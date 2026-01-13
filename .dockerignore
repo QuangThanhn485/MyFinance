@@ -1,0 +1,8 @@
+node_modules
+dist
+.git
+.vscode
+*.log
+coverage
+tests
+.tmp-tailwind.css
