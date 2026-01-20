@@ -34,8 +34,8 @@ export type PivotGroupKey =
 export type PivotMetric = "sum" | "count" | "avg"
 export type PivotChartType = "bar" | "line" | "area"
 
-export type ReportsConfigV4 = {
-  version: 4
+export type ReportsConfigV5 = {
+  version: 5
   mode: ReportsMode
   month: {
     dataset: MonthDataset
@@ -57,6 +57,7 @@ export type ReportsConfigV4 = {
     columnFields: PivotGroupKey[]
     metric: PivotMetric
     chartType: PivotChartType
+    visibleSeries: string[]
   }
 }
 
@@ -178,9 +179,9 @@ function unique<T>(items: T[]) {
   return out
 }
 
-export function defaultReportsConfig(): ReportsConfigV4 {
+export function defaultReportsConfig(): ReportsConfigV5 {
   return {
-    version: 4,
+    version: 5,
     mode: "month",
     month: {
       dataset: "categories",
@@ -202,11 +203,12 @@ export function defaultReportsConfig(): ReportsConfigV4 {
       columnFields: ["bucket"],
       metric: "sum",
       chartType: "bar",
+      visibleSeries: [],
     },
   }
 }
 
-export function loadReportsConfig(): ReportsConfigV4 {
+export function loadReportsConfig(): ReportsConfigV5 {
   if (typeof localStorage === "undefined") return defaultReportsConfig()
 
   const raw = localStorage.getItem(REPORTS_CONFIG_STORAGE_KEY)
@@ -217,7 +219,7 @@ export function loadReportsConfig(): ReportsConfigV4 {
 
   const defaults = defaultReportsConfig()
   const version = parsed.version
-  if (version !== 1 && version !== 2 && version !== 3 && version !== 4) {
+  if (version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5) {
     return defaultReportsConfig()
   }
 
@@ -226,7 +228,9 @@ export function loadReportsConfig(): ReportsConfigV4 {
   const dailyRaw =
     (version === 2 || version === 3) && isRecord(parsed.daily) ? parsed.daily : {}
   const pivotRaw =
-    (version === 3 || version === 4) && isRecord(parsed.pivot) ? parsed.pivot : {}
+    (version === 3 || version === 4 || version === 5) && isRecord(parsed.pivot)
+      ? parsed.pivot
+      : {}
 
   const visibleCategoriesRaw = Array.isArray(monthRaw.visibleCategories)
     ? monthRaw.visibleCategories
@@ -265,9 +269,18 @@ export function loadReportsConfig(): ReportsConfigV4 {
   )
 
   const rowFieldsRaw =
-    version === 4 ? normalizePivotFieldList(pivotRaw.rowFields) : []
+    version === 4 || version === 5 ? normalizePivotFieldList(pivotRaw.rowFields) : []
   const columnFieldsRaw =
-    version === 4 ? normalizePivotFieldList(pivotRaw.columnFields) : []
+    version === 4 || version === 5 ? normalizePivotFieldList(pivotRaw.columnFields) : []
+  const pivotVisibleSeriesRaw =
+    version === 5 && Array.isArray(pivotRaw.visibleSeries)
+      ? pivotRaw.visibleSeries
+      : []
+
+  const pivotVisibleSeries = unique(
+    pivotVisibleSeriesRaw
+      .filter((value): value is string => typeof value === "string" && value.length > 0),
+  )
 
   const rowGroupLegacy =
     version === 3 ? normalizePivotGroupKey(pivotRaw.rowGroup) : null
@@ -296,7 +309,7 @@ export function loadReportsConfig(): ReportsConfigV4 {
         : []
 
   return {
-    version: 4,
+    version: 5,
     mode: normalizeMode(parsed.mode),
     month: {
       dataset: normalizeMonthDataset(monthRaw.dataset),
@@ -323,11 +336,12 @@ export function loadReportsConfig(): ReportsConfigV4 {
       columnFields: pivotColumnFields,
       metric: normalizePivotMetric(pivotRaw.metric),
       chartType: normalizePivotChartType(pivotRaw.chartType),
+      visibleSeries: pivotVisibleSeries,
     },
   }
 }
 
-export function saveReportsConfig(config: ReportsConfigV4) {
+export function saveReportsConfig(config: ReportsConfigV5) {
   if (typeof localStorage === "undefined") return
   localStorage.setItem(REPORTS_CONFIG_STORAGE_KEY, JSON.stringify(config))
 }

@@ -11,7 +11,18 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <BrowserRouter>
       <App />
-      <Toaster richColors closeButton />
+      <Toaster
+        richColors
+        position="top-right"
+        duration={2500}
+        visibleToasts={2}
+        closeButton={false}
+        offset={{ top: 72, right: 16 }}
+        toastOptions={{
+          className:
+            "pointer-events-none max-w-[360px] w-[calc(100vw-1.5rem)] sm:w-auto",
+        }}
+      />
     </BrowserRouter>
   </React.StrictMode>,
 )

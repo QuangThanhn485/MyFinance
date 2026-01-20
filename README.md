@@ -14,6 +14,9 @@ npm run dev
 Mở `http://localhost:5173`.
 
 Build production:
+$cid = docker ps -q --filter "publish=8001"; if ($cid) { docker rm -f $cid }; docker build --no-cache --pull -t myfinance:prod .; docker run -d --rm --name myfinance_prod -p 8001:80 myfinance:prod
+
+
 docker ps
 docker stop heuristic_bell
 docker rm heuristic_bell

@@ -75,7 +75,9 @@ export default function ExpensesPage() {
   const [healthWarnings, setHealthWarnings] = useState<BudgetHealthWarning[]>([])
   const [healthDialogOpen, setHealthDialogOpen] = useState(false)
   const [healthWarningsDate, setHealthWarningsDate] = useState<ISODate | null>(null)
-  const [lastHealthModalSignature, setLastHealthModalSignature] = useState<string | null>(null)
+  const [lastAppliedTemplateId, setLastAppliedTemplateId] = useState<string | null>(
+    null,
+  )
   const [templates, setTemplates] = useState<ExpenseTemplate[]>(() =>
     loadExpenseTemplates(),
   )
@@ -110,12 +112,7 @@ export default function ExpensesPage() {
     setHealthWarnings([])
     setHealthDialogOpen(false)
     setHealthWarningsDate(null)
-    setLastHealthModalSignature(null)
   }, [healthWarningsDate, selectedDate])
-
-  useEffect(() => {
-    setLastHealthModalSignature(null)
-  }, [selectedDate])
 
   const budgets = computeBudgets({
     incomeVnd: data.settings.monthlyIncomeVnd,
@@ -222,36 +219,38 @@ export default function ExpensesPage() {
     return warnings
   }
 
-  const runBudgetHealthChecks = (date: ISODate) => {
+  const runBudgetHealthChecks = (
+    date: ISODate,
+    baselineWarnings?: BudgetHealthWarning[],
+  ) => {
     const store = useAppStore.getState()
     const warnings = computeBudgetHealthWarnings(store.data, date)
-    const warningSignature = warnings.length
-      ? `${date}|${warnings.map((w) => w.type).sort().join("|")}`
-      : null
 
     setHealthWarnings(warnings)
     setHealthWarningsDate(date)
 
-    if (!warningSignature) {
+    if (warnings.length === 0) {
       setHealthDialogOpen(false)
-      setLastHealthModalSignature(null)
       return
     }
 
     if (store.ui.overspending) {
       setHealthDialogOpen(false)
-      setLastHealthModalSignature(warningSignature)
       return
     }
 
-    if (warningSignature === lastHealthModalSignature) {
-      setHealthDialogOpen(false)
-      setLastHealthModalSignature(warningSignature)
-      return
-    }
+    const baselineByType = new Map(
+      (baselineWarnings ?? []).map((w) => [w.type, w.severity] as const),
+    )
+    const severityRank = (s: BudgetHealthWarning["severity"]) =>
+      s === "danger" ? 2 : 1
+    const hasNewWarning = warnings.some((w) => {
+      const prev = baselineByType.get(w.type)
+      if (!prev) return true
+      return severityRank(w.severity) > severityRank(prev)
+    })
 
-    setHealthDialogOpen(true)
-    setLastHealthModalSignature(warningSignature)
+    setHealthDialogOpen(hasNewWarning)
   }
 
   const editForm = useForm<FormValues>({
@@ -272,8 +271,7 @@ export default function ExpensesPage() {
     form.setValue("category", t.category)
     form.setValue("bucket", t.bucket === "NEEDS" ? "needs" : "wants")
     form.setValue("note", t.note ?? "")
-
-    setTemplates(touchExpenseTemplate(t.id))
+    setLastAppliedTemplateId(t.id)
   }
 
   const handleAddExpense = (
@@ -281,6 +279,10 @@ export default function ExpensesPage() {
     options?: { saveTemplate?: boolean },
   ) => {
     try {
+      const baseline = computeBudgetHealthWarnings(
+        useAppStore.getState().data,
+        values.date,
+      )
       addExpense({
         amountVnd: values.amountVnd,
         category: values.category,
@@ -307,7 +309,12 @@ export default function ExpensesPage() {
         toast.success("Đã thêm chi tiêu.")
       }
 
-      runBudgetHealthChecks(values.date)
+      if (!options?.saveTemplate && lastAppliedTemplateId) {
+        setTemplates(touchExpenseTemplate(lastAppliedTemplateId))
+      }
+      setLastAppliedTemplateId(null)
+
+      runBudgetHealthChecks(values.date, baseline)
       form.reset({
         amountVnd: 0,
         category: values.category,
@@ -345,7 +352,7 @@ export default function ExpensesPage() {
                 {healthWarnings.map((w) => w.title).join(" • ")}
               </div>
               <div className="text-xs text-muted-foreground">
-                Ghi chú: các cảnh báo này chỉ dùng chi biến đổi (không tính chi phí cố định).
+                Ghi chú: các cảnh báo này tính lũy kế đến ngày đang chọn, chỉ dùng chi biến đổi (không tính chi phí cố định).
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -591,6 +598,10 @@ export default function ExpensesPage() {
                         toast.error("Vui lòng nhập số tiền hợp lệ.")
                         return
                       }
+                      const baseline = computeBudgetHealthWarnings(
+                        useAppStore.getState().data,
+                        selectedDate,
+                      )
                       addExpense({
                         amountVnd: Math.trunc(amount),
                         category: form.getValues("category"),
@@ -599,7 +610,11 @@ export default function ExpensesPage() {
                         date: selectedDate,
                       })
                       toast.success("Đã ghi “Hôm nay chi”.")
-                      runBudgetHealthChecks(selectedDate)
+                      if (lastAppliedTemplateId) {
+                        setTemplates(touchExpenseTemplate(lastAppliedTemplateId))
+                      }
+                      setLastAppliedTemplateId(null)
+                      runBudgetHealthChecks(selectedDate, baseline)
                     }}
                   >
                     Hôm nay chi
@@ -639,6 +654,12 @@ export default function ExpensesPage() {
                 Lưu ý: hiện có cảnh báo MSS. Phần dưới là cảnh báo nhịp chi tiêu theo ngân sách (không tính chi phí cố định).
               </div>
             ) : null}
+
+            <div className="rounded-md border bg-muted p-3 text-sm text-muted-foreground">
+              Popup chỉ tự bật khi bạn <span className="text-foreground font-medium">vừa vượt ngưỡng</span> ở lần thêm này. Nếu
+              cảnh báo đã tồn tại từ các ngày trước, hệ thống chỉ hiển thị banner để
+              bạn theo dõi, không lặp popup.
+            </div>
 
             {healthWarnings.length === 0 ? (
               <div className="text-muted-foreground">Không có cảnh báo nặng.</div>

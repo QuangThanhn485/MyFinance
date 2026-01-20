@@ -142,10 +142,19 @@ export function getRecentExpenseTemplates(
   templates: ExpenseTemplate[],
   limit = 6,
 ) {
-  const score = (t: ExpenseTemplate) => Date.parse(t.lastUsedAt) || 0
+  const lastUsedScore = (t: ExpenseTemplate) => Date.parse(t.lastUsedAt) || 0
+  const createdScore = (t: ExpenseTemplate) => Date.parse(t.createdAt) || 0
   return templates
     .slice()
-    .sort((a, b) => score(b) - score(a))
+    .sort((a, b) => {
+      const diff = lastUsedScore(b) - lastUsedScore(a)
+      if (diff !== 0) return diff
+      const useDiff = (b.useCount ?? 0) - (a.useCount ?? 0)
+      if (useDiff !== 0) return useDiff
+      const createdDiff = createdScore(b) - createdScore(a)
+      if (createdDiff !== 0) return createdDiff
+      return a.name.localeCompare(b.name, "vi")
+    })
     .slice(0, Math.max(0, Math.trunc(limit)))
 }
 
@@ -232,4 +241,3 @@ export function touchExpenseTemplate(
   saveExpenseTemplates(next)
   return next
 }
-

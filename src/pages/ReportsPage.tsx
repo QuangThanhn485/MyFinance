@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react"
+﻿import { useEffect, useMemo, useState, type ReactNode } from "react"
 import {
   DndContext,
   DragOverlay,
@@ -36,6 +36,7 @@ import {
   YAxis,
 } from "recharts"
 import { X } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -52,6 +53,7 @@ import LabelValueRow from "@/components/LabelValueRow"
 import MonthPicker from "@/components/MonthPicker"
 import { BUCKET_LABELS_VI, CATEGORY_LABELS_VI, EXPENSE_CATEGORIES } from "@/domain/constants"
 import { computeBudgets } from "@/domain/finance/finance"
+import { computeAdvancedInsights, type ClusterTier } from "@/domain/finance/insights"
 import { formatVnd } from "@/lib/currency"
 import {
   dayOfMonthFromIsoDate,
@@ -86,6 +88,35 @@ const CHART_COLORS = [
   "hsl(var(--chart-5))",
   "hsl(var(--chart-6))",
 ]
+
+const PIVOT_SERIES_PALETTE = [
+  "#2563eb",
+  "#f97316",
+  "#16a34a",
+  "#dc2626",
+  "#a855f7",
+  "#0ea5e9",
+  "#d97706",
+  "#14b8a6",
+  "#ec4899",
+  "#84cc16",
+  "#6366f1",
+  "#f43f5e",
+  "#0891b2",
+  "#9333ea",
+  "#22c55e",
+  "#e11d48",
+]
+
+function pivotSeriesColor(index: number) {
+  if (index < PIVOT_SERIES_PALETTE.length) {
+    return PIVOT_SERIES_PALETTE[index]
+  }
+  const hue = (index * 137.508 + 18) % 360
+  const saturation = 68
+  const lightness = index % 2 === 0 ? 46 : 58
+  return `hsl(${hue.toFixed(1)} ${saturation}% ${lightness}%)`
+}
 
 const MONTH_BUCKET_KEYS: MonthBucketKey[] = ["needs", "wants", "saved"]
 
@@ -134,6 +165,12 @@ const DAILY_SERIES_COLORS: Record<DailySeriesKey, string> = {
   total: CHART_COLORS[0],
   needs: CHART_COLORS[1],
   wants: CHART_COLORS[2],
+}
+
+const CLUSTER_TIER_LABELS: Record<ClusterTier, string> = {
+  low: "Thấp",
+  mid: "Trung bình",
+  high: "Cao",
 }
 
 const PIVOT_METRIC_LABELS: Record<PivotMetric, string> = {
@@ -851,6 +888,22 @@ export default function ReportsPage() {
     return rows
   }, [expenses, month, today])
 
+  const advancedInsights = useMemo(
+    () => computeAdvancedInsights({ expenses, month, today }),
+    [expenses, month, today],
+  )
+  const trendMax = Math.max(
+    advancedInsights.trend?.recentAvg ?? 0,
+    advancedInsights.trend?.previousAvg ?? 0,
+    1,
+  )
+  const recentTrendPct = advancedInsights.trend
+    ? Math.round((advancedInsights.trend.recentAvg / trendMax) * 100)
+    : 0
+  const previousTrendPct = advancedInsights.trend
+    ? Math.round((advancedInsights.trend.previousAvg / trendMax) * 100)
+    : 0
+
   const pivotTable = useMemo(
     () =>
       buildPivotTable(
@@ -876,20 +929,121 @@ export default function ReportsPage() {
   const pivotChartLimit =
     pivotChartPrimary === "day" || pivotChartPrimary === "week" ? 31 : 8
   const pivotChartRows = pivotTable.rows.slice(0, pivotChartLimit)
+  const pivotHasColumns = config.pivot.columnFields.length > 0
+  const pivotDefaultSeriesLimit = pivotHasColumns ? 8 : 1
+  const pivotAvailableSeries = pivotHasColumns ? pivotTable.cols : []
+  const pivotVisibleSeriesKeys = pivotHasColumns
+    ? (config.pivot.visibleSeries ?? []).filter((key) =>
+        pivotAvailableSeries.some((col) => col.key === key),
+      )
+    : []
+  const pivotDefaultSeriesKeys = pivotHasColumns
+    ? pivotAvailableSeries.slice(0, pivotDefaultSeriesLimit).map((col) => col.key)
+    : []
+  const pivotSeriesKeys =
+    pivotHasColumns && pivotVisibleSeriesKeys.length > 0
+      ? pivotVisibleSeriesKeys
+      : pivotDefaultSeriesKeys
+  const pivotSeriesKeySet = new Set(pivotSeriesKeys)
+  const pivotUsingDefaultSeries =
+    pivotHasColumns && pivotVisibleSeriesKeys.length === 0
+  const pivotSeriesColorByKey = new Map(
+    pivotAvailableSeries.map((col, index) => [col.key, pivotSeriesColor(index)]),
+  )
+  const pivotChartColumns = pivotHasColumns
+    ? pivotAvailableSeries.filter((col) => pivotSeriesKeySet.has(col.key))
+    : []
+  const pivotChartSeries = pivotHasColumns
+    ? pivotChartColumns.map((col, index) => ({
+        key: `series_${index}`,
+        label: col.label,
+        colKey: col.key,
+        color: pivotSeriesColorByKey.get(col.key) ?? CHART_COLORS[0],
+      }))
+    : [
+        {
+          key: "value",
+          label: PIVOT_METRIC_LABELS[config.pivot.metric],
+          colKey: "total",
+          color: CHART_COLORS[0],
+        },
+      ]
+  const pivotChartSeriesLimited =
+    pivotHasColumns && pivotAvailableSeries.length > pivotChartColumns.length
+  const pivotChartSeriesLabelByKey = new Map(
+    pivotChartSeries.map((series) => [series.key, series.label]),
+  )
+  const pivotChartSeriesShortLabelByKey = new Map(
+    pivotChartSeries.map((series) => [
+      series.key,
+      shortenLabel(series.label, 18),
+    ]),
+  )
   const pivotChartData = pivotChartRows.map((row) => {
-    const value = pivotMetricValue(
-      pivotTable.rowTotals[row.key],
-      config.pivot.metric,
-    )
     const label =
       pivotChartPrimary === "day"
         ? String(row.sortValue).padStart(2, "0")
         : pivotChartPrimary === "week"
           ? `W${row.sortValue}`
           : shortenLabel(row.label, 16)
-    return { name: label, value }
+    if (!pivotHasColumns) {
+      const value = pivotMetricValue(
+        pivotTable.rowTotals[row.key],
+        config.pivot.metric,
+      )
+      return { name: label, value }
+    }
+    const entry: Record<string, number | string> = { name: label }
+    pivotChartSeries.forEach((series) => {
+      const cell = pivotTable.cells[row.key]?.[series.colKey]
+      entry[series.key] = pivotMetricValue(cell, config.pivot.metric)
+    })
+    return entry
   })
   const pivotChartLimited = pivotTable.rows.length > pivotChartLimit
+  const togglePivotSeries = (seriesKey: string) => {
+    if (!pivotHasColumns) return
+    setConfig((s) => {
+      const baseKeys =
+        s.pivot.visibleSeries && s.pivot.visibleSeries.length > 0
+          ? s.pivot.visibleSeries
+          : pivotSeriesKeys
+      const next = new Set(baseKeys)
+      if (next.has(seriesKey)) {
+        if (next.size === 1) return s
+        next.delete(seriesKey)
+      } else {
+        next.add(seriesKey)
+      }
+      return {
+        ...s,
+        pivot: {
+          ...s.pivot,
+          visibleSeries: Array.from(next),
+        },
+      }
+    })
+  }
+  const showAllPivotSeries = () => {
+    if (!pivotHasColumns) return
+    setConfig((s) => ({
+      ...s,
+      pivot: {
+        ...s.pivot,
+        visibleSeries: pivotAvailableSeries.map((col) => col.key),
+      },
+    }))
+  }
+  const resetPivotSeries = () => {
+    if (!pivotHasColumns) return
+    setConfig((s) => ({
+      ...s,
+      pivot: {
+        ...s.pivot,
+        visibleSeries: [],
+      },
+    }))
+  }
   const hasPivotRowFields = config.pivot.rowFields.length > 0
   const pivotRowLabel = hasPivotRowFields
     ? config.pivot.rowFields
@@ -1218,6 +1372,275 @@ export default function ReportsPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <CardTitle>Insight nâng cao</CardTitle>
+            {advancedInsights.activeDays > 0 ? (
+              <div
+                className="text-xs text-muted-foreground"
+                title="Số ngày có chi trong kỳ phân tích của tháng đang chọn."
+              >
+                {advancedInsights.activeDays}/{advancedInsights.totalDays} ngày có chi biến đổi (trong kỳ) •{" "}
+                <span className="whitespace-nowrap tabular-nums">
+                  {formatVnd(Math.round(advancedInsights.totalSpent))}
+                </span>
+              </div>
+            ) : null}
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4 text-sm">
+          {advancedInsights.activeDays === 0 ? (
+            <div className="text-sm text-muted-foreground">
+              Chưa có dữ liệu chi tiêu trong tháng để phân tích.
+            </div>
+          ) : (
+            <div className="grid gap-4 lg:grid-cols-3">
+              <div className="rounded-lg border bg-muted/20 p-4 lg:col-span-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-sm font-semibold">Nhịp chi theo ngày</div>
+                  <Badge variant="outline">Chi biến đổi</Badge>
+                </div>
+                <div className="mt-1 text-[11px] text-muted-foreground">
+                  Kỳ phân tích = tháng đang chọn (đến hôm nay nếu là tháng hiện tại). Nhịp được tính trên các ngày có chi biến đổi.
+                </div>
+                {advancedInsights.zeroDays > 0 ? (
+                  <div className="mt-1 text-[11px] text-muted-foreground">
+                    Ngày không ghi chi biến đổi:{" "}
+                    <span className="font-medium text-foreground">
+                      {advancedInsights.zeroDays} ngày
+                    </span>
+                  </div>
+                ) : null}
+                {advancedInsights.cluster ? (
+                  <>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                      {advancedInsights.cluster.tiers.map((tier) => {
+                        const tierColor =
+                          tier.tier === "high"
+                            ? "bg-rose-500"
+                            : tier.tier === "mid"
+                              ? "bg-sky-500"
+                              : "bg-emerald-500"
+                        return (
+                          <div
+                            key={tier.tier}
+                            className="rounded-md border bg-background/70 p-3"
+                          >
+                            <div className="flex items-center justify-between gap-2 text-xs">
+                              <span className="font-semibold">
+                                Nhịp {CLUSTER_TIER_LABELS[tier.tier]}
+                              </span>
+                              <span
+                                className="text-[11px] text-muted-foreground text-right leading-tight"
+                                title="Số ngày trong kỳ phân tích thuộc nhịp này."
+                              >
+                                {tier.count}/{advancedInsights.activeDays} ngày
+                                <span className="block">có chi</span>
+                              </span>
+                            </div>
+                            <div className="mt-2 flex items-end justify-between gap-2">
+                              <span
+                                className={cn(
+                                  "text-base font-semibold tabular-nums",
+                                  tier.tier === "high" && "text-destructive",
+                                )}
+                              >
+                                {formatVnd(Math.round(tier.avg))}
+                              </span>
+                              <span className="text-[11px] text-muted-foreground">
+                                TB/ngày
+                              </span>
+                            </div>
+                            <div className="mt-2 h-1.5 w-full rounded-full bg-muted">
+                              <div
+                                className={cn("h-1.5 rounded-full", tierColor)}
+                                style={{ width: `${Math.round(tier.share * 100)}%` }}
+                              />
+                            </div>
+                            <div className="mt-1 text-[11px] text-muted-foreground">
+                              {Math.round(tier.share * 100)}%
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                      <div className="rounded-md border bg-background/70 p-3">
+                        <div className="text-xs font-semibold">Nguồn chi cao</div>
+                        {advancedInsights.cluster.topCategories.length > 0 ? (
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {advancedInsights.cluster.topCategories.slice(0, 3).map((item) => {
+                              const label =
+                                CATEGORY_LABELS_VI[item.category] ?? item.category
+                              const pct = Math.round(item.share * 100)
+                              return (
+                                <span
+                                  key={item.category}
+                                  className="rounded-full border bg-background px-2 py-0.5 text-xs text-muted-foreground"
+                                >
+                                  {label} · {pct}%
+                                </span>
+                              )
+                            })}
+                          </div>
+                        ) : (
+                          <div className="mt-2 text-xs text-muted-foreground">
+                            Chưa đủ dữ liệu để tách nguồn chi cao.
+                          </div>
+                        )}
+                      </div>
+                      <div className="rounded-md border bg-background/70 p-3">
+                        <div className="text-xs font-semibold">Ngày dễ vượt nhịp</div>
+                        {advancedInsights.cluster.topWeekdays.length > 0 ? (
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {advancedInsights.cluster.topWeekdays.slice(0, 3).map((item) => {
+                              const label = PIVOT_WEEKDAY_LABELS[item.weekday] ?? "?"
+                              return (
+                                <span
+                                  key={`${item.weekday}-${item.avg}`}
+                                  className="rounded-full border bg-background px-2 py-0.5 text-xs text-muted-foreground"
+                                >
+                                  {label} · {formatVnd(Math.round(item.avg))}
+                                </span>
+                              )
+                            })}
+                          </div>
+                        ) : (
+                          <div className="mt-2 text-xs text-muted-foreground">
+                            Chưa có ngày vượt nhịp rõ ràng.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="mt-3 text-xs text-muted-foreground">
+                    Chưa đủ dữ liệu để phân cụm (cần tối thiểu 7 ngày trong tháng và
+                    4 ngày có chi).
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-lg border bg-muted/20 p-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-sm font-semibold">Tổ hợp danh mục</div>
+                  <Badge variant="outline">Theo ngày</Badge>
+                </div>
+                {advancedInsights.association ? (
+                  <>
+                    <div className="mt-3 rounded-md border bg-background/70 p-3">
+                      <div className="text-xs text-muted-foreground">
+                        Cặp thường đi cùng
+                      </div>
+                      <div className="mt-1 text-base font-semibold">
+                        {`${CATEGORY_LABELS_VI[advancedInsights.association.base] ?? advancedInsights.association.base} + ${CATEGORY_LABELS_VI[advancedInsights.association.with] ?? advancedInsights.association.with}`}
+                      </div>
+                    </div>
+                    <div className="mt-3 grid gap-2">
+                      <LabelValueRow
+                        className="text-xs"
+                        label="Tần suất"
+                        labelTitle="Tần suất"
+                        value={`${Math.round(advancedInsights.association.support * 100)}% ngày`}
+                      />
+                      <LabelValueRow
+                        className="text-xs"
+                        label="Xác suất đi kèm"
+                        labelTitle="Xác suất đi kèm"
+                        value={`${Math.round(advancedInsights.association.confidence * 100)}%`}
+                      />
+                      <LabelValueRow
+                        className="text-xs"
+                        label="Lift"
+                        labelTitle="Lift"
+                        value={`${advancedInsights.association.lift.toFixed(2)}x`}
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <div className="mt-3 text-xs text-muted-foreground">
+                    Chưa đủ dữ liệu để rút ra tổ hợp ổn định.
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-lg border bg-muted/20 p-4 lg:col-span-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-sm font-semibold">Xu hướng ngắn hạn</div>
+                  {advancedInsights.trend ? (
+                    <Badge variant="outline">{advancedInsights.trend.window} ngày</Badge>
+                  ) : null}
+                </div>
+                {advancedInsights.trend ? (
+                  <div className="mt-3 grid gap-4 lg:grid-cols-[minmax(0,1fr)_260px]">
+                    <div className="space-y-3">
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between text-xs text-muted-foreground">
+                          <span>
+                            {advancedInsights.trend.window} ngày gần đây (TB/ngày)
+                          </span>
+                          <span className="whitespace-nowrap tabular-nums text-foreground">
+                            {formatVnd(Math.round(advancedInsights.trend.recentAvg))}
+                          </span>
+                        </div>
+                        <div className="h-2 w-full rounded-full bg-muted">
+                          <div
+                            className="h-2 rounded-full bg-sky-500"
+                            style={{ width: `${recentTrendPct}%` }}
+                          />
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between text-xs text-muted-foreground">
+                          <span>
+                            {advancedInsights.trend.window} ngày trước đó (TB/ngày)
+                          </span>
+                          <span className="whitespace-nowrap tabular-nums text-foreground">
+                            {formatVnd(Math.round(advancedInsights.trend.previousAvg))}
+                          </span>
+                        </div>
+                        <div className="h-2 w-full rounded-full bg-muted">
+                          <div
+                            className="h-2 rounded-full bg-slate-400"
+                            style={{ width: `${previousTrendPct}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-md border bg-background/70 p-3">
+                      <div className="text-xs text-muted-foreground">Chênh lệch</div>
+                      <div
+                        className={cn(
+                          "mt-1 text-lg font-semibold tabular-nums",
+                          advancedInsights.trend.direction === "up" &&
+                            "text-destructive",
+                          advancedInsights.trend.direction === "down" &&
+                            "text-emerald-600",
+                        )}
+                      >
+                        {advancedInsights.trend.delta >= 0 ? "+" : ""}
+                        {formatVnd(Math.round(advancedInsights.trend.delta))}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {(advancedInsights.trend.deltaPct * 100).toFixed(1)}% so với
+                        {` ${advancedInsights.trend.window} ngày trước`}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-3 text-xs text-muted-foreground">
+                    Chưa đủ dữ liệu để đọc xu hướng ngắn hạn.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
@@ -2213,6 +2636,65 @@ export default function ReportsPage() {
                       Theo {pivotRowLabel} • {PIVOT_METRIC_LABELS[config.pivot.metric]} •{" "}
                       Cột: {pivotColumnSummary}
                     </div>
+                    {pivotHasColumns ? (
+                      <div className="rounded-md border bg-muted/20 p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="text-xs font-medium text-muted-foreground">
+                            Trường hiển thị trên biểu đồ
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              onClick={resetPivotSeries}
+                            >
+                              Mặc định
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={showAllPivotSeries}
+                            >
+                              Hiện tất cả
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {pivotAvailableSeries.map((col) => {
+                            const active = pivotSeriesKeySet.has(col.key)
+                            const color =
+                              pivotSeriesColorByKey.get(col.key) ?? CHART_COLORS[0]
+                            return (
+                              <button
+                                key={col.key}
+                                type="button"
+                                onClick={() => togglePivotSeries(col.key)}
+                                title={col.label}
+                                className={cn(
+                                  "flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition",
+                                  active
+                                    ? "border-primary/60 bg-primary/10 text-foreground"
+                                    : "border-border bg-background text-muted-foreground",
+                                )}
+                              >
+                                <span
+                                  className="h-2 w-2 rounded-full"
+                                  style={{ backgroundColor: color }}
+                                />
+                                <span className="max-w-[140px] truncate">
+                                  {col.label}
+                                </span>
+                              </button>
+                            )
+                          })}
+                        </div>
+                        <div className="mt-2 text-[11px] text-muted-foreground">
+                          Nhấn chip để ẩn/hiện. Giữ tối thiểu 1 trường.
+                        </div>
+                      </div>
+                    ) : null}
                     <div className="h-[460px]">
                       {pivotChartData.length === 0 ? (
                         <div className="text-sm text-muted-foreground">
@@ -2234,22 +2716,37 @@ export default function ReportsPage() {
                               />
                               <Tooltip
                                 cursor={false}
-                                formatter={(v) => [
+                                formatter={(v, name) => [
                                   formatPivotValue(Number(v), config.pivot.metric),
-                                  PIVOT_METRIC_LABELS[config.pivot.metric],
+                                  pivotChartSeriesLabelByKey.get(String(name)) ??
+                                    String(name),
                                 ]}
                               />
-                              <Bar
-                                dataKey="value"
-                                radius={[6, 6, 0, 0]}
-                              >
-                                {pivotChartData.map((_, index) => (
-                                  <Cell
-                                    key={`pivot-bar-${index}`}
-                                    fill={CHART_COLORS[index % CHART_COLORS.length]}
-                                  />
-                                ))}
-                              </Bar>
+                              {pivotChartSeries.length > 1 ? (
+                                <Legend
+                                  formatter={(value) =>
+                                    pivotChartSeriesShortLabelByKey.get(String(value)) ??
+                                    value
+                                  }
+                                />
+                              ) : null}
+                              {pivotChartSeries.map((series) => (
+                                <Bar
+                                  key={series.key}
+                                  dataKey={series.key}
+                                  stackId={
+                                    pivotHasColumns && pivotChartSeries.length > 1
+                                      ? "pivot"
+                                      : undefined
+                                  }
+                                  fill={series.color}
+                                  radius={
+                                    pivotHasColumns && pivotChartSeries.length > 1
+                                      ? 0
+                                      : [6, 6, 0, 0]
+                                  }
+                                />
+                              ))}
                             </BarChart>
                           ) : config.pivot.chartType === "area" ? (
                             <AreaChart
@@ -2265,18 +2762,35 @@ export default function ReportsPage() {
                               />
                               <Tooltip
                                 cursor={false}
-                                formatter={(v) => [
+                                formatter={(v, name) => [
                                   formatPivotValue(Number(v), config.pivot.metric),
-                                  PIVOT_METRIC_LABELS[config.pivot.metric],
+                                  pivotChartSeriesLabelByKey.get(String(name)) ??
+                                    String(name),
                                 ]}
                               />
-                              <Area
-                                dataKey="value"
-                                stroke={CHART_COLORS[0]}
-                                fill={CHART_COLORS[0]}
-                                fillOpacity={0.2}
-                                type="monotone"
-                              />
+                              {pivotChartSeries.length > 1 ? (
+                                <Legend
+                                  formatter={(value) =>
+                                    pivotChartSeriesShortLabelByKey.get(String(value)) ??
+                                    value
+                                  }
+                                />
+                              ) : null}
+                              {pivotChartSeries.map((series) => (
+                                <Area
+                                  key={series.key}
+                                  dataKey={series.key}
+                                  stroke={series.color}
+                                  fill={series.color}
+                                  fillOpacity={0.2}
+                                  type="monotone"
+                                  stackId={
+                                    pivotHasColumns && pivotChartSeries.length > 1
+                                      ? "pivot"
+                                      : undefined
+                                  }
+                                />
+                              ))}
                             </AreaChart>
                           ) : (
                             <LineChart
@@ -2292,26 +2806,45 @@ export default function ReportsPage() {
                               />
                               <Tooltip
                                 cursor={false}
-                                formatter={(v) => [
+                                formatter={(v, name) => [
                                   formatPivotValue(Number(v), config.pivot.metric),
-                                  PIVOT_METRIC_LABELS[config.pivot.metric],
+                                  pivotChartSeriesLabelByKey.get(String(name)) ??
+                                    String(name),
                                 ]}
                               />
-                              <Line
-                                dataKey="value"
-                                stroke={CHART_COLORS[0]}
-                                strokeWidth={2}
-                                dot={false}
-                                type="monotone"
-                              />
+                              {pivotChartSeries.length > 1 ? (
+                                <Legend
+                                  formatter={(value) =>
+                                    pivotChartSeriesShortLabelByKey.get(String(value)) ??
+                                    value
+                                  }
+                                />
+                              ) : null}
+                              {pivotChartSeries.map((series) => (
+                                <Line
+                                  key={series.key}
+                                  dataKey={series.key}
+                                  stroke={series.color}
+                                  strokeWidth={2}
+                                  dot={false}
+                                  type="monotone"
+                                />
+                              ))}
                             </LineChart>
                           )}
                         </ResponsiveContainer>
                       )}
                     </div>
-                    {pivotChartLimited ? (
+                    {pivotChartLimited || pivotChartSeriesLimited ? (
                       <div className="text-xs text-muted-foreground">
-                        Biểu đồ hiển thị top {pivotChartLimit} theo giá trị.
+                        {pivotChartLimited
+                          ? `Biểu đồ hiển thị top ${pivotChartLimit} theo giá trị. `
+                          : ""}
+                        {pivotChartSeriesLimited
+                          ? pivotUsingDefaultSeries
+                            ? `Đang hiển thị top ${pivotChartColumns.length}/${pivotAvailableSeries.length} cột.`
+                            : `Đang hiển thị ${pivotChartColumns.length}/${pivotAvailableSeries.length} cột.`
+                          : ""}
                       </div>
                     ) : null}
                   </CardContent>
@@ -2358,3 +2891,4 @@ export default function ReportsPage() {
     </div>
   )
 }
+
