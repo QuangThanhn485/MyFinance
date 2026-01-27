@@ -1,9 +1,16 @@
 ﻿import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useRef } from "react"
 import {
   DndContext,
   DragOverlay,
   PointerSensor,
+  MeasuringStrategy,
+  closestCenter,
+  pointerWithin,
+  rectIntersection,
+  type CollisionDetection,
   type DragEndEvent,
+  type DragOverEvent,
   useDroppable,
   useDraggable,
   useSensor,
@@ -35,10 +42,19 @@ import {
   XAxis,
   YAxis,
 } from "recharts"
-import { X } from "lucide-react"
+import {
+  BarChart3,
+  Columns2,
+  Info,
+  SlidersHorizontal,
+  Sparkles,
+  Table,
+  X,
+} from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import {
   Select,
   SelectContent,
@@ -225,6 +241,14 @@ type PivotContext = {
   mssVnd: number
 }
 
+const pivotCollisionDetection: CollisionDetection = (args) => {
+  const pointer = pointerWithin(args)
+  if (pointer.length > 0) return pointer
+  const intersections = rectIntersection(args)
+  if (intersections.length > 0) return intersections
+  return closestCenter(args)
+}
+
 function formatMonthLabel(month: YearMonth) {
   const y = month.slice(0, 4)
   const m = month.slice(5, 7)
@@ -260,7 +284,7 @@ function PivotDraggableField({
       type="button"
       style={style}
       className={cn(
-        "cursor-grab rounded-full border bg-background px-3 py-1 text-xs font-medium shadow-sm transition active:cursor-grabbing",
+        "touch-none select-none cursor-grab rounded-full border bg-background px-3 py-1 text-xs font-medium shadow-sm transition active:cursor-grabbing",
         active && "border-primary/50 bg-primary/10 text-foreground",
         isDragging && "opacity-60",
       )}
@@ -290,8 +314,8 @@ function PivotDropZone({
     <div
       ref={setNodeRef}
       className={cn(
-        "min-h-[124px] rounded-lg border-2 border-dashed bg-muted/20 p-3 transition",
-        isOver && "border-primary bg-primary/10",
+        "min-h-[108px] rounded-lg border-2 border-dashed bg-muted/20 p-3 transition-colors",
+        isOver && "border-primary bg-primary/10 ring-2 ring-primary/20",
         className,
       )}
     >
@@ -301,7 +325,7 @@ function PivotDropZone({
         </div>
         {hint ? <div className="text-[11px] text-muted-foreground">{hint}</div> : null}
       </div>
-      <div className="mt-3">{children}</div>
+      <div className="mt-2">{children}</div>
     </div>
   )
 }
@@ -332,7 +356,7 @@ function PivotFieldPill({
       ref={setNodeRef}
       style={style}
       className={cn(
-        "inline-flex items-center gap-2 rounded-full border bg-background px-3 py-1 text-xs font-medium shadow-sm cursor-grab",
+        "touch-none select-none inline-flex items-center gap-2 rounded-full border bg-background px-3 py-1 text-xs font-medium shadow-sm cursor-grab active:cursor-grabbing",
         isDragging && "opacity-60",
       )}
       {...attributes}
@@ -764,12 +788,17 @@ export default function ReportsPage() {
   const data = useAppStore((s) => s.data)
   const [month, setMonth] = useState<YearMonth>(monthFromIsoDate(todayIso()))
   const [config, setConfig] = useState(() => loadReportsConfig())
+  const [controlsOpen, setControlsOpen] = useState(false)
+  const [insightsOpen, setInsightsOpen] = useState(false)
+  const [summaryOpen, setSummaryOpen] = useState(false)
+  const [pivotSplitView, setPivotSplitView] = useState<"both" | "table" | "chart">("both")
   const pivotSensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
   )
   const [activePivotField, setActivePivotField] = useState<PivotGroupKey | null>(
     null,
   )
+  const lastPivotOverRef = useRef<{ id: string; data?: PivotDragData } | null>(null)
 
   useEffect(() => {
     saveReportsConfig(config)
@@ -1142,9 +1171,18 @@ export default function ReportsPage() {
     setActivePivotField(null)
     const activeData = event.active?.data?.current as PivotDragData | undefined
     const over = event.over
-    if (!activeData || !over) return
-    const overData = over.data?.current as PivotDragData | undefined
-    const overId = String(over.id)
+    if (!activeData) {
+      lastPivotOverRef.current = null
+      return
+    }
+
+    const fallback = lastPivotOverRef.current
+    const overId = (over ? String(over.id) : fallback?.id) ?? null
+    if (!overId) {
+      lastPivotOverRef.current = null
+      return
+    }
+    const overData = (over?.data?.current ?? fallback?.data) as PivotDragData | undefined
 
     setConfig((s) => {
       const row = s.pivot.rowFields
@@ -1230,6 +1268,16 @@ export default function ReportsPage() {
         },
       }
     })
+
+    lastPivotOverRef.current = null
+  }
+
+  const handlePivotDragOver = (event: DragOverEvent) => {
+    if (!event.over) return
+    lastPivotOverRef.current = {
+      id: String(event.over.id),
+      data: event.over.data?.current as PivotDragData | undefined,
+    }
   }
 
   const top3 = Object.entries(categories)
@@ -1258,121 +1306,204 @@ export default function ReportsPage() {
   const showDailyNeeds = config.daily.visibleSeries.includes("needs")
   const showDailyWants = config.daily.visibleSeries.includes("wants")
 
-  return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Báo cáo</h1>
-        <p className="text-sm text-muted-foreground">
-          Tổng kết tháng, biểu đồ và các insight cần hành động.
-        </p>
-      </div>
+  const monthTableRows = config.month.dataset === "categories" ? monthCategoryRows : monthBucketRows
+  const monthTableTotal = monthTableRows.reduce((sum, row) => sum + row.value, 0)
+  const dailyTableSeries =
+    config.daily.visibleSeries.length > 0
+      ? config.daily.visibleSeries
+      : (["total"] as DailySeriesKey[])
+  const trendTableSeries =
+    config.trend.visibleSeries.length > 0
+      ? config.trend.visibleSeries
+      : (["totalSpent"] as TrendSeriesKey[])
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <LabelValueRow
-          className="text-sm"
-          label="Thu nhập (tham chiếu)"
-          labelTitle="Thu nhập (tham chiếu)"
-          value={formatVnd(budgets.incomeVnd)}
-          valueClassName="text-foreground"
-        />
-        <div className="flex items-center gap-2">
+  const panelBaseClassName =
+    "left-0 right-0 bottom-0 top-auto translate-x-0 translate-y-0 w-full max-w-none max-h-[85dvh] rounded-t-xl border-0 border-t p-4 data-[state=open]:[--tw-enter-scale:1] data-[state=closed]:[--tw-exit-scale:1] sm:left-auto sm:right-0 sm:top-0 sm:bottom-auto sm:h-dvh sm:max-h-none sm:rounded-none sm:rounded-l-xl sm:border-l sm:border-t-0 sm:p-6 data-[state=open]:slide-in-from-bottom-2 sm:data-[state=open]:slide-in-from-right-2 data-[state=closed]:slide-out-to-bottom-2 sm:data-[state=closed]:slide-out-to-right-2"
+  const controlsPanelClassName = cn(
+    panelBaseClassName,
+    "p-3 sm:p-4 sm:w-[50vw] sm:min-w-[560px]",
+  )
+  const insightsPanelClassName = cn(panelBaseClassName, "sm:w-[80vw] sm:min-w-[720px]")
+  const summaryPanelClassName = cn(panelBaseClassName, "sm:w-[50vw] sm:min-w-[560px]")
+
+  const pivotShowTable = pivotSplitView !== "chart"
+  const pivotShowChart = pivotSplitView !== "table"
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <h1 className="shrink-0 text-xl font-semibold tracking-tight">Báo cáo</h1>
+          <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto pb-1">
+            <Badge variant="outline" className="whitespace-nowrap">
+              Thu nhập:{" "}
+              <span className="ml-1 font-semibold tabular-nums">
+                {formatVnd(budgets.incomeVnd)}
+              </span>
+            </Badge>
+            <Badge variant="secondary" className="whitespace-nowrap">
+              Tổng chi:{" "}
+              <span className="ml-1 font-semibold tabular-nums">
+                {formatVnd(totals.totalSpent)}
+              </span>
+            </Badge>
+            {hasPrev ? (
+              <Badge
+                variant={delta > 0 ? "destructive" : "secondary"}
+                className="whitespace-nowrap"
+              >
+                So với {prev}: {delta >= 0 ? "+" : ""}
+                {formatVnd(delta)} ({(deltaPct * 100).toFixed(1)}%)
+              </Badge>
+            ) : null}
+            {leakageDetected ? (
+              <Badge variant="destructive" className="whitespace-nowrap">
+                Rò rỉ: {smallCount}× ≤ {formatVnd(smallThreshold)}
+              </Badge>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 sm:justify-end shrink-0">
           <div className="text-sm text-muted-foreground">Tháng</div>
-          <MonthPicker value={month} onChange={setMonth} className="w-[160px]" />
+          <MonthPicker value={month} onChange={setMonth} className="w-[140px]" />
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 gap-2"
+            onClick={() => setSummaryOpen(true)}
+          >
+            <Info className="h-4 w-4" />
+            Tóm tắt
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 gap-2"
+            onClick={() => setInsightsOpen(true)}
+          >
+            <Sparkles className="h-4 w-4" />
+            Insight
+          </Button>
         </div>
       </div>
 
-      <div className="grid gap-4 sm:gap-6 md:grid-cols-2 xl:grid-cols-3">
-        <Card>
-          <CardHeader>
-            <CardTitle>Tổng chi</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-1">
-            <div className="text-2xl font-semibold whitespace-nowrap tabular-nums">
-              {formatVnd(totals.totalSpent)}
-            </div>
-            <div className="text-sm text-muted-foreground">
-              Dư/Thiếu (Thu - Chi, theo dữ liệu đã ghi):{" "}
-              <span className="whitespace-nowrap tabular-nums">
-                {formatVnd(saved)}
-              </span>{" "}
-              • Tỉ lệ: {(savingsRate * 100).toFixed(1)}%
-            </div>
-            <div className="text-xs text-muted-foreground">
-              Mục tiêu tiết kiệm theo kế hoạch:{" "}
-              <span className="whitespace-nowrap tabular-nums">
-                {formatVnd(savingsMin)}
-              </span>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Xu hướng so với tháng trước</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-1">
-            {hasPrev ? (
-              <>
-                <div
-                  className={cn(
-                    "text-2xl font-semibold whitespace-nowrap tabular-nums",
-                    delta > 0 ? "text-destructive" : "text-foreground",
-                  )}
-                >
-                  {delta >= 0 ? "+" : ""}
-                  {formatVnd(delta)}
-                </div>
-                <div className="text-sm text-muted-foreground">
-                  {prev}:{" "}
-                  <span className="whitespace-nowrap tabular-nums">
-                    {formatVnd(prevTotals.totalSpent)}
-                  </span>{" "}
-                  • {deltaPct >= 0 ? "+" : ""}
-                  {(deltaPct * 100).toFixed(1)}%
-                </div>
-              </>
-            ) : (
-              <div className="text-sm text-muted-foreground">
-                Chưa có dữ liệu tháng trước để so sánh.
-              </div>
-            )}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Insight “rò rỉ”</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm text-muted-foreground space-y-2">
-            <div>
-              Khoản nhỏ (Mong muốn) ≤{" "}
-              <span className="whitespace-nowrap tabular-nums">
-                {formatVnd(smallThreshold)}
-              </span>
-              :{" "}
-              <span className="font-medium text-foreground">{smallCount} lần</span>{" "}
-              (tổng{" "}
-              <span className="whitespace-nowrap tabular-nums">
-                {formatVnd(smallSum)}
-              </span>
-              )
-            </div>
-            <div className="text-xs text-muted-foreground">
-              Ngưỡng cảnh báo: ≥ {minLeakageCount} lần và tổng ≥{" "}
-              <span className="whitespace-nowrap tabular-nums">
-                {formatVnd(minLeakageSum)}
-              </span>
-              .
-            </div>
-            {leakageDetected ? (
-              <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-amber-900">
-                Phát hiện “rò rỉ” ở Mong muốn: nhiều khoản nhỏ lặp lại. Gợi ý đặt cap Mong muốn/ngày và gom mua sắm theo kế hoạch.
-              </div>
-            ) : (
-              <div>Chưa thấy dấu hiệu rò rỉ rõ rệt trong khoản nhỏ Mong muốn.</div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+      <Dialog open={summaryOpen} onOpenChange={setSummaryOpen}>
+        <DialogContent className={cn(summaryPanelClassName, "overflow-y-auto")}>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Info className="h-5 w-5" />
+              Tóm tắt tháng
+            </DialogTitle>
+          </DialogHeader>
 
+          <div className="grid gap-3">
+            <div className="rounded-lg border bg-background p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="text-sm font-medium">Tổng chi</div>
+                <div className="text-lg font-semibold whitespace-nowrap tabular-nums">
+                  {formatVnd(totals.totalSpent)}
+                </div>
+              </div>
+              <div className="mt-2 grid gap-1 text-sm">
+                <LabelValueRow
+                  label="Dư/Thiếu (Thu - Chi)"
+                  value={formatVnd(saved)}
+                />
+                <LabelValueRow
+                  label="Tỉ lệ tiết kiệm (ước tính)"
+                  value={`${(savingsRate * 100).toFixed(1)}%`}
+                />
+                <LabelValueRow
+                  label="Mục tiêu tiết kiệm theo kế hoạch"
+                  value={formatVnd(savingsMin)}
+                />
+              </div>
+            </div>
+
+            <div className="rounded-lg border bg-background p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="text-sm font-medium">Xu hướng so với tháng trước</div>
+                {hasPrev ? (
+                  <div
+                    className={cn(
+                      "text-lg font-semibold whitespace-nowrap tabular-nums",
+                      delta > 0 ? "text-destructive" : "text-foreground",
+                    )}
+                  >
+                    {delta >= 0 ? "+" : ""}
+                    {formatVnd(delta)}
+                  </div>
+                ) : (
+                  <Badge variant="outline" className="whitespace-nowrap">
+                    Chưa có dữ liệu
+                  </Badge>
+                )}
+              </div>
+              {hasPrev ? (
+                <div className="mt-2 grid gap-1 text-sm">
+                  <LabelValueRow
+                    label={`Tháng trước (${prev})`}
+                    value={formatVnd(prevTotals.totalSpent)}
+                  />
+                  <LabelValueRow
+                    label="Tỉ lệ thay đổi"
+                    value={`${deltaPct >= 0 ? "+" : ""}${(deltaPct * 100).toFixed(1)}%`}
+                  />
+                </div>
+              ) : (
+                <div className="mt-2 text-sm text-muted-foreground">
+                  Chưa có dữ liệu tháng trước để so sánh.
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-lg border bg-background p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="text-sm font-medium">Insight “rò rỉ”</div>
+                <Badge variant={leakageDetected ? "destructive" : "secondary"}>
+                  {leakageDetected ? "Cần chú ý" : "Ổn"}
+                </Badge>
+              </div>
+              <div className="mt-2 grid gap-1 text-sm">
+                <LabelValueRow
+                  label="Khoản nhỏ (Mong muốn)"
+                  value={`≤ ${formatVnd(smallThreshold)}`}
+                />
+                <LabelValueRow
+                  label="Số lần / Tổng"
+                  value={`${smallCount} lần • ${formatVnd(smallSum)}`}
+                />
+                <LabelValueRow
+                  label="Ngưỡng cảnh báo"
+                  value={`≥ ${minLeakageCount} lần • ≥ ${formatVnd(minLeakageSum)}`}
+                />
+              </div>
+              {leakageDetected ? (
+                <div className="mt-3 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-900">
+                  Phát hiện “rò rỉ” ở Mong muốn: nhiều khoản nhỏ lặp lại. Gợi ý đặt cap Mong muốn/ngày và gom mua sắm theo kế hoạch.
+                </div>
+              ) : (
+                <div className="mt-3 text-sm text-muted-foreground">
+                  Chưa thấy dấu hiệu rò rỉ rõ rệt trong khoản nhỏ Mong muốn.
+                </div>
+              )}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={insightsOpen} onOpenChange={setInsightsOpen}>
+        <DialogContent className={cn(insightsPanelClassName, "overflow-y-auto")}>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5" />
+              Insight
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
       <Card>
         <CardHeader>
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1641,16 +1772,375 @@ export default function ReportsPage() {
           )}
         </CardContent>
       </Card>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={controlsOpen} onOpenChange={setControlsOpen}>
+        <DialogContent className={cn(controlsPanelClassName, "overflow-y-auto")}>
+          <DialogHeader className="space-y-0 pb-2">
+            <DialogTitle className="flex items-center gap-2">
+              <SlidersHorizontal className="h-5 w-5" />
+              Tùy chỉnh báo cáo
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 text-sm">
+            {config.mode === "month" ? (
+              <div className="space-y-3">
+                <div className="grid gap-2">
+                  <Select
+                    value={config.month.dataset}
+                    onValueChange={(v) =>
+                      setConfig((s) => ({
+                        ...s,
+                        month: {
+                          ...s.month,
+                          dataset: v === "buckets" ? "buckets" : "categories",
+                        },
+                      }))
+                    }
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Chọn dữ liệu" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="categories">Theo danh mục</SelectItem>
+                      <SelectItem value="buckets">Theo bucket</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-xs text-muted-foreground">
+                    Kéo thả để thêm/bớt và sắp xếp thứ tự.
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const defaults = defaultReportsConfig()
+                      setConfig((s) => ({
+                        ...s,
+                        month: {
+                          ...s.month,
+                          chartType: defaults.month.chartType,
+                          visibleCategories: [],
+                          visibleBuckets: defaults.month.visibleBuckets,
+                        },
+                      }))
+                    }}
+                  >
+                    Reset
+                  </Button>
+                </div>
+
+                {config.month.dataset === "categories" ? (
+                  <DndMultiSelect
+                    allIds={EXPENSE_CATEGORIES}
+                    selectedIds={selectedCategoryIds}
+                    onSelectedIdsChange={(next) =>
+                      setConfig((s) => ({
+                        ...s,
+                        month: { ...s.month, visibleCategories: next },
+                      }))
+                    }
+                    getLabel={(id) => CATEGORY_LABELS_VI[id]}
+                    availableTitle="Danh mục"
+                    selectedTitle={
+                      config.month.visibleCategories.length > 0
+                        ? "Đang hiển thị"
+                        : "Đang hiển thị (tự động: top)"
+                    }
+                  />
+                ) : (
+                  <DndMultiSelect
+                    allIds={MONTH_BUCKET_KEYS}
+                    selectedIds={config.month.visibleBuckets}
+                    onSelectedIdsChange={(next) =>
+                      setConfig((s) => ({
+                        ...s,
+                        month: { ...s.month, visibleBuckets: next },
+                      }))
+                    }
+                    getLabel={(id) => MONTH_BUCKET_LABELS[id]}
+                    availableTitle="Bucket"
+                    selectedTitle="Đang hiển thị"
+                  />
+                )}
+
+                <div className="text-xs text-muted-foreground">
+                  Ghi chú: “Theo danh mục” cộng cả chi phí cố định (vd. Hóa đơn).
+                </div>
+              </div>
+            ) : config.mode === "daily" ? (
+              <div className="space-y-3">
+                <div className="flex items-center justify-end">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const defaults = defaultReportsConfig()
+                      setConfig((s) => ({ ...s, daily: defaults.daily }))
+                    }}
+                  >
+                    Reset
+                  </Button>
+                </div>
+
+                <div className="text-xs text-muted-foreground">
+                  Theo tổng ngày (từ đầu tháng), chỉ tính chi biến đổi đã ghi.
+                </div>
+
+                <DndMultiSelect
+                  allIds={DAILY_SERIES_KEYS}
+                  selectedIds={config.daily.visibleSeries}
+                  onSelectedIdsChange={(next) =>
+                    setConfig((s) => ({
+                      ...s,
+                      daily: { ...s.daily, visibleSeries: next },
+                    }))
+                  }
+                  getLabel={(id) => DAILY_SERIES_LABELS[id]}
+                  availableTitle="Chỉ số"
+                  selectedTitle="Đang hiển thị"
+                />
+              </div>
+            ) : config.mode === "trend" ? (
+              <div className="space-y-3">
+                <div className="grid gap-2">
+                  <Select
+                    value={String(config.trend.rangeMonths)}
+                    onValueChange={(v) => {
+                      const n = Number(v)
+                      const next: TrendRangeMonths | null =
+                        n === 3 || n === 6 || n === 12 ? (n as TrendRangeMonths) : null
+                      setConfig((s) => ({
+                        ...s,
+                        trend: {
+                          ...s.trend,
+                          rangeMonths: next ?? s.trend.rangeMonths,
+                        },
+                      }))
+                    }}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Khoảng thời gian" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="3">3 tháng gần nhất</SelectItem>
+                      <SelectItem value="6">6 tháng gần nhất</SelectItem>
+                      <SelectItem value="12">12 tháng gần nhất</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-xs text-muted-foreground">
+                    Kéo thả để thêm/bớt và sắp xếp thứ tự.
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const defaults = defaultReportsConfig()
+                      setConfig((s) => ({ ...s, trend: defaults.trend }))
+                    }}
+                  >
+                    Reset
+                  </Button>
+                </div>
+
+                <DndMultiSelect
+                  allIds={TREND_SERIES_KEYS}
+                  selectedIds={config.trend.visibleSeries}
+                  onSelectedIdsChange={(next) =>
+                    setConfig((s) => ({
+                      ...s,
+                      trend: { ...s.trend, visibleSeries: next },
+                    }))
+                  }
+                  getLabel={(id) => TREND_SERIES_LABELS[id]}
+                  availableTitle="Chỉ số"
+                  selectedTitle="Đang hiển thị"
+                />
+              </div>
+            ) : config.mode === "pivot" ? (
+              <div className="space-y-3">
+                <DndContext
+                  sensors={pivotSensors}
+                  collisionDetection={pivotCollisionDetection}
+                  measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}
+                  onDragStart={(event) => {
+                    lastPivotOverRef.current = null
+                    const data = event.active.data?.current as PivotDragData | undefined
+                    setActivePivotField(data?.field ?? null)
+                  }}
+                  onDragOver={handlePivotDragOver}
+                  onDragCancel={() => {
+                    setActivePivotField(null)
+                    lastPivotOverRef.current = null
+                  }}
+                  onDragEnd={handlePivotDragEnd}
+                >
+                  <div className="rounded-lg border bg-muted/5 p-3 space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 space-y-1">
+                      <div className="text-sm font-semibold">Bố cục Pivot</div>
+                      <div className="text-xs text-muted-foreground">
+                        Kéo chip vào Hàng/Cột. Kéo để đổi thứ tự.
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 px-2"
+                        onClick={() => {
+                          const defaults = defaultReportsConfig()
+                          setConfig((s) => ({
+                            ...s,
+                            pivot: defaults.pivot,
+                          }))
+                        }}
+                      >
+                        Reset
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 px-2"
+                          disabled={config.pivot.rowFields.length === 0}
+                          onClick={() =>
+                            setConfig((s) => ({
+                              ...s,
+                              pivot: { ...s.pivot, rowFields: [] },
+                            }))
+                          }
+                        >
+                          Bỏ hàng
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 px-2"
+                          disabled={config.pivot.columnFields.length === 0}
+                          onClick={() =>
+                            setConfig((s) => ({
+                              ...s,
+                              pivot: { ...s.pivot, columnFields: [] },
+                            }))
+                          }
+                        >
+                          Bỏ cột
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="rounded-md border bg-background p-3">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          Trường dữ liệu
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {PIVOT_FIELDS.map((field) => (
+                            <PivotDraggableField
+                              key={field.id}
+                              field={field}
+                              active={
+                                config.pivot.rowFields.includes(field.id) ||
+                                config.pivot.columnFields.includes(field.id)
+                              }
+                            />
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        <PivotDropZone id="pivot-drop-row" title="Hàng" className="min-h-[96px]">
+                          <SortableContext
+                            items={config.pivot.rowFields.map((field) => `row:${field}`)}
+                            strategy={rectSortingStrategy}
+                          >
+                            <div className="flex flex-wrap gap-2">
+                              {config.pivot.rowFields.length === 0 ? (
+                                <div className="text-xs text-muted-foreground">
+                                  Kéo chip vào đây
+                                </div>
+                              ) : (
+                                config.pivot.rowFields.map((field, index) => (
+                                  <PivotFieldPill
+                                    key={`row-${field}`}
+                                    field={field}
+                                    container="row"
+                                    index={index}
+                                    onRemove={(f) => handlePivotRemove(f, "row")}
+                                  />
+                                ))
+                              )}
+                            </div>
+                          </SortableContext>
+                        </PivotDropZone>
+
+                        <PivotDropZone
+                          id="pivot-drop-column"
+                          title="Cột"
+                          className="min-h-[96px]"
+                        >
+                          <SortableContext
+                            items={config.pivot.columnFields.map((field) => `column:${field}`)}
+                            strategy={rectSortingStrategy}
+                          >
+                            <div className="flex flex-wrap gap-2">
+                              {config.pivot.columnFields.length === 0 ? (
+                                <div className="text-xs text-muted-foreground">
+                                  Kéo chip vào đây
+                                </div>
+                              ) : (
+                                config.pivot.columnFields.map((field, index) => (
+                                  <PivotFieldPill
+                                    key={`col-${field}`}
+                                    field={field}
+                                    container="column"
+                                    index={index}
+                                    onRemove={(f) => handlePivotRemove(f, "column")}
+                                  />
+                                ))
+                              )}
+                            </div>
+                          </SortableContext>
+                        </PivotDropZone>
+                      </div>
+                    </div>
+
+                    <div className="text-xs text-muted-foreground">
+                      Hàng = {pivotRowSummaryText} • Cột = {pivotColumnSummaryText}
+                    </div>
+                  </div>
+
+                  <DragOverlay zIndex={10000}>
+                    {activePivotField ? (
+                      <div className="rounded-full border bg-background px-3 py-1 text-xs font-semibold shadow-xl ring-2 ring-primary/30">
+                        {PIVOT_FIELDS.find((f) => f.id === activePivotField)?.label ?? ""}
+                      </div>
+                    ) : null}
+                  </DragOverlay>
+                </DndContext>
+              </div>
+            ) : (
+              <div className="text-sm text-muted-foreground">
+                Chưa có tuỳ chỉnh cho chế độ này.
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Card>
-        <CardHeader>
-          <CardTitle>Báo cáo động</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="text-sm text-muted-foreground">
-            Tuỳ chỉnh loại biểu đồ và dữ liệu hiển thị. Dữ liệu là số <span className="text-foreground font-medium">đã ghi</span> (Actual).
-          </div>
-
+        <CardContent className="space-y-3">
           <Tabs
             value={config.mode}
             onValueChange={(v) =>
@@ -1667,14 +2157,171 @@ export default function ReportsPage() {
               }))
             }
           >
-            <TabsList className="w-full justify-start">
-              <TabsTrigger value="month">Phân bổ (tháng)</TabsTrigger>
-              <TabsTrigger value="daily">Theo ngày</TabsTrigger>
-              <TabsTrigger value="trend">Xu hướng</TabsTrigger>
-              <TabsTrigger value="pivot">Pivot</TabsTrigger>
-            </TabsList>
+            <div className="flex items-center gap-2">
+              <div className="flex-1 overflow-x-auto pb-1">
+                <TabsList className="w-max justify-start">
+                  <TabsTrigger value="month">Phân bổ (tháng)</TabsTrigger>
+                  <TabsTrigger value="daily">Theo ngày</TabsTrigger>
+                  <TabsTrigger value="trend">Xu hướng</TabsTrigger>
+                  <TabsTrigger value="pivot">Pivot</TabsTrigger>
+                </TabsList>
+              </div>
+              {config.mode === "month" ? (
+                <Select
+                  value={config.month.chartType}
+                  onValueChange={(v) =>
+                    setConfig((s) => ({
+                      ...s,
+                      month: { ...s.month, chartType: v === "pie" ? "pie" : "bar" },
+                    }))
+                  }
+                >
+                  <SelectTrigger className="h-9 w-[140px] sm:w-[170px]">
+                    <SelectValue placeholder="Biểu đồ" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="bar">Cột (Bar)</SelectItem>
+                    <SelectItem value="pie">Tròn (Pie)</SelectItem>
+                  </SelectContent>
+                </Select>
+              ) : config.mode === "daily" ? (
+                <Select
+                  value={config.daily.chartType}
+                  onValueChange={(v) =>
+                    setConfig((s) => ({
+                      ...s,
+                      daily: {
+                        ...s.daily,
+                        chartType: v === "line" ? "line" : v === "area" ? "area" : "bar",
+                      },
+                    }))
+                  }
+                >
+                  <SelectTrigger className="h-9 w-[140px] sm:w-[170px]">
+                    <SelectValue placeholder="Biểu đồ" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="bar">Cột (Bar)</SelectItem>
+                    <SelectItem value="line">Đường (Line)</SelectItem>
+                    <SelectItem value="area">Vùng (Area)</SelectItem>
+                  </SelectContent>
+                </Select>
+              ) : config.mode === "trend" ? (
+                <Select
+                  value={config.trend.chartType}
+                  onValueChange={(v) =>
+                    setConfig((s) => ({
+                      ...s,
+                      trend: {
+                        ...s.trend,
+                        chartType: v === "bar" ? "bar" : v === "area" ? "area" : "line",
+                      },
+                    }))
+                  }
+                >
+                  <SelectTrigger className="h-9 w-[140px] sm:w-[170px]">
+                    <SelectValue placeholder="Biểu đồ" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="line">Đường (Line)</SelectItem>
+                    <SelectItem value="area">Vùng (Area)</SelectItem>
+                    <SelectItem value="bar">Cột (Bar)</SelectItem>
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Select
+                  value={config.pivot.chartType}
+                  onValueChange={(v) =>
+                    setConfig((s) => ({
+                      ...s,
+                      pivot: {
+                        ...s.pivot,
+                        chartType: v as PivotChartType,
+                      },
+                    }))
+                  }
+                >
+                  <SelectTrigger className="h-9 w-[140px] sm:w-[170px]">
+                    <SelectValue placeholder="Biểu đồ" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="bar">{PIVOT_CHART_LABELS.bar}</SelectItem>
+                    <SelectItem value="line">{PIVOT_CHART_LABELS.line}</SelectItem>
+                    <SelectItem value="area">{PIVOT_CHART_LABELS.area}</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+              {config.mode === "pivot" ? (
+                <Select
+                  value={config.pivot.metric}
+                  onValueChange={(v) =>
+                    setConfig((s) => ({
+                      ...s,
+                      pivot: { ...s.pivot, metric: v as PivotMetric },
+                    }))
+                  }
+                >
+                  <SelectTrigger className="h-9 w-[150px] sm:w-[190px]">
+                    <SelectValue placeholder="Chỉ số" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="sum">Tổng chi</SelectItem>
+                    <SelectItem value="count">Số giao dịch</SelectItem>
+                    <SelectItem value="avg">TB/giao dịch</SelectItem>
+                  </SelectContent>
+                </Select>
+              ) : null}
+              {config.mode === "pivot" ? (
+                <div className="inline-flex items-center rounded-md border bg-background p-0.5">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={pivotSplitView === "table" ? "secondary" : "ghost"}
+                    className="h-8 gap-2 px-2"
+                    title="Chỉ xem bảng pivot"
+                    onClick={() => setPivotSplitView("table")}
+                  >
+                    <Table className="h-4 w-4" />
+                    <span className="hidden sm:inline">Bảng</span>
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={pivotSplitView === "both" ? "secondary" : "ghost"}
+                    className="h-8 gap-2 px-2"
+                    title="Chia đôi bảng + biểu đồ"
+                    onClick={() => setPivotSplitView("both")}
+                  >
+                    <Columns2 className="h-4 w-4" />
+                    <span className="hidden sm:inline">50/50</span>
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={pivotSplitView === "chart" ? "secondary" : "ghost"}
+                    className="h-8 gap-2 px-2"
+                    title="Chỉ xem biểu đồ pivot"
+                    onClick={() => setPivotSplitView("chart")}
+                  >
+                    <BarChart3 className="h-4 w-4" />
+                    <span className="hidden sm:inline">Biểu đồ</span>
+                  </Button>
+                </div>
+              ) : null}
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-9 gap-2 shrink-0"
+                onClick={() => setControlsOpen(true)}
+              >
+                <SlidersHorizontal className="h-4 w-4" />
+                Tùy chỉnh
+              </Button>
+            </div>
 
-            <TabsContent value="month" className="space-y-4">
+            <TabsContent value="month" className="space-y-3">
+              {/*
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex flex-wrap gap-2">
                   <Select
@@ -1733,7 +2380,9 @@ export default function ReportsPage() {
                   Reset
                 </Button>
               </div>
+              */}
 
+              {/*
               {config.month.dataset === "categories" ? (
                 <DndMultiSelect
                   allIds={EXPENSE_CATEGORIES}
@@ -1767,8 +2416,10 @@ export default function ReportsPage() {
                   selectedTitle="Đang hiển thị"
                 />
               )}
+              */}
 
-              <div className="h-[360px]">
+              <div className="grid gap-4 lg:grid-cols-2">
+                <div className="h-[320px]">
                 {config.month.dataset === "categories" ? (
                   monthCategoryRows.length === 0 ? (
                     <div className="text-sm text-muted-foreground">
@@ -1889,14 +2540,69 @@ export default function ReportsPage() {
                     )}
                   </ResponsiveContainer>
                 )}
+                </div>
+
+                <div className="rounded-md border bg-background">
+                  <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
+                    <div className="text-sm font-medium truncate">
+                      {config.month.dataset === "categories" ? "Danh mục" : "Bucket"}
+                    </div>
+                    <Badge variant="secondary" className="whitespace-nowrap">
+                      {monthTableRows.length} mục
+                    </Badge>
+                  </div>
+                  {monthTableRows.length === 0 ? (
+                    <div className="px-3 py-6 text-sm text-muted-foreground">
+                      Chưa có dữ liệu để hiển thị bảng.
+                    </div>
+                  ) : (
+                    <div className="max-h-[320px] overflow-auto">
+                      <table className="min-w-full text-sm">
+                        <thead className="sticky top-0 bg-muted/40">
+                          <tr className="border-b">
+                            <th className="px-3 py-2 text-left font-medium text-muted-foreground truncate">
+                              Tên
+                            </th>
+                            <th className="px-3 py-2 text-right font-medium text-muted-foreground whitespace-nowrap tabular-nums">
+                              Số tiền
+                            </th>
+                            <th className="px-3 py-2 text-right font-medium text-muted-foreground whitespace-nowrap tabular-nums">
+                              Tỷ lệ
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {monthTableRows.map((row) => (
+                            <tr key={row.name} className="border-b last:border-b-0">
+                              <td className="px-3 py-2 truncate" title={row.name}>
+                                {row.name}
+                              </td>
+                              <td className="px-3 py-2 text-right whitespace-nowrap tabular-nums">
+                                {formatVnd(row.value)}
+                              </td>
+                              <td className="px-3 py-2 text-right whitespace-nowrap tabular-nums">
+                                {monthTableTotal > 0
+                                  ? `${Math.round((row.value / monthTableTotal) * 100)}%`
+                                  : "—"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
               </div>
 
+              {/*
               <div className="text-xs text-muted-foreground">
                 Ghi chú: “Chi theo danh mục” đã cộng cả chi phí cố định vào danh mục tương ứng (vd. Hóa đơn).
               </div>
+              */}
             </TabsContent>
 
-            <TabsContent value="daily" className="space-y-4">
+            <TabsContent value="daily" className="space-y-3">
+              {/*
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex flex-wrap gap-2">
                   <Select
@@ -1933,11 +2639,13 @@ export default function ReportsPage() {
                   Reset
                 </Button>
               </div>
+              */}
 
               <div className="text-xs text-muted-foreground">
                 Chi theo từng ngày (từ đầu tháng), chỉ tính chi biến đổi đã ghi.
               </div>
 
+              {/*
               <DndMultiSelect
                 allIds={DAILY_SERIES_KEYS}
                 selectedIds={config.daily.visibleSeries}
@@ -1951,8 +2659,10 @@ export default function ReportsPage() {
                 availableTitle="Chỉ số"
                 selectedTitle="Đang hiển thị"
               />
+              */}
 
-              <div className="h-[360px]">
+              <div className="grid gap-4 lg:grid-cols-2">
+                <div className="h-[320px]">
                 {dailyData.every((r) => r.total === 0 && r.needs === 0 && r.wants === 0) ? (
                   <div className="text-sm text-muted-foreground">
                     Chưa có dữ liệu để vẽ biểu đồ.
@@ -2077,10 +2787,63 @@ export default function ReportsPage() {
                     )}
                   </ResponsiveContainer>
                 )}
+                </div>
+
+                <div className="rounded-md border bg-background">
+                  <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
+                    <div className="text-sm font-medium truncate">Bảng theo ngày</div>
+                    <Badge variant="secondary" className="whitespace-nowrap">
+                      {dailyData.length} ngày
+                    </Badge>
+                  </div>
+                  {dailyData.length === 0 ? (
+                    <div className="px-3 py-6 text-sm text-muted-foreground">
+                      Chưa có dữ liệu để hiển thị bảng.
+                    </div>
+                  ) : (
+                    <div className="max-h-[320px] overflow-auto">
+                      <table className="min-w-full text-sm">
+                        <thead className="sticky top-0 bg-muted/40">
+                          <tr className="border-b">
+                            <th className="px-3 py-2 text-left font-medium text-muted-foreground whitespace-nowrap">
+                              Ngày
+                            </th>
+                            {dailyTableSeries.map((k) => (
+                              <th
+                                key={k}
+                                className="px-3 py-2 text-right font-medium text-muted-foreground whitespace-nowrap tabular-nums"
+                              >
+                                {DAILY_SERIES_LABELS[k]}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {dailyData.map((row) => (
+                            <tr key={row.day} className="border-b last:border-b-0">
+                              <td className="px-3 py-2 whitespace-nowrap tabular-nums">
+                                {row.day}
+                              </td>
+                              {dailyTableSeries.map((k) => (
+                                <td
+                                  key={k}
+                                  className="px-3 py-2 text-right whitespace-nowrap tabular-nums"
+                                >
+                                  {formatVnd(row[k])}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
               </div>
             </TabsContent>
 
-            <TabsContent value="trend" className="space-y-4">
+            <TabsContent value="trend" className="space-y-3">
+              {/*
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex flex-wrap gap-2">
                   <Select
@@ -2142,7 +2905,9 @@ export default function ReportsPage() {
                   Reset
                 </Button>
               </div>
+              */}
 
+              {/*
               <DndMultiSelect
                 allIds={TREND_SERIES_KEYS}
                 selectedIds={config.trend.visibleSeries}
@@ -2156,8 +2921,10 @@ export default function ReportsPage() {
                 availableTitle="Chỉ số"
                 selectedTitle="Đang hiển thị"
               />
+              */}
 
-              <div className="h-[360px]">
+              <div className="grid gap-4 lg:grid-cols-2">
+                <div className="h-[320px]">
                 {trendData.every((r) => r.totalSpent === 0 && r.variableSpent === 0 && r.fixedCosts === 0) ? (
                   <div className="text-sm text-muted-foreground">
                     Chưa có dữ liệu để vẽ biểu đồ.
@@ -2261,216 +3028,69 @@ export default function ReportsPage() {
                     )}
                   </ResponsiveContainer>
                 )}
+                </div>
+
+                <div className="rounded-md border bg-background">
+                  <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
+                    <div className="text-sm font-medium truncate">Bảng theo tháng</div>
+                    <Badge variant="secondary" className="whitespace-nowrap">
+                      {trendData.length} tháng
+                    </Badge>
+                  </div>
+                  {trendData.length === 0 ? (
+                    <div className="px-3 py-6 text-sm text-muted-foreground">
+                      Chưa có dữ liệu để hiển thị bảng.
+                    </div>
+                  ) : (
+                    <div className="max-h-[320px] overflow-auto">
+                      <table className="min-w-full text-sm">
+                        <thead className="sticky top-0 bg-muted/40">
+                          <tr className="border-b">
+                            <th className="px-3 py-2 text-left font-medium text-muted-foreground whitespace-nowrap">
+                              Tháng
+                            </th>
+                            {trendTableSeries.map((k) => (
+                              <th
+                                key={k}
+                                className="px-3 py-2 text-right font-medium text-muted-foreground whitespace-nowrap tabular-nums"
+                              >
+                                {TREND_SERIES_LABELS[k]}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {trendData.map((row) => (
+                            <tr key={row.month} className="border-b last:border-b-0">
+                              <td className="px-3 py-2 whitespace-nowrap">
+                                {formatMonthLabel(row.month)}
+                              </td>
+                              {trendTableSeries.map((k) => (
+                                <td
+                                  key={k}
+                                  className="px-3 py-2 text-right whitespace-nowrap tabular-nums"
+                                >
+                                  {formatVnd(row[k])}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
               </div>
             </TabsContent>
 
-            <TabsContent value="pivot" className="space-y-4">
-              <DndContext
-                sensors={pivotSensors}
-                onDragStart={(event) => {
-                  const data = event.active.data?.current as PivotDragData | undefined
-                  setActivePivotField(data?.field ?? null)
-                }}
-                onDragCancel={() => setActivePivotField(null)}
-                onDragEnd={handlePivotDragEnd}
-              >
-                <div className="rounded-lg border bg-muted/5 p-4 space-y-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="text-sm font-medium">Kéo thả trường dữ liệu</div>
-                    <div className="text-xs text-muted-foreground">
-                      Kéo nhiều chip vào Hàng/Cột để ghép nhiều cấp.
-                    </div>
-                  </div>
-                  <div className="grid gap-3 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)]">
-                    <div className="rounded-md border bg-muted/30 p-3">
-                      <div className="text-xs font-medium text-muted-foreground uppercase">
-                        Trường dữ liệu
-                      </div>
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        {PIVOT_FIELDS.map((field) => (
-                          <PivotDraggableField
-                            key={field.id}
-                            field={field}
-                            active={
-                              config.pivot.rowFields.includes(field.id) ||
-                              config.pivot.columnFields.includes(field.id)
-                            }
-                          />
-                        ))}
-                      </div>
-                    </div>
-
-                    <PivotDropZone
-                      id="pivot-drop-row"
-                      title="Hàng"
-                      hint="Có thể kéo nhiều chip để ghép hàng"
-                    >
-                      <SortableContext
-                        items={config.pivot.rowFields.map((field) => `row:${field}`)}
-                        strategy={rectSortingStrategy}
-                      >
-                        <div className="flex flex-wrap gap-2">
-                          {config.pivot.rowFields.length === 0 ? (
-                            <div className="text-xs text-muted-foreground">
-                              Chưa chọn hàng
-                            </div>
-                          ) : (
-                            config.pivot.rowFields.map((field, index) => (
-                              <PivotFieldPill
-                                key={`row-${field}`}
-                                field={field}
-                                container="row"
-                                index={index}
-                                onRemove={(f) => handlePivotRemove(f, "row")}
-                              />
-                            ))
-                          )}
-                        </div>
-                      </SortableContext>
-                    </PivotDropZone>
-
-                    <PivotDropZone
-                      id="pivot-drop-column"
-                      title="Cột"
-                      hint="Có thể kéo nhiều chip để ghép cột"
-                    >
+            <TabsContent value="pivot" className="space-y-3">
+              <div className={cn("grid gap-4", pivotShowTable && pivotShowChart && "lg:grid-cols-2")}>
+                {pivotShowTable ? (
+                  <Card>
+                    <CardContent className="p-3 space-y-2">
                       <div className="flex items-center justify-between gap-2">
-                        <SortableContext
-                          items={config.pivot.columnFields.map((field) => `column:${field}`)}
-                          strategy={rectSortingStrategy}
-                        >
-                          <div className="flex flex-wrap gap-2">
-                            {config.pivot.columnFields.length === 0 ? (
-                              <div className="text-xs text-muted-foreground">
-                                Chưa chọn cột
-                              </div>
-                            ) : (
-                              config.pivot.columnFields.map((field, index) => (
-                                <PivotFieldPill
-                                  key={`col-${field}`}
-                                  field={field}
-                                  container="column"
-                                  index={index}
-                                  onRemove={(f) => handlePivotRemove(f, "column")}
-                                />
-                              ))
-                            )}
-                          </div>
-                        </SortableContext>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          disabled={config.pivot.columnFields.length === 0}
-                          onClick={() =>
-                            setConfig((s) => ({
-                              ...s,
-                              pivot: { ...s.pivot, columnFields: [] },
-                            }))
-                          }
-                        >
-                          Bỏ cột
-                        </Button>
+                        <div className="text-base font-semibold">Bảng pivot</div>
                       </div>
-                    </PivotDropZone>
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    Bố cục hiện tại: Hàng = {pivotRowSummaryText} • Cột = {pivotColumnSummaryText}
-                  </div>
-                </div>
-
-                <DragOverlay>
-                  {activePivotField ? (
-                    <div className="rounded-full border bg-background px-3 py-1 text-xs font-medium shadow-lg">
-                      {PIVOT_FIELDS.find((f) => f.id === activePivotField)?.label ??
-                        ""}
-                    </div>
-                  ) : null}
-                </DragOverlay>
-              </DndContext>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <Select
-                  value={config.pivot.metric}
-                  onValueChange={(v) =>
-                    setConfig((s) => ({
-                      ...s,
-                      pivot: {
-                        ...s.pivot,
-                        metric: v as PivotMetric,
-                      },
-                    }))
-                  }
-                >
-                  <SelectTrigger className="w-[200px]">
-                    <SelectValue placeholder="Chọn chỉ số" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="sum">Tổng chi</SelectItem>
-                    <SelectItem value="count">Số giao dịch</SelectItem>
-                    <SelectItem value="avg">Trung bình/giao dịch</SelectItem>
-                  </SelectContent>
-                </Select>
-
-                <Select
-                  value={config.pivot.chartType}
-                  onValueChange={(v) =>
-                    setConfig((s) => ({
-                      ...s,
-                      pivot: {
-                        ...s.pivot,
-                        chartType: v as PivotChartType,
-                      },
-                    }))
-                  }
-                >
-                  <SelectTrigger className="w-[180px]">
-                    <SelectValue placeholder="Loại biểu đồ" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="bar">{PIVOT_CHART_LABELS.bar}</SelectItem>
-                    <SelectItem value="line">{PIVOT_CHART_LABELS.line}</SelectItem>
-                    <SelectItem value="area">{PIVOT_CHART_LABELS.area}</SelectItem>
-                  </SelectContent>
-                </Select>
-
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    const defaults = defaultReportsConfig()
-                    setConfig((s) => ({
-                      ...s,
-                      pivot: defaults.pivot,
-                    }))
-                  }}
-                >
-                  Reset
-                </Button>
-              </div>
-
-              <div className="grid gap-4">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Bảng pivot</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    <div className="grid gap-2 text-sm sm:grid-cols-3">
-                      <LabelValueRow
-                        label="Tổng giao dịch"
-                        value={formatPivotValue(pivotTable.grandTotal.count, "count")}
-                      />
-                      <LabelValueRow
-                        label="Tổng chi (đã ghi)"
-                        value={formatVnd(pivotTable.grandTotal.sum)}
-                      />
-                      <LabelValueRow
-                        label="Hàng × cột"
-                        value={`${pivotTable.rows.length} × ${pivotTable.cols.length}`}
-                      />
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      Pivot dùng chi tiêu đã ghi trong tháng (biến đổi), không gồm chi phí cố định.
-                    </div>
 
                     {pivotTable.rows.length === 0 ? (
                       <div className="text-sm text-muted-foreground">
@@ -2624,29 +3244,22 @@ export default function ReportsPage() {
                         </table>
                       </div>
                     )}
-                  </CardContent>
-                </Card>
+                    </CardContent>
+                  </Card>
+                ) : null}
 
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Biểu đồ pivot</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    <div className="text-sm text-muted-foreground">
-                      Theo {pivotRowLabel} • {PIVOT_METRIC_LABELS[config.pivot.metric]} •{" "}
-                      Cột: {pivotColumnSummary}
-                    </div>
-                    {pivotHasColumns ? (
-                      <div className="rounded-md border bg-muted/20 p-3">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div className="text-xs font-medium text-muted-foreground">
-                            Trường hiển thị trên biểu đồ
-                          </div>
-                          <div className="flex flex-wrap gap-2">
+                {pivotShowChart ? (
+                  <Card>
+                    <CardContent className="p-3 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-base font-semibold">Biểu đồ pivot</div>
+                        {pivotHasColumns ? (
+                          <div className="flex items-center gap-2">
                             <Button
                               type="button"
                               size="sm"
                               variant="ghost"
+                              className="h-8 px-2"
                               onClick={resetPivotSeries}
                             >
                               Mặc định
@@ -2655,46 +3268,14 @@ export default function ReportsPage() {
                               type="button"
                               size="sm"
                               variant="outline"
+                              className="h-8 px-2"
                               onClick={showAllPivotSeries}
                             >
                               Hiện tất cả
                             </Button>
                           </div>
-                        </div>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {pivotAvailableSeries.map((col) => {
-                            const active = pivotSeriesKeySet.has(col.key)
-                            const color =
-                              pivotSeriesColorByKey.get(col.key) ?? CHART_COLORS[0]
-                            return (
-                              <button
-                                key={col.key}
-                                type="button"
-                                onClick={() => togglePivotSeries(col.key)}
-                                title={col.label}
-                                className={cn(
-                                  "flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition",
-                                  active
-                                    ? "border-primary/60 bg-primary/10 text-foreground"
-                                    : "border-border bg-background text-muted-foreground",
-                                )}
-                              >
-                                <span
-                                  className="h-2 w-2 rounded-full"
-                                  style={{ backgroundColor: color }}
-                                />
-                                <span className="max-w-[140px] truncate">
-                                  {col.label}
-                                </span>
-                              </button>
-                            )
-                          })}
-                        </div>
-                        <div className="mt-2 text-[11px] text-muted-foreground">
-                          Nhấn chip để ẩn/hiện. Giữ tối thiểu 1 trường.
-                        </div>
+                        ) : null}
                       </div>
-                    ) : null}
                     <div className="h-[460px]">
                       {pivotChartData.length === 0 ? (
                         <div className="text-sm text-muted-foreground">
@@ -2835,6 +3416,37 @@ export default function ReportsPage() {
                         </ResponsiveContainer>
                       )}
                     </div>
+                    {pivotHasColumns ? (
+                      <div className="rounded-md border bg-muted/20 px-2 py-2">
+                        <div className="flex flex-nowrap gap-2 overflow-x-auto pb-1">
+                          {pivotAvailableSeries.map((col) => {
+                            const active = pivotSeriesKeySet.has(col.key)
+                            const color =
+                              pivotSeriesColorByKey.get(col.key) ?? CHART_COLORS[0]
+                            return (
+                              <button
+                                key={col.key}
+                                type="button"
+                                onClick={() => togglePivotSeries(col.key)}
+                                title={col.label}
+                                className={cn(
+                                  "flex items-center gap-2 whitespace-nowrap rounded-full border px-3 py-1 text-xs font-medium transition",
+                                  active
+                                    ? "border-primary/60 bg-primary/10 text-foreground"
+                                    : "border-border bg-background text-muted-foreground",
+                                )}
+                              >
+                                <span
+                                  className="h-2 w-2 rounded-full"
+                                  style={{ backgroundColor: color }}
+                                />
+                                <span className="max-w-[140px] truncate">{col.label}</span>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    ) : null}
                     {pivotChartLimited || pivotChartSeriesLimited ? (
                       <div className="text-xs text-muted-foreground">
                         {pivotChartLimited
@@ -2847,8 +3459,9 @@ export default function ReportsPage() {
                           : ""}
                       </div>
                     ) : null}
-                  </CardContent>
-                </Card>
+                    </CardContent>
+                  </Card>
+                ) : null}
               </div>
             </TabsContent>
           </Tabs>

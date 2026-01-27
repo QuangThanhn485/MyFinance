@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build-docker": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"$cid = docker ps -q --filter 'publish=8001'; if ($cid) { docker rm -f $cid }; docker build --no-cache --pull -t myfinance:prod .; docker run -d --rm --name myfinance_prod -p 8001:80 myfinance:prod\"",
     "test": "vitest run",
     "preview": "vite preview"
   },

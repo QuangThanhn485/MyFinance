@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ComponentType } from "react"
+import { useEffect, useMemo, useRef, useState, type ComponentType } from "react"
 import { NavLink, useLocation } from "react-router-dom"
 import {
   ArrowLeftRight,
@@ -203,6 +203,20 @@ export default function SideNav({
   const initialOpen = useMemo(() => getDefaultOpenGroups(location.pathname), [])
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(initialOpen)
   const [collapsedPopoverGroupId, setCollapsedPopoverGroupId] = useState<string | null>(null)
+  const collapsedPopoverCloseTimerRef = useRef<number | null>(null)
+
+  const clearCollapsedPopoverCloseTimer = () => {
+    if (collapsedPopoverCloseTimerRef.current === null) return
+    window.clearTimeout(collapsedPopoverCloseTimerRef.current)
+    collapsedPopoverCloseTimerRef.current = null
+  }
+
+  const scheduleCollapsedPopoverClose = () => {
+    clearCollapsedPopoverCloseTimer()
+    collapsedPopoverCloseTimerRef.current = window.setTimeout(() => {
+      setCollapsedPopoverGroupId(null)
+    }, 120)
+  }
 
   useEffect(() => {
     setOpenGroups((prev) => {
@@ -305,6 +319,11 @@ export default function SideNav({
                     <button
                       type="button"
                       title={node.label}
+                      onPointerEnter={() => {
+                        clearCollapsedPopoverCloseTimer()
+                        setCollapsedPopoverGroupId(node.id)
+                      }}
+                      onPointerLeave={() => scheduleCollapsedPopoverClose()}
                       className={cn(
                         "group relative w-full flex items-center gap-2 rounded-lg px-2 py-2 transition-colors justify-center",
                         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
@@ -332,6 +351,8 @@ export default function SideNav({
                     align="start"
                     sideOffset={8}
                     className="w-64 p-2"
+                    onPointerEnter={() => clearCollapsedPopoverCloseTimer()}
+                    onPointerLeave={() => scheduleCollapsedPopoverClose()}
                   >
                     <div className="px-2 py-1 text-xs font-semibold text-muted-foreground">
                       {node.label}
