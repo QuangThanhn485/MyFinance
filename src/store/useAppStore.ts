@@ -22,6 +22,7 @@ import {
   dayOfMonthFromIsoDate,
   daysInMonth,
   monthFromIsoDate,
+  previousMonth,
   todayIso,
 } from "@/lib/date"
 import { formatVnd } from "@/lib/currency"
@@ -114,6 +115,7 @@ type Actions = {
   exportJson: () => string
   importJson: (raw: string) => { ok: true } | { ok: false; error: string }
   resetAll: () => void
+  autoClosePreviousMonthIfNeeded: () => void
 }
 
 export type AppStore = {
@@ -133,6 +135,41 @@ function touch(state: CttmState): CttmState {
 
 function id(prefix: "ex_" | "fc_" | "pp_") {
   return `${prefix}${nanoid(10)}`
+}
+
+function cloneSettings(settings: Settings): Settings {
+  const rule = settings.budgetRule
+  const budgetRule =
+    rule.type === "custom"
+      ? { type: "custom" as const, needsPct: rule.needsPct, wantsPct: rule.wantsPct, savingsPct: rule.savingsPct }
+      : { type: rule.type }
+
+  return {
+    ...settings,
+    budgetRule,
+    customSavingsGoalVnd: settings.customSavingsGoalVnd ?? null,
+    actualSavingsBalanceVnd: settings.actualSavingsBalanceVnd ?? 0,
+  }
+}
+
+function autoClosePreviousMonthIfNeeded(state: CttmState): CttmState {
+  const now = nowIso()
+  const currentMonth = monthFromIsoDate(todayIso())
+  const target = previousMonth(currentMonth)
+  const alreadyClosed = !!state.monthLocksByMonth?.[target]
+  if (alreadyClosed) return state
+
+  const snapshot = {
+    closedAt: now,
+    settings: cloneSettings(state.settings),
+    budgetAdjustment: state.budgetAdjustmentsByMonth[target] ?? null,
+    caps: state.capsByMonth[target] ?? null,
+  }
+
+  return touch({
+    ...state,
+    monthLocksByMonth: { ...(state.monthLocksByMonth ?? {}), [target]: snapshot },
+  })
 }
 
 function isDefaultSettings(settings: Settings): boolean {
@@ -308,7 +345,9 @@ if (persistedWorkspace !== "real") {
 export const useAppStore = create<AppStore>()(
   subscribeWithSelector((set, get) => ({
     workspace: initialWorkspace,
-    data: loadCttmStateFromKey(getStorageKeyForWorkspace(initialWorkspace)),
+    data: autoClosePreviousMonthIfNeeded(
+      loadCttmStateFromKey(getStorageKeyForWorkspace(initialWorkspace)),
+    ),
     ui: { overspending: null, forcedPurchaseRescue: null },
     actions: {
       setWorkspace: (workspace) => {
@@ -320,7 +359,9 @@ export const useAppStore = create<AppStore>()(
 
         set(() => ({
           workspace,
-          data: loadCttmStateFromKey(getStorageKeyForWorkspace(workspace)),
+          data: autoClosePreviousMonthIfNeeded(
+            loadCttmStateFromKey(getStorageKeyForWorkspace(workspace)),
+          ),
           ui: { overspending: null, forcedPurchaseRescue: null },
         }))
       },
@@ -794,6 +835,10 @@ export const useAppStore = create<AppStore>()(
           data: next,
           ui: { overspending: null, forcedPurchaseRescue: null },
         }))
+      },
+
+      autoClosePreviousMonthIfNeeded: () => {
+        set((s) => ({ data: autoClosePreviousMonthIfNeeded(s.data) }))
       },
     },
   })),

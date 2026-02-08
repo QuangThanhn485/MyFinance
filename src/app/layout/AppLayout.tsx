@@ -4,12 +4,14 @@ import AppOverlays from "@/app/layout/AppOverlays"
 import SideNav from "@/app/layout/SideNav"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
+import { useAppStore } from "@/store/useAppStore"
 import { PanelLeftOpen } from "lucide-react"
 
 const SIDEBAR_COLLAPSED_KEY = "smartSpend.ui.sidebarCollapsed.v1"
 
 export default function AppLayout() {
   const location = useLocation()
+  const autoClose = useAppStore((s) => s.actions.autoClosePreviousMonthIfNeeded)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
       return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1"
@@ -27,7 +29,15 @@ export default function AppLayout() {
     }
   }, [sidebarCollapsed])
 
-  const wideContainer = location.pathname === "/reports" || location.pathname.startsWith("/reports/")
+  useEffect(() => {
+    autoClose()
+  }, [autoClose])
+
+  const wideContainer =
+    location.pathname === "/reports" ||
+    location.pathname.startsWith("/reports/") ||
+    location.pathname === "/budgets" ||
+    location.pathname.startsWith("/budgets/")
   const mainContainerClassName = wideContainer
     ? "flex-1 max-w-screen-2xl w-full mx-auto px-3 sm:px-4 lg:px-6 py-4 sm:py-6"
     : "flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6"

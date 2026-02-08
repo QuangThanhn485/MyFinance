@@ -1,5 +1,5 @@
 ﻿import { useEffect, useMemo, useState, type ReactNode } from "react"
-import { useRef } from "react"
+import { useRef, type CSSProperties } from "react"
 import {
   DndContext,
   DragOverlay,
@@ -54,7 +54,9 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Label } from "@/components/ui/label"
 import {
   Select,
   SelectContent,
@@ -70,6 +72,7 @@ import MonthPicker from "@/components/MonthPicker"
 import { BUCKET_LABELS_VI, CATEGORY_LABELS_VI, EXPENSE_CATEGORIES } from "@/domain/constants"
 import { computeBudgets } from "@/domain/finance/finance"
 import { computeAdvancedInsights, type ClusterTier } from "@/domain/finance/insights"
+import { getEffectiveBudgetAdjustmentForMonth, getEffectiveSettingsForMonth } from "@/domain/finance/monthLock"
 import { formatVnd } from "@/lib/currency"
 import {
   dayOfMonthFromIsoDate,
@@ -106,22 +109,23 @@ const CHART_COLORS = [
 ]
 
 const PIVOT_SERIES_PALETTE = [
-  "#2563eb",
-  "#f97316",
-  "#16a34a",
-  "#dc2626",
-  "#a855f7",
-  "#0ea5e9",
-  "#d97706",
-  "#14b8a6",
-  "#ec4899",
-  "#84cc16",
-  "#6366f1",
-  "#f43f5e",
-  "#0891b2",
-  "#9333ea",
-  "#22c55e",
-  "#e11d48",
+  // High-contrast, mostly color-blind-friendly palette (avoid light yellows on white).
+  "#2563eb", // blue
+  "#16a34a", // green
+  "#dc2626", // red
+  "#7c3aed", // purple
+  "#0ea5e9", // sky
+  "#f97316", // orange
+  "#b45309", // amber (darker)
+  "#0f766e", // teal (darker)
+  "#db2777", // pink
+  "#4d7c0f", // lime (darker)
+  "#4f46e5", // indigo
+  "#be123c", // rose (darker)
+  "#0369a1", // blue-cyan (darker)
+  "#6d28d9", // violet (darker)
+  "#15803d", // green (darker)
+  "#c2410c", // burnt orange
 ]
 
 function pivotSeriesColor(index: number) {
@@ -129,8 +133,9 @@ function pivotSeriesColor(index: number) {
     return PIVOT_SERIES_PALETTE[index]
   }
   const hue = (index * 137.508 + 18) % 360
-  const saturation = 68
-  const lightness = index % 2 === 0 ? 46 : 58
+  // Keep all generated colors sufficiently dark for white backgrounds.
+  const saturation = 72
+  const lightness = 45
   return `hsl(${hue.toFixed(1)} ${saturation}% ${lightness}%)`
 }
 
@@ -495,6 +500,57 @@ function formatPivotValue(value: number, metric: PivotMetric) {
   return formatVnd(Math.round(value))
 }
 
+function formatImpactRangeVndHint(input: {
+  label: string
+  baseVnd: number
+  ranges: { maxPct: number; label: string }[]
+}) {
+  const base = Math.max(0, input.baseVnd)
+  if (base <= 0) return null
+
+  const idx = input.ranges.findIndex((r) => r.label === input.label)
+  if (idx < 0) return null
+
+  const minPct = idx === 0 ? 0 : input.ranges[idx - 1]?.maxPct ?? 0
+  const maxPct = input.ranges[idx]?.maxPct ?? 0
+
+  const minVnd = Math.round(minPct * base)
+  if (maxPct === Number.POSITIVE_INFINITY) {
+    return `≈ > ${formatVnd(minVnd)}`
+  }
+
+  const maxVnd = Math.round(maxPct * base)
+  if (idx === 0) return `≈ ≤ ${formatVnd(maxVnd)}`
+  return `≈ ${formatVnd(minVnd)} – ${formatVnd(maxVnd)}`
+}
+
+function pivotMoneyHeatmapStyle(
+  value: number,
+  thresholds: number[],
+): CSSProperties | undefined {
+  if (!(value > 0)) return undefined
+  const palette = [
+    { bg: "rgba(16,185,129,0.22)", accent: "rgba(16,185,129,0.75)" }, // emerald
+    { bg: "rgba(132,204,22,0.22)", accent: "rgba(132,204,22,0.75)" }, // lime
+    { bg: "rgba(245,158,11,0.24)", accent: "rgba(245,158,11,0.78)" }, // amber
+    { bg: "rgba(249,115,22,0.26)", accent: "rgba(249,115,22,0.82)" }, // orange
+    { bg: "rgba(244,63,94,0.28)", accent: "rgba(244,63,94,0.82)" }, // rose
+  ]
+
+  const bucketIndex = thresholds.reduce((acc, t) => (value > t ? acc + 1 : acc), 0)
+  const ratio = thresholds.length > 0 ? bucketIndex / thresholds.length : 0
+  const paletteIndex = Math.min(
+    palette.length - 1,
+    Math.max(0, Math.round(ratio * (palette.length - 1))),
+  )
+  const colors = palette[paletteIndex]
+
+  return {
+    backgroundColor: colors.bg,
+    boxShadow: `inset 3px 0 0 ${colors.accent}`,
+  }
+}
+
 function comparePivotSortValue(a: number | string, b: number | string) {
   if (typeof a === "number" && typeof b === "number") return a - b
   return String(a).localeCompare(String(b))
@@ -808,13 +864,21 @@ export default function ReportsPage() {
   const categories = useMemo(() => getCategoryTotals(data, month), [data, month])
   const expenses = useMemo(() => getExpensesByMonth(data, month), [data, month])
 
+  const settingsForMonth = useMemo(
+    () => getEffectiveSettingsForMonth(data, month),
+    [data, month],
+  )
+  const adjustment = useMemo(
+    () => getEffectiveBudgetAdjustmentForMonth(data, month),
+    [data, month],
+  )
   const budgets = computeBudgets({
-    incomeVnd: data.settings.monthlyIncomeVnd,
+    incomeVnd: settingsForMonth.monthlyIncomeVnd,
     fixedCostsVnd: totals.fixedCostsTotal,
-    essentialVariableBaselineVnd: data.settings.essentialVariableBaselineVnd,
-    rule: data.settings.budgetRule,
-    adjustment: data.budgetAdjustmentsByMonth[month] ?? null,
-    customSavingsGoalVnd: data.settings.customSavingsGoalVnd,
+    essentialVariableBaselineVnd: settingsForMonth.essentialVariableBaselineVnd,
+    rule: settingsForMonth.budgetRule,
+    adjustment,
+    customSavingsGoalVnd: settingsForMonth.customSavingsGoalVnd,
   })
   const savingsMin = budgets.savingsTargetVnd
   const saved = budgets.incomeVnd - totals.totalSpent
@@ -870,8 +934,8 @@ export default function ReportsPage() {
   }, [config.trend.rangeMonths, month])
 
   const trendData = useMemo(() => {
-    const I = data.settings.monthlyIncomeVnd
     return trendMonths.map((m) => {
+      const I = getEffectiveSettingsForMonth(data, m).monthlyIncomeVnd
       const t = getMonthTotals(data, m)
       const balance = I - t.totalSpent
       return {
@@ -884,7 +948,7 @@ export default function ReportsPage() {
         balance,
       }
     })
-  }, [data, data.settings.monthlyIncomeVnd, trendMonths])
+  }, [data, trendMonths])
 
   const today = todayIso()
 
@@ -959,6 +1023,36 @@ export default function ReportsPage() {
     pivotChartPrimary === "day" || pivotChartPrimary === "week" ? 31 : 8
   const pivotChartRows = pivotTable.rows.slice(0, pivotChartLimit)
   const pivotHasColumns = config.pivot.columnFields.length > 0
+  const pivotMoneyMetric = config.pivot.metric !== "count"
+  const pivotHeatmapEnabled = pivotMoneyMetric && config.pivot.colorByAmount
+  const pivotHeatmapScale = useMemo(() => {
+    if (!pivotHeatmapEnabled) return null
+    const values: number[] = []
+    for (const row of pivotTable.rows) {
+      for (const col of pivotTable.cols) {
+        const v = pivotMetricValue(pivotTable.cells[row.key]?.[col.key], config.pivot.metric)
+        if (v > 0) values.push(v)
+      }
+    }
+    if (values.length < 2) return null
+    values.sort((a, b) => a - b)
+    const min = values[0]
+    const max = values[values.length - 1]
+    if (!(max > min)) return null
+
+    const bins = 5
+    const rawThresholds = Array.from({ length: bins - 1 }, (_, idx) => {
+      const pct = (idx + 1) / bins
+      const at = Math.round((values.length - 1) * pct)
+      return values[Math.min(values.length - 1, Math.max(0, at))]
+    })
+    const thresholds: number[] = []
+    for (const t of rawThresholds) {
+      if (thresholds.length === 0 || t > thresholds[thresholds.length - 1]) thresholds.push(t)
+    }
+    if (thresholds.length === 0) thresholds.push(min + (max - min) * 0.5)
+    return { thresholds }
+  }, [pivotHeatmapEnabled, pivotTable, config.pivot.metric])
   const pivotDefaultSeriesLimit = pivotHasColumns ? 8 : 1
   const pivotAvailableSeries = pivotHasColumns ? pivotTable.cols : []
   const pivotVisibleSeriesKeys = pivotHasColumns
@@ -2119,6 +2213,32 @@ export default function ReportsPage() {
                     <div className="text-xs text-muted-foreground">
                       Hàng = {pivotRowSummaryText} • Cột = {pivotColumnSummaryText}
                     </div>
+
+                    <div className="flex items-center justify-between gap-3 rounded-md border bg-background/70 px-3 py-2">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <Checkbox
+                          id="pivot-color-by-amount"
+                          disabled={!pivotMoneyMetric}
+                          checked={pivotMoneyMetric && config.pivot.colorByAmount}
+                          onCheckedChange={(next) =>
+                            setConfig((s) => ({
+                              ...s,
+                              pivot: { ...s.pivot, colorByAmount: next === true },
+                            }))
+                          }
+                        />
+                        <Label
+                          htmlFor="pivot-color-by-amount"
+                          className="min-w-0 truncate text-sm"
+                        >
+                          Màu theo số tiền
+                        </Label>
+                        <span className="hidden sm:inline whitespace-nowrap text-xs text-muted-foreground">
+                          xanh thấp → đỏ cao
+                        </span>
+                      </div>
+                      <div className="hidden h-2 w-20 shrink-0 rounded-full bg-gradient-to-r from-emerald-500/60 via-amber-500/60 to-rose-500/60 sm:block" />
+                    </div>
                   </div>
 
                   <DragOverlay zIndex={10000}>
@@ -3124,18 +3244,43 @@ export default function ReportsPage() {
                                     ))
                                   : null}
                                 {headerRow.map((group) => (
-                                  <th
-                                    key={group.key}
-                                    colSpan={group.span}
-                                    className="bg-muted px-3 py-2 text-center font-medium whitespace-nowrap border-b border-border/70 border-r border-border/70"
-                                  >
-                                    <span
-                                      className="block max-w-[180px] truncate"
-                                      title={group.label}
-                                    >
-                                      {group.label}
-                                    </span>
-                                  </th>
+                                  (() => {
+                                    const columnFieldAtLevel = config.pivot.columnFields[level]
+                                    const hint =
+                                      columnFieldAtLevel === "mssImpact"
+                                        ? formatImpactRangeVndHint({
+                                            label: group.label,
+                                            baseVnd: budgets.mssVnd,
+                                            ranges: PIVOT_MSS_IMPACT_RANGES,
+                                          })
+                                        : columnFieldAtLevel === "savingsImpact"
+                                          ? formatImpactRangeVndHint({
+                                              label: group.label,
+                                              baseVnd: budgets.savingsTargetVnd,
+                                              ranges: PIVOT_SAVINGS_IMPACT_RANGES,
+                                            })
+                                          : null
+
+                                    return (
+                                      <th
+                                        key={group.key}
+                                        colSpan={group.span}
+                                        className="bg-muted px-3 py-2 text-center font-medium whitespace-nowrap border-b border-border/70 border-r border-border/70"
+                                      >
+                                        <span
+                                          className="block max-w-[180px] truncate"
+                                          title={hint ? `${group.label} (${hint})` : group.label}
+                                        >
+                                          {group.label}
+                                        </span>
+                                        {hint ? (
+                                          <span className="mt-0.5 block max-w-[180px] truncate text-[11px] font-normal tabular-nums text-muted-foreground/90">
+                                            {hint}
+                                          </span>
+                                        ) : null}
+                                      </th>
+                                    )
+                                  })()
                                 ))}
                                 {level === 0 ? (
                                   <th
@@ -3182,24 +3327,42 @@ export default function ReportsPage() {
                                     cell,
                                     config.pivot.metric,
                                   )
+                                  const style = pivotHeatmapScale
+                                    ? pivotMoneyHeatmapStyle(
+                                        value,
+                                        pivotHeatmapScale.thresholds,
+                                      )
+                                    : undefined
                                   return (
                                     <td
                                       key={`${row.key}-${col.key}`}
-                                      className="px-3 py-2 text-right tabular-nums whitespace-nowrap border-b border-border/60 border-r border-border/60"
+                                      style={style}
+                                      className="px-3 py-2 text-right tabular-nums whitespace-nowrap border-b border-border/60 border-r border-border/60 transition-colors"
                                     >
                                       {formatPivotValue(value, config.pivot.metric)}
                                     </td>
                                   )
                                 })}
-                                <td className="px-3 py-2 text-right font-medium tabular-nums whitespace-nowrap border-b border-border/60 border-r border-border/60">
-                                  {formatPivotValue(
-                                    pivotMetricValue(
-                                      pivotTable.rowTotals[row.key],
-                                      config.pivot.metric,
-                                    ),
+                                {(() => {
+                                  const value = pivotMetricValue(
+                                    pivotTable.rowTotals[row.key],
                                     config.pivot.metric,
-                                  )}
-                                </td>
+                                  )
+                                  const style = pivotHeatmapScale
+                                    ? pivotMoneyHeatmapStyle(
+                                        value,
+                                        pivotHeatmapScale.thresholds,
+                                      )
+                                    : undefined
+                                  return (
+                                    <td
+                                      style={style}
+                                      className="px-3 py-2 text-right font-medium tabular-nums whitespace-nowrap border-b border-border/60 border-r border-border/60 transition-colors"
+                                    >
+                                      {formatPivotValue(value, config.pivot.metric)}
+                                    </td>
+                                  )
+                                })()}
                               </tr>
                             ))}
                             <tr className="bg-muted/40">
@@ -3216,29 +3379,47 @@ export default function ReportsPage() {
                                   {level === 0 ? "Tổng" : null}
                                 </td>
                               ))}
-                              {pivotTable.cols.map((col) => (
-                                <td
-                                  key={`total-${col.key}`}
-                                  className="px-3 py-2 text-right font-medium tabular-nums whitespace-nowrap border-b border-border/60 border-r border-border/60"
-                                >
-                                  {formatPivotValue(
-                                    pivotMetricValue(
-                                      pivotTable.colTotals[col.key],
-                                      config.pivot.metric,
-                                    ),
-                                    config.pivot.metric,
-                                  )}
-                                </td>
-                              ))}
-                              <td className="px-3 py-2 text-right font-semibold tabular-nums whitespace-nowrap border-b border-border/60 border-r border-border/60">
-                                {formatPivotValue(
-                                  pivotMetricValue(
-                                    pivotTable.grandTotal,
-                                    config.pivot.metric,
-                                  ),
+                              {pivotTable.cols.map((col) => {
+                                const value = pivotMetricValue(
+                                  pivotTable.colTotals[col.key],
                                   config.pivot.metric,
-                                )}
-                              </td>
+                                )
+                                const style = pivotHeatmapScale
+                                  ? pivotMoneyHeatmapStyle(
+                                      value,
+                                      pivotHeatmapScale.thresholds,
+                                    )
+                                  : undefined
+                                return (
+                                  <td
+                                    key={`total-${col.key}`}
+                                    style={style}
+                                    className="px-3 py-2 text-right font-medium tabular-nums whitespace-nowrap border-b border-border/60 border-r border-border/60 transition-colors"
+                                  >
+                                    {formatPivotValue(value, config.pivot.metric)}
+                                  </td>
+                                )
+                              })}
+                              {(() => {
+                                const value = pivotMetricValue(
+                                  pivotTable.grandTotal,
+                                  config.pivot.metric,
+                                )
+                                const style = pivotHeatmapScale
+                                  ? pivotMoneyHeatmapStyle(
+                                      value,
+                                      pivotHeatmapScale.thresholds,
+                                    )
+                                  : undefined
+                                return (
+                                  <td
+                                    style={style}
+                                    className="px-3 py-2 text-right font-semibold tabular-nums whitespace-nowrap border-b border-border/60 border-r border-border/60 transition-colors"
+                                  >
+                                    {formatPivotValue(value, config.pivot.metric)}
+                                  </td>
+                                )
+                              })()}
                             </tr>
                           </tbody>
                         </table>

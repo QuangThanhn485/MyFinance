@@ -96,6 +96,7 @@ export function loadCttmStateFromKey(storageKey: string): CttmState {
       ? (state.budgetAdjustmentsByMonth as any)
       : {},
     capsByMonth: isRecord(state.capsByMonth) ? (state.capsByMonth as any) : {},
+    monthLocksByMonth: isRecord((state as any).monthLocksByMonth) ? ((state as any).monthLocksByMonth as any) : {},
     indexes: empty.indexes,
   }
 

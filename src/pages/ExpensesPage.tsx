@@ -42,6 +42,7 @@ import {
 } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
 import { computeBudgets } from "@/domain/finance/finance"
+import { getEffectiveBudgetAdjustmentForMonth, getEffectiveSettingsForMonth, isMonthLocked } from "@/domain/finance/monthLock"
 import {
   evaluateBudgetHealth,
   type BudgetHealthWarning,
@@ -101,6 +102,7 @@ export default function ExpensesPage() {
   const month = monthFromIsoDate(selectedDate)
   const dom = dayOfMonthFromIsoDate(selectedDate)
   const dim = daysInMonth(month)
+  const selectedMonthLocked = isMonthLocked(data, month)
   const monthTotals = getMonthTotals(data, month)
   const monthToDateTotals = useMemo(
     () => getMonthToDateTotals(data, selectedDate),
@@ -114,13 +116,15 @@ export default function ExpensesPage() {
     setHealthWarningsDate(null)
   }, [healthWarningsDate, selectedDate])
 
+  const settingsForMonth = useMemo(() => getEffectiveSettingsForMonth(data, month), [data, month])
+  const adjustment = useMemo(() => getEffectiveBudgetAdjustmentForMonth(data, month), [data, month])
   const budgets = computeBudgets({
-    incomeVnd: data.settings.monthlyIncomeVnd,
+    incomeVnd: settingsForMonth.monthlyIncomeVnd,
     fixedCostsVnd: monthTotals.fixedCostsTotal,
-    essentialVariableBaselineVnd: data.settings.essentialVariableBaselineVnd,
-    rule: data.settings.budgetRule,
-    adjustment: data.budgetAdjustmentsByMonth[month] ?? null,
-    customSavingsGoalVnd: data.settings.customSavingsGoalVnd,
+    essentialVariableBaselineVnd: settingsForMonth.essentialVariableBaselineVnd,
+    rule: settingsForMonth.budgetRule,
+    adjustment,
+    customSavingsGoalVnd: settingsForMonth.customSavingsGoalVnd,
   })
 
   const needsSpentTodayVnd = expensesToday.reduce(
@@ -181,6 +185,11 @@ export default function ExpensesPage() {
     },
   })
 
+  const formMonthLocked = isMonthLocked(
+    data,
+    monthFromIsoDate(form.watch("date") as unknown as ISODate),
+  )
+
   const [editingId, setEditingId] = useState<string | null>(null)
 
   const editingExpense = editingId ? data.entities.expenses.byId[editingId] : null
@@ -191,14 +200,15 @@ export default function ExpensesPage() {
     const dim = daysInMonth(month)
 
     const totalsForBudget = getMonthTotals(state, month)
-    const adjustment = state.budgetAdjustmentsByMonth[month] ?? null
+    const settingsForMonth = getEffectiveSettingsForMonth(state, month)
+    const adjustment = getEffectiveBudgetAdjustmentForMonth(state, month)
     const budgets = computeBudgets({
-      incomeVnd: state.settings.monthlyIncomeVnd,
+      incomeVnd: settingsForMonth.monthlyIncomeVnd,
       fixedCostsVnd: totalsForBudget.fixedCostsTotal,
-      essentialVariableBaselineVnd: state.settings.essentialVariableBaselineVnd,
-      rule: state.settings.budgetRule,
+      essentialVariableBaselineVnd: settingsForMonth.essentialVariableBaselineVnd,
+      rule: settingsForMonth.budgetRule,
       adjustment,
-      customSavingsGoalVnd: state.settings.customSavingsGoalVnd,
+      customSavingsGoalVnd: settingsForMonth.customSavingsGoalVnd,
     })
 
     const toDate = getMonthToDateTotals(state, date)
@@ -279,8 +289,15 @@ export default function ExpensesPage() {
     options?: { saveTemplate?: boolean },
   ) => {
     try {
+      const storeData = useAppStore.getState().data
+      const targetMonth = monthFromIsoDate(values.date)
+      if (isMonthLocked(storeData, targetMonth)) {
+        toast.error(`Tháng ${targetMonth} đã chốt báo cáo nên không thể thêm chi tiêu.`)
+        return
+      }
+
       const baseline = computeBudgetHealthWarnings(
-        useAppStore.getState().data,
+        storeData,
         values.date,
       )
       addExpense({
@@ -592,16 +609,28 @@ export default function ExpensesPage() {
                     type="button"
                     variant="secondary"
                     className="w-full"
+                    disabled={selectedMonthLocked}
+                    title={
+                      selectedMonthLocked
+                        ? `Tháng ${month} đã chốt báo cáo nên không thể thêm chi tiêu.`
+                        : undefined
+                    }
                     onClick={() => {
                       const amount = Number(form.getValues("amountVnd"))
                       if (!Number.isFinite(amount) || amount <= 0) {
                         toast.error("Vui lòng nhập số tiền hợp lệ.")
                         return
                       }
-                      const baseline = computeBudgetHealthWarnings(
-                        useAppStore.getState().data,
-                        selectedDate,
-                      )
+                      const storeData = useAppStore.getState().data
+                      const targetMonth = monthFromIsoDate(selectedDate)
+                      if (isMonthLocked(storeData, targetMonth)) {
+                        toast.error(
+                          `Tháng ${targetMonth} đã chốt báo cáo nên không thể thêm chi tiêu.`,
+                        )
+                        return
+                      }
+
+                      const baseline = computeBudgetHealthWarnings(storeData, selectedDate)
                       addExpense({
                         amountVnd: Math.trunc(amount),
                         category: form.getValues("category"),
@@ -623,11 +652,27 @@ export default function ExpensesPage() {
               </div>
 
               <div className="grid grid-cols-2 gap-2">
-                <Button type="submit">Thêm</Button>
+                <Button
+                  type="submit"
+                  disabled={formMonthLocked}
+                  title={
+                    formMonthLocked
+                      ? `Tháng ${monthFromIsoDate(form.getValues("date") as unknown as ISODate)} đã chốt báo cáo nên không thể thêm chi tiêu.`
+                      : undefined
+                  }
+                >
+                  Thêm
+                </Button>
                 <Button
                   type="button"
                   variant="secondary"
                   className="whitespace-normal text-xs sm:text-sm"
+                  disabled={formMonthLocked}
+                  title={
+                    formMonthLocked
+                      ? `Tháng ${monthFromIsoDate(form.getValues("date") as unknown as ISODate)} đã chốt báo cáo nên không thể thêm chi tiêu.`
+                      : undefined
+                  }
                   onClick={() => {
                     form.handleSubmit((values) =>
                       handleAddExpense(values, { saveTemplate: true }),
@@ -765,10 +810,13 @@ export default function ExpensesPage() {
         </DialogContent>
       </Dialog>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Danh sách chi tiêu ({selectedDate})</CardTitle>
-        </CardHeader>
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center justify-between gap-2">
+              <span>Danh sách chi tiêu ({selectedDate})</span>
+              {selectedMonthLocked ? <Badge variant="outline">Đã chốt tháng</Badge> : null}
+            </CardTitle>
+          </CardHeader>
         <CardContent className="space-y-3">
           {expensesToday.length === 0 ? (
             <div className="text-sm text-muted-foreground">
@@ -776,11 +824,15 @@ export default function ExpensesPage() {
             </div>
           ) : (
             <div className="space-y-2">
-              {expensesToday.map((ex) => (
-                <div
-                  key={ex.id}
-                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-md border p-3"
-                >
+              {expensesToday.map((ex) => {
+                const expenseMonth = monthFromIsoDate(ex.date)
+                const expenseMonthLocked = isMonthLocked(data, expenseMonth)
+
+                return (
+                  <div
+                    key={ex.id}
+                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-md border p-3"
+                  >
                     <div className="min-w-0">
                       <div className="font-medium">
                         <span className="whitespace-nowrap tabular-nums">
@@ -795,20 +847,45 @@ export default function ExpensesPage() {
                           {ex.note}
                         </div>
                     ) : null}
-                  </div>
-                  <div className="flex gap-2">
-                    <Dialog open={editingId === ex.id} onOpenChange={(open) => setEditingId(open ? ex.id : null)}>
-                      <DialogTrigger asChild>
-                        <Button variant="outline" size="sm">Sửa</Button>
-                      </DialogTrigger>
-                      <DialogContent className="max-h-[90vh] overflow-y-auto">
-                        <DialogHeader>
-                          <DialogTitle>Chỉnh sửa chi tiêu</DialogTitle>
-                        </DialogHeader>
+                    </div>
+                    <div className="flex gap-2">
+                      <Dialog open={editingId === ex.id} onOpenChange={(open) => setEditingId(open ? ex.id : null)}>
+                        <DialogTrigger asChild>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={expenseMonthLocked}
+                            title={
+                              expenseMonthLocked
+                                ? `Tháng ${expenseMonth} đã chốt báo cáo nên không thể sửa.`
+                                : undefined
+                            }
+                          >
+                            Sửa
+                          </Button>
+                        </DialogTrigger>
+                        <DialogContent className="max-h-[90vh] overflow-y-auto">
+                          <DialogHeader>
+                            <DialogTitle>Chỉnh sửa chi tiêu</DialogTitle>
+                          </DialogHeader>
                         {editingExpense ? (
                           <form
                             className="grid gap-4"
                             onSubmit={editForm.handleSubmit((values) => {
+                              const storeData = useAppStore.getState().data
+                              const originalMonth = monthFromIsoDate(ex.date)
+                              const nextMonth = monthFromIsoDate(values.date)
+
+                              if (
+                                isMonthLocked(storeData, originalMonth) ||
+                                isMonthLocked(storeData, nextMonth)
+                              ) {
+                                toast.error(
+                                  `Tháng đã chốt báo cáo (${isMonthLocked(storeData, originalMonth) ? originalMonth : nextMonth}) nên không thể cập nhật.`,
+                                )
+                                return
+                              }
+
                               updateExpense(ex.id, {
                                 amountVnd: values.amountVnd,
                                 category: values.category,
@@ -904,7 +981,20 @@ export default function ExpensesPage() {
                     <Button
                       variant="destructive"
                       size="sm"
+                      disabled={expenseMonthLocked}
+                      title={
+                        expenseMonthLocked
+                          ? `Tháng ${expenseMonth} đã chốt báo cáo nên không thể xóa.`
+                          : undefined
+                      }
                       onClick={() => {
+                        const storeData = useAppStore.getState().data
+                        if (isMonthLocked(storeData, expenseMonth)) {
+                          toast.error(
+                            `Tháng ${expenseMonth} đã chốt báo cáo nên không thể xóa.`,
+                          )
+                          return
+                        }
                         deleteExpense(ex.id)
                         toast.success("Đã xóa.")
                       }}
@@ -913,7 +1003,8 @@ export default function ExpensesPage() {
                     </Button>
                   </div>
                 </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </CardContent>

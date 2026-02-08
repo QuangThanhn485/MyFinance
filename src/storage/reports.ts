@@ -58,6 +58,7 @@ export type ReportsConfigV5 = {
     metric: PivotMetric
     chartType: PivotChartType
     visibleSeries: string[]
+    colorByAmount: boolean
   }
 }
 
@@ -204,6 +205,7 @@ export function defaultReportsConfig(): ReportsConfigV5 {
       metric: "sum",
       chartType: "bar",
       visibleSeries: [],
+      colorByAmount: false,
     },
   }
 }
@@ -276,6 +278,10 @@ export function loadReportsConfig(): ReportsConfigV5 {
     version === 5 && Array.isArray(pivotRaw.visibleSeries)
       ? pivotRaw.visibleSeries
       : []
+  const pivotColorByAmountRaw =
+    version === 5 && typeof pivotRaw.colorByAmount === "boolean"
+      ? pivotRaw.colorByAmount
+      : false
 
   const pivotVisibleSeries = unique(
     pivotVisibleSeriesRaw
@@ -337,6 +343,7 @@ export function loadReportsConfig(): ReportsConfigV5 {
       metric: normalizePivotMetric(pivotRaw.metric),
       chartType: normalizePivotChartType(pivotRaw.chartType),
       visibleSeries: pivotVisibleSeries,
+      colorByAmount: pivotColorByAmountRaw,
     },
   }
 }

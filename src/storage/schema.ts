@@ -31,6 +31,13 @@ export interface ExpenseIndexes {
   expensesByBucketMonth: Record<string, string[]>
 }
 
+export type MonthLockSnapshot = {
+  closedAt: string
+  settings: Settings
+  budgetAdjustment: BudgetAdjustment | null
+  caps: SpendingCaps | null
+}
+
 export interface CttmState {
   schemaVersion: SchemaVersion
   updatedAt: string
@@ -44,6 +51,7 @@ export interface CttmState {
   indexes: ExpenseIndexes
   budgetAdjustmentsByMonth: Record<string, BudgetAdjustment>
   capsByMonth: Record<string, SpendingCaps>
+  monthLocksByMonth: Record<string, MonthLockSnapshot>
 }
 
 export function createEmptyExpenseIndexes(): ExpenseIndexes {
@@ -87,5 +95,6 @@ export function createInitialState(nowIso: string): CttmState {
     indexes: createEmptyExpenseIndexes(),
     budgetAdjustmentsByMonth: {},
     capsByMonth: {},
+    monthLocksByMonth: {},
   }
 }
