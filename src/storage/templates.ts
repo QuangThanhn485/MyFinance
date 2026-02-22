@@ -158,6 +158,20 @@ export function getRecentExpenseTemplates(
     .slice(0, Math.max(0, Math.trunc(limit)))
 }
 
+export function getAllExpenseTemplatesSorted(templates: ExpenseTemplate[]) {
+  const lastUsedScore = (t: ExpenseTemplate) => Date.parse(t.lastUsedAt) || 0
+  const createdScore = (t: ExpenseTemplate) => Date.parse(t.createdAt) || 0
+  return templates
+    .slice()
+    .sort((a, b) => {
+      const usedDiff = lastUsedScore(b) - lastUsedScore(a)
+      if (usedDiff !== 0) return usedDiff
+      const createdDiff = createdScore(b) - createdScore(a)
+      if (createdDiff !== 0) return createdDiff
+      return a.name.localeCompare(b.name, "vi")
+    })
+}
+
 export function upsertExpenseTemplate(input: {
   name?: string
   amountVnd: number
@@ -240,4 +254,45 @@ export function touchExpenseTemplate(
   next[idx] = updated
   saveExpenseTemplates(next)
   return next
+}
+
+export function updateExpenseTemplate(
+  templateId: string,
+  patch: Partial<{
+    name: string
+    amount: number
+    category: ExpenseCategory
+    bucket: TemplateBucket
+    note: string
+  }>,
+): ExpenseTemplate[] {
+  const templates = loadExpenseTemplates()
+  const idx = templates.findIndex((t) => t.id === templateId)
+  if (idx < 0) return templates
+
+  const existing = templates[idx]
+  const next: ExpenseTemplate = {
+    ...existing,
+    name:
+      typeof patch.name === "string" && patch.name.trim()
+        ? patch.name.trim().slice(0, 80)
+        : existing.name,
+    amount:
+      typeof patch.amount === "number" && Number.isFinite(patch.amount)
+        ? clampMoneyVnd(patch.amount)
+        : existing.amount,
+    category: patch.category ?? existing.category,
+    bucket: patch.bucket ?? existing.bucket,
+    note:
+      typeof patch.note === "string"
+        ? normalizeNote(patch.note) || undefined
+        : existing.note,
+  }
+
+  if (next.amount <= 0) return templates
+
+  const updated = templates.slice()
+  updated[idx] = next
+  saveExpenseTemplates(updated)
+  return updated
 }

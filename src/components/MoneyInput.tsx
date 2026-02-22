@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { forwardRef, useEffect, useMemo, useState } from "react"
 import { Input, type InputProps } from "@/components/ui/input"
 import { formatVndNumber, parseVndInput } from "@/lib/currency"
 import { cn } from "@/lib/utils"
@@ -8,13 +8,10 @@ type MoneyInputProps = Omit<InputProps, "value" | "onChange" | "type"> & {
   onValueChange: (next: number) => void
 }
 
-export default function MoneyInput({
-  value,
-  onValueChange,
-  inputMode = "numeric",
-  className,
-  ...props
-}: MoneyInputProps) {
+const MoneyInput = forwardRef<HTMLInputElement, MoneyInputProps>(function MoneyInput(
+  { value, onValueChange, inputMode = "numeric", className, ...props },
+  ref,
+) {
   const formatted = useMemo(
     () => (value > 0 ? formatVndNumber(value) : ""),
     [value],
@@ -25,6 +22,7 @@ export default function MoneyInput({
 
   return (
     <Input
+      ref={ref}
       {...props}
       inputMode={inputMode}
       className={cn("text-right tabular-nums", className)}
@@ -43,4 +41,8 @@ export default function MoneyInput({
       }}
     />
   )
-}
+})
+
+MoneyInput.displayName = "MoneyInput"
+
+export default MoneyInput

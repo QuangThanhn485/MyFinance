@@ -1,0 +1,229 @@
+# PROMPT NÂNG CẤP UI/UX TRANG “Ghi chi tiêu” (expenses) + PROMPT THI CÔNG CHO GPT 5.3 CODEX
+Ngày: 2026-02-22
+
+============================================================
+PHẦN A — MÔ TẢ / SPEC UI/UX (DÙNG CHO DESIGN + DEV)
+============================================================
+
+## 1) Bối cảnh & vấn đề hiện tại
+- Trang hiện tại UI/UX kém: khi thêm item phải cuộn xuống mới thấy “Danh sách chi tiêu” → bất tiện/khó chịu.
+- “Mẫu gần đây / item thêm nhanh” hiện chưa CRUD được (chưa có tính năng).
+- Layout có nguy cơ: chữ bị cắt, bị đè, padding lỗi, responsive kém, xuất hiện khoảng trắng dư gây lãng phí diện tích.
+
+## 2) Mục tiêu
+- Thiết kế lại bố cục theo chiều ngang thành 3 khu vực từ trái sang phải:
+  1) Thống kê nhanh
+  2) Thêm chi tiêu (khu thao tác chính + quản lý item thêm nhanh)
+  3) Danh sách chi tiêu (items đã thêm trong ngày)
+- Cả 3 khu đều có thể **Thu gọn / Mở rộng** độc lập (collapsible).
+- Toàn bộ trang ưu tiên hiển thị **trong 1 màn hình** (không cuộn trang).  
+  - Chỉ các danh sách (list) được phép cuộn **bên trong** khu vực của nó.
+- KHÔNG làm sai lệch logic/công thức tài chính hiện có: chỉ thay đổi UI/UX và bổ sung CRUD cho list item thêm nhanh.
+
+## 3) Nguyên tắc thiết kế (UI/UX)
+- Rõ ràng, ít khoảng trắng dư, tận dụng chiều ngang.
+- Không vỡ layout:  
+  - Không bị text overflow/cắt chữ: dùng line-clamp/ellipsis hợp lý, tooltip khi hover nếu cần.
+  - Không bị đè chữ lên nhau; spacing/padding nhất quán.
+- Tối ưu thao tác: thêm nhanh chỉ 1–2 click.
+- Thứ tự thị giác: thao tác chính ở giữa, thông tin tổng quan bên trái, kết quả (list) bên phải.
+
+## 4) Bố cục đề xuất (3 cột)
+### 4.1 Grid layout
+- Desktop: 3 cột (left / center / right) dạng CSS Grid.
+  - Left (Thống kê nhanh): ~ 25–30% width
+  - Center (Thêm chi tiêu): ~ 35–40% width
+  - Right (Danh sách chi tiêu): ~ 30–35% width
+- Tablet: 2 cột (Left + Center trên, Right xuống dưới) hoặc 1 cột có tabs (tùy breakpoint).
+- Mobile: 1 cột (stack) + sticky header với nút chuyển khu (segmented control).
+
+### 4.2 Collapsible sections
+- Mỗi khu có header:
+  - Title + icon
+  - Nút thu gọn/mở rộng (chevron).
+  - Khi thu gọn: chỉ còn header + 1–2 dòng tóm tắt (nếu có).
+- Hành vi:
+  - Thu gọn khu nào → các khu còn lại tự giãn để tận dụng diện tích.
+  - Lưu trạng thái mở/đóng (localStorage) để lần sau giữ nguyên.
+
+## 5) Khu “Thêm chi tiêu” — trọng tâm
+### 5.1 Khu vực “Item thêm nhanh” (Quick Templates)
+- Hiển thị dạng **list có thể cuộn** (scrollable list), không làm trang cuộn.
+- Mỗi item hiển thị:
+  - Tên mẫu (ví dụ: “Ăn uống • Cafe”)
+  - Số tiền mặc định
+  - Danh mục + bucket (nếu có)
+  - Ghi chú (nếu có) hiển thị rút gọn
+- Controls trên item:
+  - Nút “>>” (Add) để thêm nhanh vào “Danh sách chi tiêu” (ngày đang chọn).
+  - Nút “Edit” để sửa item (mở popup panel bên phải).
+- Multi-select:
+  - Mỗi item có checkbox đầu dòng.
+  - Khi có item được chọn: hiện thanh hành động nổi/inline:
+    - “Xoá (n items)” + “Bỏ chọn”
+- CRUD yêu cầu:
+  - Create: nút “Thêm” → mở popup tạo template mới.
+  - Update: Edit từng item → popup sửa.
+  - Delete: xoá theo multi-select (bulk) + xoá 1 item (optional).
+- Tìm kiếm/ lọc (khuyến nghị):
+  - Input search phía trên list (lọc theo tên/danh mục).
+  - Có thể thêm filter chips theo danh mục.
+
+### 5.2 Form “Thêm chi tiêu” (manual input)
+- Phần nhập tay giữ nguyên logic cũ:
+  - Số tiền
+  - Danh mục
+  - Bucket
+  - Ghi chú
+  - Ngày
+- CTA:
+  - Nút “Thêm” (add expense vào danh sách)
+  - Nút “Thêm & Lưu mẫu” (add expense + lưu thành template trong list thêm nhanh)
+- Ưu tiên layout gọn: form theo 2 cột nhỏ trong center panel (nếu đủ rộng), tránh khoảng trắng.
+
+### 5.3 Popup / panel chỉnh sửa (bên phải)
+- Khi nhấn Edit hoặc Thêm:
+  - Mở **panel trượt từ phải** (right drawer/popup), không che toàn bộ trang nếu có thể.
+  - Panel có:
+    - Title (Thêm mẫu / Sửa mẫu)
+    - Fields tương tự template: name, amount, category, bucket, note
+    - Actions: Save, Cancel
+- Validation:
+  - Amount chỉ số, không âm, format VND.
+  - Name không rỗng.
+
+## 6) Khu “Danh sách chi tiêu”
+- Hiển thị list items theo ngày đã chọn.
+- List cuộn nội bộ (scroll).
+- Khi add nhanh (>>), item xuất hiện ngay ở đầu list (hoặc theo sort hiện tại).
+- Hiển thị tổng ngày / tổng nhóm (nếu sẵn có) nhưng KHÔNG đổi công thức.
+- Cung cấp thao tác cơ bản nếu đã có: edit/delete expense (giữ như cũ). Nếu chưa có thì KHÔNG bắt buộc thêm.
+
+## 7) Khu “Thống kê nhanh”
+- Giữ nguyên các chỉ số hiện có, không đổi logic.
+- Trình bày lại:
+  - Nhóm theo block nhỏ, tránh dòng dài.
+  - Nếu text dài: wrap hợp lý + tooltip.
+  - Hiển thị số tiền align phải, label align trái.
+- Không dùng khoảng trắng thừa; ưu tiên dense layout.
+
+## 8) Không phá vỡ layout & responsive
+- Text:
+  - Không để chữ bị cắt “hard cut” gây khó hiểu. Dùng:
+    - line-clamp 1–2 dòng + tooltip full text
+    - hoặc wrap cho label, giữ số tiền 1 dòng
+- Spacing:
+  - Padding thống nhất (8/12/16px).
+  - Không có khoảng trắng dư gây xuống dòng lãng phí.
+- Chiều cao:
+  - Mục tiêu: toàn bộ 3 panel vừa trong viewport (trừ header chung).
+  - Các list có height: calc(100vh - header - paddings) và overflow:auto.
+
+## 9) Tiêu chí nghiệm thu (Acceptance Criteria)
+1) Desktop: 3 cột hiển thị trong 1 màn hình, không cuộn trang.
+2) Khi thêm item (manual hoặc add nhanh), “Danh sách chi tiêu” cập nhật ngay, không cần cuộn.
+3) “Item thêm nhanh” có CRUD:
+   - Thêm mới template (popup)
+   - Sửa template (popup)
+   - Chọn nhiều template và xoá (hiện “Xoá (n items)”)
+4) Không đổi công thức tài chính: số liệu thống kê và tính toán giữ nguyên.
+5) Không lỗi UI:
+   - Không text bị đè/cắt sai
+   - Không padding lệch
+   - Responsive ổn: desktop/tablet/mobile không vỡ layout
+6) List có thể cuộn nội bộ, trang không bị scroll (trừ màn hình quá nhỏ như mobile).
+
+============================================================
+PHẦN B — PROMPT THI CÔNG CHO “GPT 5.3 CODEX”
+============================================================
+
+Bạn là “GPT 5.3 codex”. Hãy thi công refactor UI/UX trang route `/expenses` theo spec sau, chỉ thay đổi UI/UX và thêm CRUD cho list “item thêm nhanh”, KHÔNG thay đổi công thức tài chính / logic tính toán hiện có.
+
+### 0) Yêu cầu chung
+- Dự án chạy ở localhost:5173 (Vite/React rất có thể). Không giả định framework khác; hãy đọc code hiện có để xác định.
+- Giữ nguyên data flow/tính toán thống kê hiện có: mọi hàm tính toán, selector, service liên quan tài chính không được sửa logic.
+- Chỉ refactor layout, component structure, styling, và thêm CRUD cho “quick templates”.
+- Không tạo scroll cho toàn trang (desktop). Chỉ list cuộn nội bộ.
+- Không để text overflow/đè/cắt sai; dùng CSS ellipsis/line-clamp/tooltip phù hợp.
+- Responsive chuẩn: desktop 3 cột; tablet/ mobile không vỡ.
+
+### 1) Layout 3 cột + collapsible
+- Chia màn hình thành 3 panel: `QuickStatsPanel`, `AddExpensePanel`, `ExpenseListPanel`.
+- Mỗi panel là 1 “CollapsibleCard”:
+  - header (title + toggle)
+  - body (content)
+  - collapsed state lưu localStorage theo key cố định (vd: `expenses.panel.stats.collapsed`, …)
+- Khi 1 panel collapsed, grid column tương ứng thu nhỏ; 2 panel còn lại giãn ra.
+
+### 2) AddExpensePanel: Quick Templates (list cuộn + CRUD)
+- Tạo component `QuickTemplateList`:
+  - search input (optional nhưng nên có)
+  - scrollable list
+  - mỗi row có:
+    - checkbox
+    - name + meta (category/bucket) + amount
+    - nút `>>` để add nhanh thành expense của ngày đang chọn (gọi đúng action hiện có để add expense)
+    - nút `Edit` mở RightDrawer `QuickTemplateEditorDrawer`
+  - bulk delete:
+    - khi selectedCount > 0: hiện action bar có nút “Xoá (n items)” và “Bỏ chọn”
+- CRUD:
+  - Create: nút “Thêm” mở drawer ở mode create
+  - Update: Edit mở drawer ở mode edit
+  - Delete: bulk delete
+- Lưu trữ templates:
+  - Ưu tiên dùng store/API hiện có nếu đã có endpoint/model.
+  - Nếu chưa có: tạo local persistence tối thiểu bằng localStorage (key `expenses.quickTemplates`) + migrate dữ liệu từ “Mẫu gần đây” nếu có.
+  - Tuyệt đối không ảnh hưởng tới expense items thật và các phép tính thống kê.
+
+### 3) AddExpensePanel: Form nhập tay + “Thêm & Lưu mẫu”
+- Giữ nguyên form fields và validation hiện có.
+- Bố trí lại gọn gàng (2 cột khi đủ rộng).
+- Nút:
+  - “Thêm” = add expense như cũ
+  - “Thêm & Lưu mẫu” = add expense + tạo/ghi template (theo fields vừa nhập)
+    - Sau khi lưu, template xuất hiện ngay trong QuickTemplateList.
+
+### 4) ExpenseListPanel: list cuộn
+- Hiển thị danh sách chi tiêu theo ngày chọn.
+- Khi add nhanh/manual, list cập nhật ngay.
+- Không đổi sorting/format nếu đang có quy tắc; chỉ làm UI gọn hơn nếu cần.
+
+### 5) QuickStatsPanel: giữ logic, cải thiện trình bày
+- Chỉ thay layout/typography:
+  - label trái, value phải
+  - nhóm thành các block, tránh xuống dòng dư
+  - tooltip cho text dài
+
+### 6) CSS/Styling & Quality bar
+- Không “vỡ layout”: test các trường hợp:
+  - tên template rất dài
+  - ghi chú dài
+  - số tiền lớn
+- Dùng CSS Grid/Flex chuẩn; hạn chế magic numbers.
+- Tất cả panel có min-width hợp lý; body list dùng `overflow:auto`.
+- Không tạo khoảng trắng dư (margins/paddings vừa phải).
+- Tối ưu chiều cao:
+  - wrapper dùng `height: calc(100vh - <headerHeight>)`
+  - list dùng `max-height`/`min-height` phù hợp và cuộn nội bộ.
+
+### 7) Output mong muốn (bắt buộc)
+- Commit-level thay đổi theo dạng:
+  - Tạo/sửa components rõ ràng
+  - Tách `CollapsibleCard`, `QuickTemplateList`, `QuickTemplateEditorDrawer`
+- Không phá build, không lỗi lint/types.
+- Nếu project có TypeScript: dùng type đầy đủ cho Template model.
+- Viết ít nhất 1–2 unit tests hoặc component tests nếu project đã có test setup (không bắt buộc nếu repo chưa có).
+
+### 8) Checklist trước khi kết thúc
+- [ ] Desktop không cần cuộn trang để thấy cả 3 khu
+- [ ] List “item thêm nhanh” CRUD hoạt động
+- [ ] Nút `>>` add nhanh vào danh sách chi tiêu hoạt động
+- [ ] “Thêm & Lưu mẫu” hoạt động
+- [ ] Không đổi công thức tài chính
+- [ ] Responsive không vỡ
+
+Hãy bắt đầu bằng việc đọc code hiện tại của route `/expenses`, xác định state management và nơi đang render:
+- quick stats
+- add expense form
+- expense list
+Sau đó refactor theo spec, đảm bảo backward compatible với logic hiện có.
