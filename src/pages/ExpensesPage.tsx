@@ -444,11 +444,12 @@ export default function ExpensesPage() {
     }
 
     const baseline = computeBudgetHealthWarnings(storeData, selectedDate)
+    const templateNote = template.note?.trim() ? template.note : template.name
     const newId = addExpense({
       amountVnd: template.amount,
       category: template.category,
       bucket: template.bucket === "NEEDS" ? "needs" : "wants",
-      note: template.note ?? "",
+      note: templateNote,
       date: selectedDate,
     })
 
@@ -457,6 +458,52 @@ export default function ExpensesPage() {
     scrollToExpense(newId)
     runBudgetHealthChecks(selectedDate, baseline)
     toast.success(`Đã thêm nhanh: ${template.name}.`)
+  }
+
+  const addSelectedTemplates = () => {
+    if (selectedTemplateIds.size === 0) return
+
+    const storeData = useAppStore.getState().data
+    const targetMonth = monthFromIsoDate(selectedDate)
+    if (isMonthLocked(storeData, targetMonth)) {
+      toast.error(`Tháng ${targetMonth} đã chốt báo cáo nên không thể thêm chi tiêu.`)
+      return
+    }
+
+    const selectedTemplates = sortedTemplates.filter((template) =>
+      selectedTemplateIds.has(template.id),
+    )
+    if (selectedTemplates.length === 0) return
+
+    const baseline = computeBudgetHealthWarnings(storeData, selectedDate)
+    const addedIds: string[] = []
+
+    selectedTemplates.forEach((template) => {
+      const templateNote = template.note?.trim() ? template.note : template.name
+      const id = addExpense({
+        amountVnd: template.amount,
+        category: template.category,
+        bucket: template.bucket === "NEEDS" ? "needs" : "wants",
+        note: templateNote,
+        date: selectedDate,
+      })
+      addedIds.push(id)
+    })
+
+    let nextTemplates = templates
+    selectedTemplates.forEach((template) => {
+      nextTemplates = touchExpenseTemplate(template.id)
+    })
+    setTemplates(nextTemplates)
+
+    const lastId = addedIds[addedIds.length - 1]
+    if (lastId) {
+      setHighlightExpenseId(lastId)
+      scrollToExpense(lastId)
+    }
+
+    runBudgetHealthChecks(selectedDate, baseline)
+    toast.success(`Đã thêm ${selectedTemplates.length} item vào danh sách chi tiêu.`)
   }
 
   const saveTemplateFromFormValues = (values: FormValues) => {
@@ -605,8 +652,18 @@ export default function ExpensesPage() {
 
   const panelStyle = (collapsed: boolean, weight: number) => {
     if (!isDesktop) return undefined
-    if (collapsed) return { flex: "0 0 72px", minWidth: "72px" }
-    return { flex: `${weight} 1 0%`, minWidth: "0" }
+    if (collapsed) {
+      return {
+        flex: "0 0 72px",
+        minWidth: "72px",
+        transition: "flex-basis 200ms ease, min-width 200ms ease",
+      }
+    }
+    return {
+      flex: `${weight} 1 0%`,
+      minWidth: "0",
+      transition: "flex-basis 200ms ease, min-width 200ms ease",
+    }
   }
 
   return (
@@ -673,7 +730,10 @@ export default function ExpensesPage() {
 
       <div className="flex-1 min-h-0 overflow-hidden">
         <div className="h-full flex flex-col gap-3 lg:flex-row">
-          <div style={panelStyle(statsCollapsed, 0.9)} className="min-h-0">
+          <div
+            style={panelStyle(statsCollapsed, 0.9)}
+            className="min-h-0 transition-[flex-basis,min-width,max-width] duration-200 ease-out lg:order-3"
+          >
             <CollapsibleCard
               title="Thống kê nhanh"
               icon={<ChartColumn className="h-4 w-4" />}
@@ -733,7 +793,10 @@ export default function ExpensesPage() {
             </CollapsibleCard>
           </div>
 
-          <div style={panelStyle(addCollapsed, 1.3)} className="min-h-0">
+          <div
+            style={panelStyle(addCollapsed, 1.3)}
+            className="min-h-0 transition-[flex-basis,min-width,max-width] duration-200 ease-out lg:order-1"
+          >
             <CollapsibleCard
               title="Thêm chi tiêu"
               icon={<PlusSquare className="h-4 w-4" />}
@@ -800,6 +863,7 @@ export default function ExpensesPage() {
                       })
                     }}
                     onClearSelection={() => setSelectedTemplateIds(new Set())}
+                    onBulkAddSelected={addSelectedTemplates}
                     onBulkDelete={() => setBulkDeleteTemplatesOpen(true)}
                     onQuickAdd={addExpenseFromTemplate}
                     onEdit={(template) => setTemplateEditor({ mode: "edit", templateId: template.id })}
@@ -815,7 +879,10 @@ export default function ExpensesPage() {
             </CollapsibleCard>
           </div>
 
-          <div style={panelStyle(listCollapsed, 1.1)} className="min-h-0">
+          <div
+            style={panelStyle(listCollapsed, 1.1)}
+            className="min-h-0 transition-[flex-basis,min-width,max-width] duration-200 ease-out lg:order-2"
+          >
             <CollapsibleCard
               title="Danh sách chi tiêu"
               icon={<ListChecks className="h-4 w-4" />}

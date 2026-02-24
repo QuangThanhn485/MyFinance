@@ -15,6 +15,7 @@ type QuickTemplateListProps = {
   onToggleSelect: (id: string, checked: boolean) => void
   onToggleSelectAllVisible: (checked: boolean) => void
   onClearSelection: () => void
+  onBulkAddSelected?: () => void
   onBulkDelete: () => void
   onQuickAdd: (template: ExpenseTemplate) => void
   onEdit: (template: ExpenseTemplate) => void
@@ -30,6 +31,7 @@ export default function QuickTemplateList({
   onToggleSelect,
   onToggleSelectAllVisible,
   onClearSelection,
+  onBulkAddSelected,
   onBulkDelete,
   onQuickAdd,
   onEdit,
@@ -81,6 +83,9 @@ export default function QuickTemplateList({
                 <Trash2 className="h-4 w-4" />
                 Xoá ({selectedCount})
               </Button>
+              <Button type="button" size="sm" onClick={onBulkAddSelected} disabled={!onBulkAddSelected}>
+                Thêm ({selectedCount})
+              </Button>
               <Button type="button" size="sm" variant="ghost" onClick={onClearSelection}>
                 Bỏ chọn
               </Button>
@@ -101,13 +106,29 @@ export default function QuickTemplateList({
               return (
                 <div
                   key={template.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={(event) => {
+                    const target = event.target as HTMLElement
+                    if (target.closest('[data-stop-select="true"]')) return
+                    onToggleSelect(template.id, !checked)
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter" && event.key !== " ") return
+                    const target = event.target as HTMLElement
+                    if (target.closest('[data-stop-select="true"]')) return
+                    event.preventDefault()
+                    onToggleSelect(template.id, !checked)
+                  }}
                   className={cn(
-                    "rounded-md border bg-background p-2.5",
+                    "rounded-md border bg-background p-2.5 cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                    !checked && "hover:border-muted-foreground/40",
                     checked && "border-primary/50 ring-1 ring-primary/25",
                   )}
                 >
                   <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-2">
                     <Checkbox
+                      data-stop-select="true"
                       checked={checked}
                       onCheckedChange={(value) => onToggleSelect(template.id, value === true)}
                       aria-label={`Chọn mẫu ${template.name}`}
@@ -140,17 +161,7 @@ export default function QuickTemplateList({
 
                     <div className="flex items-center gap-1">
                       <Button
-                        type="button"
-                        size="sm"
-                        variant="secondary"
-                        className="h-8 px-2 font-semibold"
-                        onClick={() => onQuickAdd(template)}
-                        aria-label={`Thêm nhanh từ mẫu ${template.name}`}
-                        title="Thêm nhanh vào danh sách chi tiêu"
-                      >
-                        &gt;&gt;
-                      </Button>
-                      <Button
+                        data-stop-select="true"
                         type="button"
                         size="icon"
                         variant="outline"
@@ -160,6 +171,18 @@ export default function QuickTemplateList({
                         title="Sửa mẫu"
                       >
                         <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        data-stop-select="true"
+                        type="button"
+                        size="icon"
+                        variant="secondary"
+                        className="h-8 w-8"
+                        onClick={() => onQuickAdd(template)}
+                        aria-label={`Thêm nhanh từ mẫu ${template.name}`}
+                        title="Thêm nhanh vào danh sách chi tiêu"
+                      >
+                        <Plus className="h-4 w-4" />
                       </Button>
                     </div>
                   </div>
