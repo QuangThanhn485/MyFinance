@@ -1,6 +1,7 @@
 import type { Expense, ExpenseCategory, ISODate, YearMonth } from "@/domain/types"
 import type { CttmState } from "@/storage/schema"
 import { EXPENSE_CATEGORIES } from "@/domain/constants"
+import { getEffectiveSettingsForMonth } from "@/domain/finance/monthLock"
 
 const ESSENTIAL_CATEGORIES: ReadonlySet<ExpenseCategory> = new Set([
   "Food",
@@ -36,6 +37,7 @@ export function getExpensesByMonth(
 
 export function getMonthTotals(state: CttmState, month: YearMonth) {
   const ids = state.indexes.expensesByMonth[month] ?? []
+  const settingsForMonth = getEffectiveSettingsForMonth(state, month)
 
   let variableNeeds = 0
   let variableWants = 0
@@ -53,9 +55,10 @@ export function getMonthTotals(state: CttmState, month: YearMonth) {
   for (const id of state.entities.fixedCosts.allIds) {
     const fc = state.entities.fixedCosts.byId[id]
     if (!fc || !fc.active) continue
+    if (fc.month !== month) continue
     fixedCostsTotal += fc.amountVnd
   }
-  fixedCostsTotal += Math.max(0, Math.trunc(state.settings.debtPaymentMonthlyVnd ?? 0))
+  fixedCostsTotal += Math.max(0, Math.trunc(settingsForMonth.debtPaymentMonthlyVnd ?? 0))
 
   return {
     fixedCostsTotal,
@@ -101,6 +104,7 @@ export function getMonthToDateTotals(state: CttmState, date: ISODate) {
 
 export function getCategoryTotals(state: CttmState, month: YearMonth) {
   const result: Record<string, number> = {}
+  const settingsForMonth = getEffectiveSettingsForMonth(state, month)
 
   for (const category of EXPENSE_CATEGORIES) {
     const key = `${month}|${category}`
@@ -116,9 +120,10 @@ export function getCategoryTotals(state: CttmState, month: YearMonth) {
   for (const id of state.entities.fixedCosts.allIds) {
     const fc = state.entities.fixedCosts.byId[id]
     if (!fc || !fc.active) continue
+    if (fc.month !== month) continue
     result[fc.category] = (result[fc.category] ?? 0) + fc.amountVnd
   }
-  const debtPaymentMonthlyVnd = Math.max(0, Math.trunc(state.settings.debtPaymentMonthlyVnd ?? 0))
+  const debtPaymentMonthlyVnd = Math.max(0, Math.trunc(settingsForMonth.debtPaymentMonthlyVnd ?? 0))
   if (debtPaymentMonthlyVnd > 0) {
     result.Bills = (result.Bills ?? 0) + debtPaymentMonthlyVnd
   }

@@ -43,6 +43,7 @@ export interface CttmState {
   updatedAt: string
   migrations: MigrationRecord[]
   settings: Settings
+  settingsByMonth: Record<string, Settings>
   entities: {
     expenses: EntityTable<Expense>
     fixedCosts: EntityTable<FixedCost>
@@ -70,6 +71,7 @@ export function createEmptyEntityTable<T>(): EntityTable<T> {
 export function createDefaultSettings(): Settings {
   return {
     monthlyIncomeVnd: 0,
+    extraIncomeMonthlyVnd: 0,
     paydayDayOfMonth: 1,
     debtPaymentMonthlyVnd: 0,
     budgetRule: { type: "50_30_20" },
@@ -87,6 +89,7 @@ export function createInitialState(nowIso: string): CttmState {
     updatedAt: nowIso,
     migrations: [],
     settings: createDefaultSettings(),
+    settingsByMonth: {},
     entities: {
       expenses: createEmptyEntityTable(),
       fixedCosts: createEmptyEntityTable(),

@@ -1,4 +1,5 @@
 import { rebuildExpenseIndexesFromEntities } from "@/storage/indexes"
+import type { FixedCost, Settings, YearMonth } from "@/domain/types"
 import {
   createInitialState,
   SCHEMA_VERSION,
@@ -35,6 +36,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
+function toYearMonthFromDateTime(dateLike: string, fallback: YearMonth): YearMonth {
+  const d = new Date(dateLike)
+  if (Number.isNaN(d.getTime())) return fallback
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, "0")
+  return `${year}-${month}` as YearMonth
+}
+
 function mergeEntityTable<T>(
   base: EntityTable<T>,
   incoming: unknown,
@@ -58,6 +67,7 @@ export function loadCttmState(): CttmState {
 export function loadCttmStateFromKey(storageKey: string): CttmState {
   const now = nowIso()
   const empty = createInitialState(now)
+  const fallbackMonth = toYearMonthFromDateTime(now, "2000-01")
 
   const raw = localStorage.getItem(storageKey)
   if (!raw) return empty
@@ -72,6 +82,32 @@ export function loadCttmStateFromKey(storageKey: string): CttmState {
 
   const state = parsed as Partial<CttmState>
 
+  const settingsByMonthRaw = isRecord((state as any).settingsByMonth)
+    ? ((state as any).settingsByMonth as Record<string, unknown>)
+    : {}
+
+  const normalizedSettingsByMonth: Record<string, Settings> = {}
+  for (const [month, value] of Object.entries(settingsByMonthRaw)) {
+    if (!isRecord(value)) continue
+    normalizedSettingsByMonth[month] = {
+      ...empty.settings,
+      ...(value as Partial<Settings>),
+    }
+  }
+
+  const monthLocksRaw = isRecord((state as any).monthLocksByMonth)
+    ? ((state as any).monthLocksByMonth as Record<string, unknown>)
+    : {}
+  const normalizedMonthLocks: CttmState["monthLocksByMonth"] = {}
+  for (const [month, value] of Object.entries(monthLocksRaw)) {
+    if (!isRecord(value)) continue
+    const settingsRaw = isRecord((value as any).settings) ? ((value as any).settings as Partial<Settings>) : {}
+    normalizedMonthLocks[month] = {
+      ...(value as any),
+      settings: { ...empty.settings, ...settingsRaw },
+    }
+  }
+
   const next: CttmState = {
     ...empty,
     ...state,
@@ -81,6 +117,7 @@ export function loadCttmStateFromKey(storageKey: string): CttmState {
     settings: isRecord(state.settings)
       ? { ...empty.settings, ...(state.settings as any) }
       : empty.settings,
+    settingsByMonth: normalizedSettingsByMonth,
     entities: {
       expenses: mergeEntityTable(empty.entities.expenses, state.entities?.expenses),
       fixedCosts: mergeEntityTable(
@@ -96,8 +133,18 @@ export function loadCttmStateFromKey(storageKey: string): CttmState {
       ? (state.budgetAdjustmentsByMonth as any)
       : {},
     capsByMonth: isRecord(state.capsByMonth) ? (state.capsByMonth as any) : {},
-    monthLocksByMonth: isRecord((state as any).monthLocksByMonth) ? ((state as any).monthLocksByMonth as any) : {},
+    monthLocksByMonth: normalizedMonthLocks,
     indexes: empty.indexes,
+  }
+
+  for (const id of next.entities.fixedCosts.allIds) {
+    const fc = next.entities.fixedCosts.byId[id] as FixedCost | undefined
+    if (!fc) continue
+    if (fc.month) continue
+    next.entities.fixedCosts.byId[id] = {
+      ...fc,
+      month: toYearMonthFromDateTime(fc.createdAt, fallbackMonth),
+    }
   }
 
   const idx = state.indexes

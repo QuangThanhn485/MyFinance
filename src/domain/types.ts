@@ -28,6 +28,7 @@ export interface Expense {
 
 export interface FixedCost {
   id: string
+  month: YearMonth
   name: string
   amountVnd: number
   category: ExpenseCategory
@@ -55,6 +56,7 @@ export type BudgetRule =
 
 export interface Settings {
   monthlyIncomeVnd: number
+  extraIncomeMonthlyVnd: number
   paydayDayOfMonth: number
   debtPaymentMonthlyVnd: number
   budgetRule: BudgetRule

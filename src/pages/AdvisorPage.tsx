@@ -49,6 +49,7 @@ import { dayOfMonthFromIsoDate, daysInMonth, monthFromIsoDate, todayIso } from "
 import { getMonthToDateTotals, getMonthTotals } from "@/selectors/expenses"
 import { cn } from "@/lib/utils"
 import { useAppStore } from "@/store/useAppStore"
+import { getEffectiveSettingsForMonth, getMonthlyIncomeTotalVnd } from "@/domain/finance/monthLock"
 
 export default function AdvisorPage() {
   const data = useAppStore((s) => s.data)
@@ -60,25 +61,26 @@ export default function AdvisorPage() {
   const today = todayIso()
   const month = monthFromIsoDate(today)
   const totals = getMonthTotals(data, month)
+  const settingsForMonth = getEffectiveSettingsForMonth(data, month)
   const toDateTotals = getMonthToDateTotals(data, today)
   const adjustment = data.budgetAdjustmentsByMonth[month] ?? null
   const budgets = computeBudgets({
-    incomeVnd: data.settings.monthlyIncomeVnd,
+    incomeVnd: getMonthlyIncomeTotalVnd(settingsForMonth),
     fixedCostsVnd: totals.fixedCostsTotal,
-    essentialVariableBaselineVnd: data.settings.essentialVariableBaselineVnd,
-    rule: data.settings.budgetRule,
+    essentialVariableBaselineVnd: settingsForMonth.essentialVariableBaselineVnd,
+    rule: settingsForMonth.budgetRule,
     adjustment,
-    customSavingsGoalVnd: data.settings.customSavingsGoalVnd,
+    customSavingsGoalVnd: settingsForMonth.customSavingsGoalVnd,
   })
   const savingsMin = budgets.savingsTargetVnd
   const MSS = computeMinimumSafetySavings(budgets.incomeVnd)
-  const actualSavingsBalanceVnd = data.settings.actualSavingsBalanceVnd ?? 0
+  const actualSavingsBalanceVnd = settingsForMonth.actualSavingsBalanceVnd ?? 0
   const flexibleEmergencyBorrowVnd = Math.max(0, actualSavingsBalanceVnd - MSS)
   const emergency = computeEmergencyFund({
     fixedCostsVnd: totals.fixedCostsTotal,
-    essentialVariableBaselineVnd: data.settings.essentialVariableBaselineVnd,
-    targetMonths: data.settings.emergencyFundTargetMonths,
-    currentBalanceVnd: data.settings.emergencyFundCurrentVnd,
+    essentialVariableBaselineVnd: settingsForMonth.essentialVariableBaselineVnd,
+    targetMonths: settingsForMonth.emergencyFundTargetMonths,
+    currentBalanceVnd: settingsForMonth.emergencyFundCurrentVnd,
   })
 
   const schema = z.object({
@@ -128,10 +130,10 @@ export default function AdvisorPage() {
       daysInMonth: daysInMonth(month),
       incomeVnd: budgets.incomeVnd,
       fixedCostsVnd: totals.fixedCostsTotal,
-      essentialVariableBaselineVnd: data.settings.essentialVariableBaselineVnd,
-      emergencyFundCurrentVnd: data.settings.emergencyFundCurrentVnd,
-      emergencyFundTargetMonths: data.settings.emergencyFundTargetMonths,
-      debtPaymentMonthlyVnd: data.settings.debtPaymentMonthlyVnd,
+      essentialVariableBaselineVnd: settingsForMonth.essentialVariableBaselineVnd,
+      emergencyFundCurrentVnd: settingsForMonth.emergencyFundCurrentVnd,
+      emergencyFundTargetMonths: settingsForMonth.emergencyFundTargetMonths,
+      debtPaymentMonthlyVnd: settingsForMonth.debtPaymentMonthlyVnd,
       budgets: {
         wantsBudgetVnd: budgets.wantsBudgetVnd,
         savingsTargetVnd: budgets.savingsTargetVnd,
@@ -161,13 +163,13 @@ export default function AdvisorPage() {
       context: {
         incomeVnd: budgets.incomeVnd,
         fixedCostsVnd: totals.fixedCostsTotal,
-        essentialVariableBaselineVnd: data.settings.essentialVariableBaselineVnd,
+        essentialVariableBaselineVnd: settingsForMonth.essentialVariableBaselineVnd,
         variableNeedsSpentVnd: toDateTotals.variableNeedsToDateVnd,
         variableWantsSpentVnd: toDateTotals.variableWantsToDateVnd,
         wantsBudgetVnd: budgets.wantsBudgetVnd,
         savingsBudgetVnd: budgets.savingsBudgetVnd,
         emergencyCoverageMonths: emergency.coverageMonths,
-        emergencyFundTargetMonths: data.settings.emergencyFundTargetMonths,
+        emergencyFundTargetMonths: settingsForMonth.emergencyFundTargetMonths,
       },
     })
     setResult(advisor)

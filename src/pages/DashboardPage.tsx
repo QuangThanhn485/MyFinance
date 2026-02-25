@@ -21,6 +21,7 @@ import { addDaysIsoDate, dayOfMonthFromIsoDate, daysInMonth, monthFromIsoDate, t
 import { getExpensesByDate, getMonthTotals } from "@/selectors/expenses"
 import { useAppStore } from "@/store/useAppStore"
 import { cn } from "@/lib/utils"
+import { getEffectiveCapsForMonth, getEffectiveSettingsForMonth, getMonthlyIncomeTotalVnd } from "@/domain/finance/monthLock"
 
 export default function DashboardPage() {
   const data = useAppStore((s) => s.data)
@@ -29,6 +30,7 @@ export default function DashboardPage() {
   const today = todayIso()
   const month = monthFromIsoDate(today)
   const totals = getMonthTotals(data, month)
+  const settingsForMonth = getEffectiveSettingsForMonth(data, month)
   const todayExpenses = getExpensesByDate(data, today)
   const todaySpent = todayExpenses.reduce((sum, ex) => sum + ex.amountVnd, 0)
 
@@ -40,12 +42,12 @@ export default function DashboardPage() {
 
   const adjustment = data.budgetAdjustmentsByMonth[month] ?? null
   const budgets = computeBudgets({
-    incomeVnd: data.settings.monthlyIncomeVnd,
+    incomeVnd: getMonthlyIncomeTotalVnd(settingsForMonth),
     fixedCostsVnd: totals.fixedCostsTotal,
-    essentialVariableBaselineVnd: data.settings.essentialVariableBaselineVnd,
-    rule: data.settings.budgetRule,
+    essentialVariableBaselineVnd: settingsForMonth.essentialVariableBaselineVnd,
+    rule: settingsForMonth.budgetRule,
     adjustment,
-    customSavingsGoalVnd: data.settings.customSavingsGoalVnd,
+    customSavingsGoalVnd: settingsForMonth.customSavingsGoalVnd,
   })
   const savingsMin = budgets.savingsTargetVnd
   const MSS = computeMinimumSafetySavings(budgets.incomeVnd)
@@ -61,14 +63,14 @@ export default function DashboardPage() {
   const recommendedDailyCap =
     daysRemaining > 0 ? Math.floor(Math.max(0, totalRemaining) / daysRemaining) : 0
 
-  const caps = data.capsByMonth[month]
+  const caps = getEffectiveCapsForMonth(data, month)
   const shownDailyCap = caps?.dailyTotalCapVnd ?? recommendedDailyCap
 
   const emergency = computeEmergencyFund({
     fixedCostsVnd: totals.fixedCostsTotal,
-    essentialVariableBaselineVnd: data.settings.essentialVariableBaselineVnd,
-    targetMonths: data.settings.emergencyFundTargetMonths,
-    currentBalanceVnd: data.settings.emergencyFundCurrentVnd,
+    essentialVariableBaselineVnd: settingsForMonth.essentialVariableBaselineVnd,
+    targetMonths: settingsForMonth.emergencyFundTargetMonths,
+    currentBalanceVnd: settingsForMonth.emergencyFundCurrentVnd,
   })
   const emergencyProgress =
     emergency.targetVnd > 0

@@ -14,6 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { computeBudgets } from "@/domain/finance/finance"
 import {
   getEffectiveBudgetAdjustmentForMonth,
+  getMonthlyIncomeTotalVnd,
   getEffectiveSettingsForMonth,
   isMonthLocked,
 } from "@/domain/finance/monthLock"
@@ -881,7 +882,7 @@ export default function BudgetsPage() {
   const adjustment = getEffectiveBudgetAdjustmentForMonth(data, month)
 
   const budgets = computeBudgets({
-    incomeVnd: settingsForMonth.monthlyIncomeVnd,
+    incomeVnd: getMonthlyIncomeTotalVnd(settingsForMonth),
     fixedCostsVnd: totals.fixedCostsTotal,
     essentialVariableBaselineVnd: settingsForMonth.essentialVariableBaselineVnd,
     rule: settingsForMonth.budgetRule,

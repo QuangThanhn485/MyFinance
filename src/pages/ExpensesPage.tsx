@@ -41,7 +41,12 @@ import {
 } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
 import { computeBudgets } from "@/domain/finance/finance"
-import { getEffectiveBudgetAdjustmentForMonth, getEffectiveSettingsForMonth, isMonthLocked } from "@/domain/finance/monthLock"
+import {
+  getEffectiveBudgetAdjustmentForMonth,
+  getEffectiveSettingsForMonth,
+  getMonthlyIncomeTotalVnd,
+  isMonthLocked,
+} from "@/domain/finance/monthLock"
 import {
   evaluateBudgetHealth,
   type BudgetHealthWarning,
@@ -244,7 +249,7 @@ export default function ExpensesPage() {
   const settingsForMonth = useMemo(() => getEffectiveSettingsForMonth(data, month), [data, month])
   const adjustment = useMemo(() => getEffectiveBudgetAdjustmentForMonth(data, month), [data, month])
   const budgets = computeBudgets({
-    incomeVnd: settingsForMonth.monthlyIncomeVnd,
+    incomeVnd: getMonthlyIncomeTotalVnd(settingsForMonth),
     fixedCostsVnd: monthTotals.fixedCostsTotal,
     essentialVariableBaselineVnd: settingsForMonth.essentialVariableBaselineVnd,
     rule: settingsForMonth.budgetRule,
@@ -338,7 +343,7 @@ export default function ExpensesPage() {
     const settingsForMonth = getEffectiveSettingsForMonth(state, month)
     const adjustment = getEffectiveBudgetAdjustmentForMonth(state, month)
     const budgets = computeBudgets({
-      incomeVnd: settingsForMonth.monthlyIncomeVnd,
+      incomeVnd: getMonthlyIncomeTotalVnd(settingsForMonth),
       fixedCostsVnd: totalsForBudget.fixedCostsTotal,
       essentialVariableBaselineVnd: settingsForMonth.essentialVariableBaselineVnd,
       rule: settingsForMonth.budgetRule,

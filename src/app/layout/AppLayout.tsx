@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { Outlet, useLocation } from "react-router-dom"
+import { Outlet } from "react-router-dom"
 import AppOverlays from "@/app/layout/AppOverlays"
 import SideNav from "@/app/layout/SideNav"
 import { Button } from "@/components/ui/button"
@@ -10,7 +10,6 @@ import { PanelLeftOpen } from "lucide-react"
 const SIDEBAR_COLLAPSED_KEY = "smartSpend.ui.sidebarCollapsed.v1"
 
 export default function AppLayout() {
-  const location = useLocation()
   const autoClose = useAppStore((s) => s.actions.autoClosePreviousMonthIfNeeded)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
@@ -31,20 +30,13 @@ export default function AppLayout() {
 
   useEffect(() => {
     autoClose()
+    const timer = window.setInterval(() => {
+      autoClose()
+    }, 60_000)
+    return () => window.clearInterval(timer)
   }, [autoClose])
 
-  const expensesFluid =
-    location.pathname === "/expenses" || location.pathname.startsWith("/expenses/")
-  const wideContainer =
-    location.pathname === "/reports" ||
-    location.pathname.startsWith("/reports/") ||
-    location.pathname === "/budgets" ||
-    location.pathname.startsWith("/budgets/")
-  const mainContainerClassName = expensesFluid
-    ? "flex-1 w-full px-3 sm:px-4 lg:px-6 py-4 sm:py-5"
-    : wideContainer
-      ? "flex-1 max-w-screen-2xl w-full mx-auto px-3 sm:px-4 lg:px-6 py-4 sm:py-6"
-      : "flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6"
+  const mainContainerClassName = "flex-1 w-full px-3 sm:px-4 lg:px-6 py-4 sm:py-6"
 
   return (
     <div className="min-h-dvh bg-background">

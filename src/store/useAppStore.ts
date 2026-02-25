@@ -1,4 +1,4 @@
-import { nanoid } from "nanoid"
+﻿import { nanoid } from "nanoid"
 import { create } from "zustand"
 import { subscribeWithSelector } from "zustand/middleware"
 import type {
@@ -27,6 +27,7 @@ import {
 } from "@/lib/date"
 import { formatVnd } from "@/lib/currency"
 import { getMonthTotals } from "@/selectors/expenses"
+import { getEffectiveSettingsForMonth, getMonthlyIncomeTotalVnd } from "@/domain/finance/monthLock"
 import {
   addExpenseToIndexes,
   rebuildExpenseIndexesFromEntities,
@@ -58,15 +59,17 @@ type Actions = {
   resetDemoAndSeed: () => void
 
   setSettings: (patch: Partial<Settings>) => void
+  setSettingsForMonth: (input: { month: YearMonth; patch: Partial<Settings> }) => void
 
   addFixedCost: (input: {
+    month: YearMonth
     name: string
     amountVnd: number
     category?: ExpenseCategory
   }) => string
   updateFixedCost: (
     id: string,
-    patch: Partial<Pick<FixedCost, "name" | "amountVnd" | "category" | "active">>,
+    patch: Partial<Pick<FixedCost, "month" | "name" | "amountVnd" | "category" | "active">>,
   ) => void
   deleteFixedCost: (id: string) => void
 
@@ -152,29 +155,94 @@ function cloneSettings(settings: Settings): Settings {
   }
 }
 
-function autoClosePreviousMonthIfNeeded(state: CttmState): CttmState {
+function ensureCurrentMonthConfigurationFromPrevious(state: CttmState): CttmState {
   const now = nowIso()
   const currentMonth = monthFromIsoDate(todayIso())
-  const target = previousMonth(currentMonth)
-  const alreadyClosed = !!state.monthLocksByMonth?.[target]
-  if (alreadyClosed) return state
+  const prevMonth = previousMonth(currentMonth)
+  const hasCurrentSettings = !!state.settingsByMonth[currentMonth]
+  const hasCurrentFixedCosts = state.entities.fixedCosts.allIds.some((fixedCostId) => {
+    const fixedCost = state.entities.fixedCosts.byId[fixedCostId]
+    return !!fixedCost && fixedCost.month === currentMonth
+  })
 
-  const snapshot = {
-    closedAt: now,
-    settings: cloneSettings(state.settings),
-    budgetAdjustment: state.budgetAdjustmentsByMonth[target] ?? null,
-    caps: state.capsByMonth[target] ?? null,
+  if (hasCurrentSettings) return state
+
+  // Tháng mới kế thừa cấu hình "hiệu lực" của tháng liền trước.
+  const inheritedSettings = cloneSettings(getEffectiveSettingsForMonth(state, prevMonth))
+  const nextSettingsByMonth = {
+    ...state.settingsByMonth,
+    [currentMonth]: inheritedSettings,
+  }
+
+  if (hasCurrentFixedCosts) {
+    return touch({
+      ...state,
+      settingsByMonth: nextSettingsByMonth,
+    })
+  }
+
+  let nextFixedCosts = state.entities.fixedCosts
+  const prevFixedCosts = state.entities.fixedCosts.allIds
+    .map((fixedCostId) => state.entities.fixedCosts.byId[fixedCostId])
+    .filter((fixedCost): fixedCost is FixedCost => !!fixedCost && fixedCost.month === prevMonth)
+
+  if (prevFixedCosts.length > 0) {
+    const cloned = prevFixedCosts.map((fixedCost) => {
+      const newId = id("fc_")
+      return {
+        ...fixedCost,
+        id: newId,
+        month: currentMonth,
+        createdAt: now,
+        updatedAt: now,
+      }
+    })
+
+    nextFixedCosts = {
+      byId: {
+        ...state.entities.fixedCosts.byId,
+        ...Object.fromEntries(cloned.map((fixedCost) => [fixedCost.id, fixedCost])),
+      },
+      allIds: [...state.entities.fixedCosts.allIds, ...cloned.map((fixedCost) => fixedCost.id)],
+    }
   }
 
   return touch({
     ...state,
-    monthLocksByMonth: { ...(state.monthLocksByMonth ?? {}), [target]: snapshot },
+    settingsByMonth: nextSettingsByMonth,
+    entities: {
+      ...state.entities,
+      fixedCosts: nextFixedCosts,
+    },
+  })
+}
+
+function autoClosePreviousMonthIfNeeded(state: CttmState): CttmState {
+  const nextState = ensureCurrentMonthConfigurationFromPrevious(state)
+  const now = nowIso()
+  const currentMonth = monthFromIsoDate(todayIso())
+  const target = previousMonth(currentMonth)
+  const alreadyClosed = !!nextState.monthLocksByMonth?.[target]
+  if (alreadyClosed) return nextState
+  const settingsForTarget = getEffectiveSettingsForMonth(nextState, target)
+
+  const snapshot = {
+    closedAt: now,
+    settings: cloneSettings(settingsForTarget),
+    budgetAdjustment: nextState.budgetAdjustmentsByMonth[target] ?? null,
+    caps: nextState.capsByMonth[target] ?? null,
+  }
+
+  return touch({
+    ...nextState,
+    monthLocksByMonth: { ...(nextState.monthLocksByMonth ?? {}), [target]: snapshot },
   })
 }
 
 function isDefaultSettings(settings: Settings): boolean {
   return (
     settings.monthlyIncomeVnd === 0 &&
+    (settings.extraIncomeMonthlyVnd ?? 0) === 0 &&
     settings.paydayDayOfMonth === 1 &&
     settings.debtPaymentMonthlyVnd === 0 &&
     settings.budgetRule?.type === "50_30_20" &&
@@ -191,6 +259,7 @@ function isSeedableEmptyState(state: CttmState): boolean {
     state.entities.expenses.allIds.length === 0 &&
     state.entities.fixedCosts.allIds.length === 0 &&
     state.entities.purchasePlans.allIds.length === 0 &&
+    Object.keys(state.settingsByMonth).length === 0 &&
     Object.keys(state.budgetAdjustmentsByMonth).length === 0 &&
     Object.keys(state.capsByMonth).length === 0 &&
     isDefaultSettings(state.settings)
@@ -205,6 +274,7 @@ function buildDemoSeedState(now: string): CttmState {
   base.settings = {
     ...base.settings,
     monthlyIncomeVnd: 15000000,
+    extraIncomeMonthlyVnd: 0,
     paydayDayOfMonth: 1,
     debtPaymentMonthlyVnd: 800000,
     budgetRule: { type: "50_30_20" },
@@ -217,7 +287,8 @@ function buildDemoSeedState(now: string): CttmState {
   const fixedCosts: FixedCost[] = [
     {
       id: id("fc_"),
-      name: "Tiền nhà",
+      month,
+      name: "Tiá»n nhÃ ",
       amountVnd: 5000000,
       category: "Bills",
       active: true,
@@ -226,7 +297,8 @@ function buildDemoSeedState(now: string): CttmState {
     },
     {
       id: id("fc_"),
-      name: "Điện/nước/internet",
+      month,
+      name: "Äiá»‡n/nÆ°á»›c/internet",
       amountVnd: 1200000,
       category: "Bills",
       active: true,
@@ -235,7 +307,8 @@ function buildDemoSeedState(now: string): CttmState {
     },
     {
       id: id("fc_"),
-      name: "Bảo hiểm",
+      month,
+      name: "Báº£o hiá»ƒm",
       amountVnd: 600000,
       category: "Bills",
       active: true,
@@ -253,35 +326,35 @@ function buildDemoSeedState(now: string): CttmState {
       amountVnd: 35000,
       category: "Food",
       bucket: "needs",
-      note: "Cà phê",
+      note: "CÃ  phÃª",
       date: today,
     },
     {
       amountVnd: 85000,
       category: "Food",
       bucket: "needs",
-      note: "Ăn trưa",
+      note: "Ä‚n trÆ°a",
       date: today,
     },
     {
       amountVnd: 25000,
       category: "Transport",
       bucket: "needs",
-      note: "Xe ôm",
+      note: "Xe Ã´m",
       date: addDaysIsoDate(today, -1),
     },
     {
       amountVnd: 120000,
       category: "Food",
       bucket: "needs",
-      note: "Ăn tối",
+      note: "Ä‚n tá»‘i",
       date: addDaysIsoDate(today, -1),
     },
     {
       amountVnd: 180000,
       category: "Shopping",
       bucket: "wants",
-      note: "Mua lặt vặt",
+      note: "Mua láº·t váº·t",
       date: addDaysIsoDate(today, -2),
     },
     {
@@ -295,14 +368,14 @@ function buildDemoSeedState(now: string): CttmState {
       amountVnd: 90000,
       category: "Health",
       bucket: "needs",
-      note: "Thuốc",
+      note: "Thuá»‘c",
       date: addDaysIsoDate(today, -4),
     },
     {
       amountVnd: 42000,
       category: "Food",
       bucket: "needs",
-      note: "Ăn sáng",
+      note: "Ä‚n sÃ¡ng",
       date: addDaysIsoDate(today, -5),
     },
   ]
@@ -320,6 +393,9 @@ function buildDemoSeedState(now: string): CttmState {
   }
 
   base.indexes = rebuildExpenseIndexesFromEntities(base.entities.expenses)
+  base.settingsByMonth = {
+    [month]: cloneSettings(base.settings),
+  }
   base.capsByMonth = {
     [month]: {
       month,
@@ -328,7 +404,7 @@ function buildDemoSeedState(now: string): CttmState {
       wantsFreezeUntil: null,
       appliedAt: now,
       source: "seed",
-      note: "Dữ liệu mẫu",
+      note: "Dá»¯ liá»‡u máº«u",
     },
   }
 
@@ -409,12 +485,40 @@ export const useAppStore = create<AppStore>()(
       setSettings: (patch) => {
         set((s) => ({ data: touch({ ...s.data, settings: { ...s.data.settings, ...patch } }) }))
       },
+      setSettingsForMonth: ({ month, patch }) => {
+        set((s) => {
+          const current = getEffectiveSettingsForMonth(s.data, month)
+          const nextSettings = { ...current, ...patch }
+          const existingLock = s.data.monthLocksByMonth[month]
+          const nextMonthLocks = existingLock
+            ? {
+                ...s.data.monthLocksByMonth,
+                [month]: {
+                  ...existingLock,
+                  settings: nextSettings,
+                },
+              }
+            : s.data.monthLocksByMonth
 
-      addFixedCost: ({ name, amountVnd, category }) => {
+          return {
+            data: touch({
+              ...s.data,
+              settingsByMonth: {
+                ...s.data.settingsByMonth,
+                [month]: nextSettings,
+              },
+              monthLocksByMonth: nextMonthLocks,
+            }),
+          }
+        })
+      },
+
+      addFixedCost: ({ month, name, amountVnd, category }) => {
         const newId = id("fc_")
         const now = nowIso()
         const fc: FixedCost = {
           id: newId,
+          month,
           name,
           amountVnd,
           category: category ?? "Bills",
@@ -502,19 +606,20 @@ export const useAppStore = create<AppStore>()(
         const month = monthFromIsoDate(date)
         const totals = getMonthTotals(state, month)
         const adjustment = state.budgetAdjustmentsByMonth[month] ?? null
+        const settingsForMonth = getEffectiveSettingsForMonth(state, month)
         const budgets = computeBudgets({
-          incomeVnd: state.settings.monthlyIncomeVnd,
+          incomeVnd: getMonthlyIncomeTotalVnd(settingsForMonth),
           fixedCostsVnd: totals.fixedCostsTotal,
-          essentialVariableBaselineVnd: state.settings.essentialVariableBaselineVnd,
-          rule: state.settings.budgetRule,
+          essentialVariableBaselineVnd: settingsForMonth.essentialVariableBaselineVnd,
+          rule: settingsForMonth.budgetRule,
           adjustment,
-          customSavingsGoalVnd: state.settings.customSavingsGoalVnd,
+          customSavingsGoalVnd: settingsForMonth.customSavingsGoalVnd,
         })
         const emergency = computeEmergencyFund({
           fixedCostsVnd: totals.fixedCostsTotal,
-          essentialVariableBaselineVnd: state.settings.essentialVariableBaselineVnd,
-          targetMonths: state.settings.emergencyFundTargetMonths,
-          currentBalanceVnd: state.settings.emergencyFundCurrentVnd,
+          essentialVariableBaselineVnd: settingsForMonth.essentialVariableBaselineVnd,
+          targetMonths: settingsForMonth.emergencyFundTargetMonths,
+          currentBalanceVnd: settingsForMonth.emergencyFundCurrentVnd,
         })
 
         const result = evaluateOverspending({
@@ -537,7 +642,7 @@ export const useAppStore = create<AppStore>()(
           emergency: {
             essentialMonthlyVnd: emergency.essentialMonthlyVnd,
             emergencyFundCurrentVnd: emergency.currentVnd,
-            emergencyFundTargetMonths: state.settings.emergencyFundTargetMonths,
+            emergencyFundTargetMonths: settingsForMonth.emergencyFundTargetMonths,
           },
         })
 
@@ -671,7 +776,7 @@ export const useAppStore = create<AppStore>()(
         const installment = option.actions.installmentSimulation
 
         if (!caps && !delta && !extraIncomeTargetVnd && !installment) {
-          return { ok: false as const, error: "Phương án này không có thay đổi để áp dụng." }
+          return { ok: false as const, error: "PhÆ°Æ¡ng Ã¡n nÃ y khÃ´ng cÃ³ thay Ä‘á»•i Ä‘á»ƒ Ã¡p dá»¥ng." }
         }
 
         set((s) => {
@@ -702,11 +807,11 @@ export const useAppStore = create<AppStore>()(
             const noteParts: string[] = []
             if (caps?.note) noteParts.push(caps.note)
             if (typeof extraIncomeTargetVnd === "number" && extraIncomeTargetVnd > 0) {
-              noteParts.push(`Mục tiêu tăng thu nhập: ${formatVnd(extraIncomeTargetVnd)}`)
+              noteParts.push(`Má»¥c tiÃªu tÄƒng thu nháº­p: ${formatVnd(extraIncomeTargetVnd)}`)
             }
             if (installment) {
               noteParts.push(
-                `Mô phỏng trả góp: ~${formatVnd(installment.monthlyInstallmentVnd)}/tháng trong ${installment.tenorMonths} tháng`,
+                `MÃ´ phá»ng tráº£ gÃ³p: ~${formatVnd(installment.monthlyInstallmentVnd)}/thÃ¡ng trong ${installment.tenorMonths} thÃ¡ng`,
               )
             }
 
@@ -716,13 +821,14 @@ export const useAppStore = create<AppStore>()(
             if (isCurrentMonth) {
               const totals = getMonthTotals(next, month)
               const adj = next.budgetAdjustmentsByMonth[month] ?? null
+              const settingsForMonth = getEffectiveSettingsForMonth(next, month)
                const b = computeBudgets({
-                 incomeVnd: next.settings.monthlyIncomeVnd,
+                 incomeVnd: getMonthlyIncomeTotalVnd(settingsForMonth),
                  fixedCostsVnd: totals.fixedCostsTotal,
-                 essentialVariableBaselineVnd: next.settings.essentialVariableBaselineVnd,
-                 rule: next.settings.budgetRule,
+                 essentialVariableBaselineVnd: settingsForMonth.essentialVariableBaselineVnd,
+                 rule: settingsForMonth.budgetRule,
                  adjustment: adj,
-                 customSavingsGoalVnd: next.settings.customSavingsGoalVnd,
+                 customSavingsGoalVnd: settingsForMonth.customSavingsGoalVnd,
                })
                const spendingBudgetVnd = Math.max(0, b.incomeVnd - b.savingsTargetVnd)
                const remainingVnd = spendingBudgetVnd - totals.totalSpent
@@ -761,7 +867,7 @@ export const useAppStore = create<AppStore>()(
                   null,
                 appliedAt: nowIso(),
                 source: option.id,
-                note: noteParts.length ? noteParts.join(" • ") : current?.note,
+                note: noteParts.length ? noteParts.join(" â€¢ ") : current?.note,
               },
             }
           }
@@ -789,14 +895,14 @@ export const useAppStore = create<AppStore>()(
         try {
           parsed = JSON.parse(raw)
         } catch {
-          return { ok: false as const, error: "JSON không hợp lệ." }
+          return { ok: false as const, error: "JSON khÃ´ng há»£p lá»‡." }
         }
         if (!parsed || typeof parsed !== "object") {
-          return { ok: false as const, error: "Dữ liệu import không hợp lệ." }
+          return { ok: false as const, error: "Dá»¯ liá»‡u import khÃ´ng há»£p lá»‡." }
         }
         const incoming = parsed as Partial<CttmState>
         if (incoming.schemaVersion !== 1) {
-          return { ok: false as const, error: "Sai schemaVersion (chỉ hỗ trợ v1)." }
+          return { ok: false as const, error: "Sai schemaVersion (chá»‰ há»— trá»£ v1)." }
         }
 
         writeLastBackup({
@@ -805,8 +911,17 @@ export const useAppStore = create<AppStore>()(
           data: get().data,
         })
 
+        const baseImportState = createInitialState(nowIso())
         const nextData: CttmState = {
+          ...baseImportState,
           ...(incoming as CttmState),
+          settings: {
+            ...baseImportState.settings,
+            ...((incoming as CttmState).settings ?? {}),
+          },
+          settingsByMonth: {
+            ...((incoming as CttmState).settingsByMonth ?? {}),
+          },
           indexes: rebuildExpenseIndexesFromEntities(
             (incoming as CttmState).entities.expenses,
           ),
@@ -848,3 +963,5 @@ useAppStore.subscribe(
   (s) => ({ workspace: s.workspace, data: s.data }),
   ({ workspace, data }) => debouncedSave(getStorageKeyForWorkspace(workspace), data),
 )
+
+

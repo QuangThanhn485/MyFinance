@@ -72,7 +72,11 @@ import MonthPicker from "@/components/MonthPicker"
 import { BUCKET_LABELS_VI, CATEGORY_LABELS_VI, EXPENSE_CATEGORIES } from "@/domain/constants"
 import { computeBudgets } from "@/domain/finance/finance"
 import { computeAdvancedInsights, type ClusterTier } from "@/domain/finance/insights"
-import { getEffectiveBudgetAdjustmentForMonth, getEffectiveSettingsForMonth } from "@/domain/finance/monthLock"
+import {
+  getEffectiveBudgetAdjustmentForMonth,
+  getEffectiveSettingsForMonth,
+  getMonthlyIncomeTotalVnd,
+} from "@/domain/finance/monthLock"
 import { formatVnd } from "@/lib/currency"
 import {
   dayOfMonthFromIsoDate,
@@ -873,7 +877,7 @@ export default function ReportsPage() {
     [data, month],
   )
   const budgets = computeBudgets({
-    incomeVnd: settingsForMonth.monthlyIncomeVnd,
+    incomeVnd: getMonthlyIncomeTotalVnd(settingsForMonth),
     fixedCostsVnd: totals.fixedCostsTotal,
     essentialVariableBaselineVnd: settingsForMonth.essentialVariableBaselineVnd,
     rule: settingsForMonth.budgetRule,
@@ -935,7 +939,7 @@ export default function ReportsPage() {
 
   const trendData = useMemo(() => {
     return trendMonths.map((m) => {
-      const I = getEffectiveSettingsForMonth(data, m).monthlyIncomeVnd
+      const I = getMonthlyIncomeTotalVnd(getEffectiveSettingsForMonth(data, m))
       const t = getMonthTotals(data, m)
       const balance = I - t.totalSpent
       return {

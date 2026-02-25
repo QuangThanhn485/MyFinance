@@ -14,6 +14,7 @@ import LabelValueRow from "@/components/LabelValueRow"
 import { formatVnd } from "@/lib/currency"
 import { cn } from "@/lib/utils"
 import { useAppStore } from "@/store/useAppStore"
+import { getEffectiveSettingsForMonth } from "@/domain/finance/monthLock"
 
 function SeverityBadge({ severity }: { severity: "nhẹ" | "trung bình" | "mạnh" }) {
   const variant =
@@ -24,14 +25,14 @@ function SeverityBadge({ severity }: { severity: "nhẹ" | "trung bình" | "mạ
 }
 
 export default function OverspendingModal() {
+  const data = useAppStore((s) => s.data)
   const overspending = useAppStore((s) => s.ui.overspending)
-  const actualSavingsBalanceVnd = useAppStore(
-    (s) => s.data.settings.actualSavingsBalanceVnd ?? 0,
-  )
   const applyRecoveryOption = useAppStore((s) => s.actions.applyRecoveryOption)
   const clearOverspending = useAppStore((s) => s.actions.clearOverspending)
 
   if (!overspending) return null
+  const settingsForMonth = getEffectiveSettingsForMonth(data, overspending.month)
+  const actualSavingsBalanceVnd = settingsForMonth.actualSavingsBalanceVnd ?? 0
 
   const recommended =
     overspending.options.find((o) => o.id === overspending.recommendedOptionId) ??
