@@ -1,12 +1,17 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { toast } from "sonner"
 import { CATEGORY_LABELS_VI, EXPENSE_CATEGORIES } from "@/domain/constants"
-import { computeBudgets, computeEmergencyFund, computeMinimumSafetySavings } from "@/domain/finance/finance"
+import {
+  computeBudgets,
+  computeEmergencyFund,
+  computeMinimumSafetySavings,
+} from "@/domain/finance/finance"
 import type { ExpenseCategory } from "@/domain/types"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import LabelValueRow from "@/components/LabelValueRow"
 import { Label } from "@/components/ui/label"
+import MoneyInput from "@/components/MoneyInput"
 import { Progress } from "@/components/ui/progress"
 import {
   Select,
@@ -15,13 +20,55 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import MoneyInput from "@/components/MoneyInput"
 import { formatVnd } from "@/lib/currency"
-import { addDaysIsoDate, dayOfMonthFromIsoDate, daysInMonth, monthFromIsoDate, todayIso } from "@/lib/date"
-import { getExpensesByDate, getMonthTotals } from "@/selectors/expenses"
-import { useAppStore } from "@/store/useAppStore"
+import {
+  addDaysIsoDate,
+  dayOfMonthFromIsoDate,
+  daysInMonth,
+  monthFromIsoDate,
+  todayIso,
+} from "@/lib/date"
 import { cn } from "@/lib/utils"
-import { getEffectiveCapsForMonth, getEffectiveSettingsForMonth, getMonthlyIncomeTotalVnd } from "@/domain/finance/monthLock"
+import {
+  getEffectiveCapsForMonth,
+  getEffectiveSettingsForMonth,
+  getMonthlyIncomeTotalVnd,
+} from "@/domain/finance/monthLock"
+import { getCategoryTotals, getExpensesByDate, getMonthTotals } from "@/selectors/expenses"
+import { useAppStore } from "@/store/useAppStore"
+
+function clampPct(value: number) {
+  if (!Number.isFinite(value)) return 0
+  return Math.max(0, Math.min(100, value))
+}
+
+function formatCoverageMonths(value: number) {
+  if (!Number.isFinite(value)) return "-"
+  return `${value.toFixed(1)} tháng`
+}
+
+type MetricCardProps = {
+  title: string
+  value: string
+  subValue?: string
+  danger?: boolean
+}
+
+function MetricCard({ title, value, subValue, danger = false }: MetricCardProps) {
+  return (
+    <Card>
+      <CardContent className="p-4">
+        <div className="space-y-1">
+          <div className="text-xs uppercase tracking-wide text-muted-foreground">{title}</div>
+          <div className={cn("text-xl font-semibold tabular-nums", danger && "text-destructive")}>
+            {value}
+          </div>
+          {subValue ? <div className="text-xs text-muted-foreground">{subValue}</div> : null}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
 
 export default function DashboardPage() {
   const data = useAppStore((s) => s.data)
@@ -36,7 +83,8 @@ export default function DashboardPage() {
 
   const weekDates = Array.from({ length: 7 }, (_, i) => addDaysIsoDate(today, -i))
   const weekSpent = weekDates.reduce(
-    (sum, date) => sum + getExpensesByDate(data, date).reduce((s2, ex) => s2 + ex.amountVnd, 0),
+    (sum, date) =>
+      sum + getExpensesByDate(data, date).reduce((innerSum, ex) => innerSum + ex.amountVnd, 0),
     0,
   )
 
@@ -49,20 +97,19 @@ export default function DashboardPage() {
     adjustment,
     customSavingsGoalVnd: settingsForMonth.customSavingsGoalVnd,
   })
+
   const savingsMin = budgets.savingsTargetVnd
   const MSS = computeMinimumSafetySavings(budgets.incomeVnd)
   const spendingBudgetVnd = Math.max(0, budgets.incomeVnd - savingsMin)
-
+  const totalRemaining = spendingBudgetVnd - totals.totalSpent
   const essentialRemaining = budgets.essentialVariableBaselineVnd - totals.variableNeeds
   const wantsRemaining = budgets.wantsBudgetVnd - totals.variableWants
-  const totalRemaining = spendingBudgetVnd - totals.totalSpent
 
   const dim = daysInMonth(month)
   const dom = dayOfMonthFromIsoDate(today)
   const daysRemaining = Math.max(0, dim - dom)
   const recommendedDailyCap =
     daysRemaining > 0 ? Math.floor(Math.max(0, totalRemaining) / daysRemaining) : 0
-
   const caps = getEffectiveCapsForMonth(data, month)
   const shownDailyCap = caps?.dailyTotalCapVnd ?? recommendedDailyCap
 
@@ -72,189 +119,254 @@ export default function DashboardPage() {
     targetMonths: settingsForMonth.emergencyFundTargetMonths,
     currentBalanceVnd: settingsForMonth.emergencyFundCurrentVnd,
   })
-  const emergencyProgress =
-    emergency.targetVnd > 0
-      ? Math.min(100, (emergency.currentVnd / emergency.targetVnd) * 100)
-      : 0
+  const emergencyProgress = clampPct(
+    emergency.targetVnd > 0 ? (emergency.currentVnd / emergency.targetVnd) * 100 : 0,
+  )
 
   const wantsFreezeActive =
     caps?.wantsFreezeUntil && today <= caps.wantsFreezeUntil ? true : false
+
+  const spendingProgress = clampPct(
+    spendingBudgetVnd > 0 ? (totals.totalSpent / spendingBudgetVnd) * 100 : 0,
+  )
+  const essentialProgress = clampPct(
+    budgets.essentialVariableBaselineVnd > 0
+      ? (totals.variableNeeds / budgets.essentialVariableBaselineVnd) * 100
+      : 0,
+  )
+  const wantsProgress = clampPct(
+    budgets.wantsBudgetVnd > 0 ? (totals.variableWants / budgets.wantsBudgetVnd) * 100 : 0,
+  )
+  const projectedSavingsNow = budgets.incomeVnd - totals.totalSpent
+
+  const categoryRows = useMemo(() => {
+    const categories = getCategoryTotals(data, month)
+    return Object.entries(categories)
+      .map(([category, amountVnd]) => ({
+        category,
+        amountVnd,
+      }))
+      .sort((a, b) => b.amountVnd - a.amountVnd)
+      .slice(0, 5)
+  }, [data, month])
+  const topCategoryMax = categoryRows[0]?.amountVnd ?? 0
 
   const [quickAmountVnd, setQuickAmountVnd] = useState(0)
   const [quickCategory, setQuickCategory] = useState<ExpenseCategory>("Food")
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Tổng quan</h1>
-        <p className="text-sm text-muted-foreground">
-          Theo dõi chi tiêu hôm nay, tháng này và giới hạn an toàn cho những ngày
-          còn lại.
-        </p>
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Tổng quan</h1>
+          <p className="text-sm text-muted-foreground">Tháng {month} • Theo dõi nhanh tình hình chi tiêu.</p>
+        </div>
+        <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm">
+          <span className="text-muted-foreground">MSS: </span>
+          <span className="font-semibold tabular-nums">{formatVnd(MSS)}</span>
+        </div>
       </div>
 
-      <div className="grid gap-4 sm:gap-6 md:grid-cols-2 xl:grid-cols-3">
-        <Card>
-          <CardHeader>
-            <CardTitle>Hôm nay</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-2 text-sm">
-              <LabelValueRow label="Đã chi hôm nay" value={formatVnd(todaySpent)} />
-              <LabelValueRow label="7 ngày gần nhất" value={formatVnd(weekSpent)} />
-            </div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+        <MetricCard title="Chi hôm nay" value={formatVnd(todaySpent)} />
+        <MetricCard title="7 ngày gần nhất" value={formatVnd(weekSpent)} />
+        <MetricCard title="Chi tháng đến nay" value={formatVnd(totals.totalSpent)} />
+        <MetricCard
+          title="Còn lại ngân sách chi"
+          value={formatVnd(totalRemaining)}
+          danger={totalRemaining < 0}
+        />
+        <MetricCard
+          title="Cap chi mỗi ngày"
+          value={formatVnd(shownDailyCap)}
+          subValue={`${daysRemaining} ngày còn lại`}
+        />
+        <MetricCard
+          title="Quỹ khẩn cấp phủ được"
+          value={formatCoverageMonths(emergency.coverageMonths)}
+          subValue={emergency.status}
+        />
+      </div>
 
-            <div className="space-y-3">
-              <div className="text-sm font-medium">Thêm nhanh</div>
-              <div className="grid gap-3">
-                <div className="grid gap-2">
-                  <Label>Số tiền (VND)</Label>
-                  <MoneyInput
-                    placeholder="Ví dụ: 35.000"
-                    value={quickAmountVnd}
-                    onValueChange={setQuickAmountVnd}
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label>Danh mục</Label>
-                  <Select
-                    value={quickCategory}
-                    onValueChange={(v) => setQuickCategory(v as ExpenseCategory)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Chọn danh mục" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {EXPENSE_CATEGORIES.map((c) => (
-                        <SelectItem key={c} value={c}>
-                          {CATEGORY_LABELS_VI[c]}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <Button
-                  onClick={() => {
-                    const amountVnd = quickAmountVnd
-                    if (amountVnd <= 0) {
-                      toast.error("Vui lòng nhập số tiền hợp lệ.")
-                      return
-                    }
-                    addExpense({
-                      amountVnd,
-                      category: quickCategory,
-                      date: today,
-                      note: "Hôm nay chi",
-                    })
-                    setQuickAmountVnd(0)
-                    toast.success("Đã ghi chi tiêu.")
-                  }}
-                >
-                  Hôm nay chi
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Tháng này</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-2 text-sm">
-              <LabelValueRow label="Đã chi (tháng đến nay)" value={formatVnd(totals.totalSpent)} />
-              <LabelValueRow label="Ngân sách chi (tháng)" value={formatVnd(spendingBudgetVnd)} />
+      <div className="grid gap-4 lg:grid-cols-12">
+        <div className="space-y-4 lg:col-span-7">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle>Tiến độ ngân sách tháng</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <LabelValueRow
+                label="Ngân sách chi tháng"
+                value={formatVnd(spendingBudgetVnd)}
+                valueClassName="font-semibold"
+              />
+              <LabelValueRow
+                label="Đã chi"
+                value={formatVnd(totals.totalSpent)}
+                valueClassName={cn(totals.totalSpent > spendingBudgetVnd && "text-destructive")}
+              />
               <LabelValueRow
                 label="Còn lại"
                 value={formatVnd(totalRemaining)}
                 valueClassName={cn(totalRemaining < 0 && "text-destructive")}
               />
-            </div>
-            <div className="rounded-md bg-muted p-3 text-sm space-y-2">
-              <LabelValueRow
-                label={`Cap chi tiêu/ngày (${daysRemaining} ngày còn lại)`}
-                labelTitle={`Cap chi tiêu/ngày (${daysRemaining} ngày còn lại)`}
-                value={formatVnd(shownDailyCap)}
-                valueClassName="text-base font-semibold"
-              />
-              {caps?.dailyTotalCapVnd != null ? (
-                <div className="text-xs text-muted-foreground">
-                  (đang áp dụng cap đã đặt)
+
+              <div className="space-y-1.5 pt-1">
+                <LabelValueRow
+                  label="Tổng chi / ngân sách"
+                  value={`${spendingProgress.toFixed(0)}%`}
+                  className="text-sm"
+                />
+                <Progress value={spendingProgress} />
+              </div>
+              <div className="space-y-1.5">
+                <LabelValueRow
+                  label="Thiết yếu biến đổi (E)"
+                  value={`${essentialProgress.toFixed(0)}%`}
+                  className="text-sm"
+                />
+                <Progress value={essentialProgress} />
+              </div>
+              <div className="space-y-1.5">
+                <LabelValueRow
+                  label="Mong muốn (W)"
+                  value={`${wantsProgress.toFixed(0)}%`}
+                  className="text-sm"
+                />
+                <Progress value={wantsProgress} />
+              </div>
+
+              <div className="grid gap-2 rounded-md border bg-muted/30 p-3 text-sm">
+                <LabelValueRow
+                  label="E còn lại"
+                  value={formatVnd(essentialRemaining)}
+                  valueClassName={cn(essentialRemaining < 0 && "text-destructive")}
+                />
+                <LabelValueRow
+                  label="W còn lại"
+                  value={formatVnd(wantsRemaining)}
+                  valueClassName={cn(wantsRemaining < 0 && "text-destructive")}
+                />
+                <LabelValueRow
+                  label="Tiết kiệm tạm tính"
+                  value={formatVnd(projectedSavingsNow)}
+                  valueClassName={cn(projectedSavingsNow < 0 && "text-destructive")}
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle>Danh mục chi nhiều nhất</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {categoryRows.length === 0 ? (
+                <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+                  Chưa có dữ liệu chi tiêu trong tháng.
                 </div>
-              ) : null}
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Quỹ khẩn cấp</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-2 text-sm">
+              ) : (
+                categoryRows.map((row) => {
+                  const width =
+                    topCategoryMax > 0 ? Math.max(6, (row.amountVnd / topCategoryMax) * 100) : 0
+                  const label =
+                    CATEGORY_LABELS_VI[row.category as ExpenseCategory] ?? row.category
+                  return (
+                    <div key={row.category} className="space-y-1.5">
+                      <LabelValueRow label={label} value={formatVnd(row.amountVnd)} className="text-sm" />
+                      <div className="h-2 rounded-full bg-secondary">
+                        <div
+                          className="h-full rounded-full bg-primary transition-all"
+                          style={{ width: `${Math.min(100, width)}%` }}
+                        />
+                      </div>
+                    </div>
+                  )
+                })
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="space-y-4 lg:col-span-5">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle>Ghi nhanh hôm nay</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid gap-2">
+                <Label>Số tiền (VND)</Label>
+                <MoneyInput
+                  placeholder="Ví dụ: 35.000"
+                  value={quickAmountVnd}
+                  onValueChange={setQuickAmountVnd}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label>Danh mục</Label>
+                <Select
+                  value={quickCategory}
+                  onValueChange={(value) => setQuickCategory(value as ExpenseCategory)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Chọn danh mục" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {EXPENSE_CATEGORIES.map((category) => (
+                      <SelectItem key={category} value={category}>
+                        {CATEGORY_LABELS_VI[category]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button
+                className="w-full"
+                onClick={() => {
+                  if (quickAmountVnd <= 0) {
+                    toast.error("Vui lòng nhập số tiền hợp lệ.")
+                    return
+                  }
+                  addExpense({
+                    amountVnd: quickAmountVnd,
+                    category: quickCategory,
+                    date: today,
+                    note: "Hôm nay chi",
+                  })
+                  setQuickAmountVnd(0)
+                  toast.success("Đã ghi chi tiêu.")
+                }}
+              >
+                Ghi chi tiêu
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle>Quỹ khẩn cấp & an toàn</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
               <LabelValueRow label="Hiện có" value={formatVnd(emergency.currentVnd)} />
               <LabelValueRow label="Mục tiêu" value={formatVnd(emergency.targetVnd)} />
               <LabelValueRow
                 label="Phủ được"
-                value={
-                  Number.isFinite(emergency.coverageMonths)
-                    ? `${emergency.coverageMonths.toFixed(1)} tháng`
-                    : "—"
-                }
+                value={formatCoverageMonths(emergency.coverageMonths)}
               />
-              <LabelValueRow label="Trạng thái" value={emergency.status} />
-            </div>
-            <Progress value={emergencyProgress} />
-          </CardContent>
-        </Card>
-      </div>
+              <Progress value={emergencyProgress} />
 
-      <div className="grid gap-4 sm:gap-6 md:grid-cols-2 xl:grid-cols-3">
-        <Card>
-          <CardHeader>
-            <CardTitle>Khung tháng này (F/E/W)</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="text-sm space-y-2">
-              <LabelValueRow
-                label="Cố định (F — đã ghi nhận đầu tháng)"
-                value={formatVnd(totals.fixedCostsTotal)}
-              />
-              <LabelValueRow
-                label="Thiết yếu biến đổi (E) còn lại"
-                value={formatVnd(essentialRemaining)}
-                valueClassName={cn(essentialRemaining < 0 && "text-destructive")}
-              />
-              <LabelValueRow
-                label="Mong muốn (W) còn lại"
-                value={formatVnd(wantsRemaining)}
-                valueClassName={cn(wantsRemaining < 0 && "text-destructive")}
-              />
-              {wantsFreezeActive ? (
-                <div className="text-xs text-destructive">
-                  Đang đóng băng Mong muốn đến {caps?.wantsFreezeUntil}
-                </div>
-              ) : null}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Nhắc nhanh</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm text-muted-foreground space-y-2">
-            <div>
-              Nếu cảm thấy “rò rỉ” (nhiều khoản nhỏ), hãy đặt cap Mong muốn/ngày và ưu tiên bữa ăn/di chuyển tối giản.
-            </div>
-            <LabelValueRow
-              className="text-sm"
-              label="MSS (tiết kiệm tối thiểu cần giữ)"
-              value={formatVnd(MSS)}
-              labelClassName="text-muted-foreground"
-              valueClassName="text-foreground"
-            />
-          </CardContent>
-        </Card>
+              <div className="rounded-md border bg-muted/30 p-3 text-sm">
+                {wantsFreezeActive ? (
+                  <div className="font-medium text-destructive">
+                    Đang đóng băng Mong muốn đến {caps?.wantsFreezeUntil}
+                  </div>
+                ) : (
+                  <div className="text-muted-foreground">Không có đóng băng Mong muốn.</div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   )

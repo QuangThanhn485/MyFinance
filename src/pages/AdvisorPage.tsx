@@ -149,13 +149,14 @@ export default function AdvisorPage() {
   }
 
   const runAdvisor = (
-    values: Pick<FormValues, "name" | "priceVnd" | "bucket" | "forced">,
+    values: Pick<FormValues, "name" | "priceVnd" | "bucket" | "forced" | "priority">,
   ) => {
     const purchase = {
       name: values.name.trim(),
       priceVnd: Math.trunc(values.priceVnd),
       bucket: values.bucket,
       forced: values.forced,
+      priority: values.priority,
     }
 
     const advisor = evaluatePurchaseAdvisor({
@@ -170,6 +171,8 @@ export default function AdvisorPage() {
         savingsBudgetVnd: budgets.savingsBudgetVnd,
         emergencyCoverageMonths: emergency.coverageMonths,
         emergencyFundTargetMonths: settingsForMonth.emergencyFundTargetMonths,
+        dayOfMonth: dayOfMonthFromIsoDate(today),
+        daysInMonth: daysInMonth(month),
       },
     })
     setResult(advisor)
@@ -410,6 +413,7 @@ export default function AdvisorPage() {
                             name: pp.name,
                             priceVnd: pp.priceVnd,
                             bucket: pp.bucket,
+                            priority: pp.priority,
                             forced: pp.forced,
                           })
                           toast.success("Đã áp dụng kế hoạch để phân tích.")
@@ -669,7 +673,48 @@ export default function AdvisorPage() {
                 {badgeLabel}
               </Badge>
              <div className="text-sm text-muted-foreground">{result.behaviorReminder}</div>
-            </div>
+             </div>
+
+             {!isNegligible ? (
+               <div className="rounded-md border bg-muted/20 p-3 text-sm space-y-2">
+                 <div className="grid gap-2 sm:grid-cols-3">
+                   <LabelValueRow
+                     label="Điểm rủi ro"
+                     value={`${result.decisionEngine.riskScore}/100`}
+                     valueClassName={cn(
+                       result.decisionEngine.riskScore >= 75
+                         ? "text-destructive"
+                         : result.decisionEngine.riskScore >= 55
+                           ? "text-amber-600"
+                           : "text-emerald-600",
+                     )}
+                   />
+                   <LabelValueRow
+                     label="Độ tin cậy"
+                     value={`${result.decisionEngine.confidencePct}%`}
+                   />
+                   <LabelValueRow
+                     label="Vượt nhịp"
+                     value={formatVnd(result.decisionEngine.pace.overspendVnd)}
+                     valueClassName={cn(
+                       result.decisionEngine.pace.overspendVnd >
+                         result.decisionEngine.pace.toleranceVnd && "text-amber-600",
+                     )}
+                   />
+                 </div>
+
+                 {result.decisionEngine.hardStops.length ? (
+                   <div className="rounded-md border border-destructive/40 bg-destructive/5 p-2.5">
+                     <div className="font-medium text-destructive">Điểm chặn quyết định</div>
+                     <ul className="mt-1 list-disc pl-5 text-muted-foreground">
+                       {result.decisionEngine.hardStops.map((stop) => (
+                         <li key={stop}>{stop}</li>
+                       ))}
+                     </ul>
+                   </div>
+                 ) : null}
+               </div>
+             ) : null}
 
              {isNegligible ? (
                <div className="space-y-3">

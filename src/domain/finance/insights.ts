@@ -14,6 +14,7 @@ export type ClusterTierSummary = {
 
 export type ClusterInsight = {
   tiers: ClusterTierSummary[]
+  sampleDays: number
   highDays: number[]
   highTotal: number
   highAvg: number
@@ -29,6 +30,7 @@ export type AssociationInsight = {
   lift: number
   days: number
   baseDays: number
+  sampleDays: number
 }
 
 export type TrendDirection = "up" | "down" | "flat"
@@ -47,6 +49,9 @@ export type AdvancedInsights = {
   activeDays: number
   zeroDays: number
   totalSpent: number
+  historicalActiveDays: number
+  historicalFrom: ISODate | null
+  historicalTo: ISODate | null
   cluster: ClusterInsight | null
   association: AssociationInsight | null
   trend: TrendInsight | null
@@ -64,6 +69,15 @@ type DayBucket = {
 const MIN_CLUSTER_DAYS = 7
 const MIN_ACTIVE_DAYS = 4
 const MIN_ASSOCIATION_DAYS = 6
+const MIN_ASSOCIATION_LIFT = 1.03
+
+function sanitizeInsightExpenses(expenses: Expense[], today: ISODate) {
+  return expenses.filter((expense) => {
+    if (!expense) return false
+    if (!Number.isFinite(expense.amountVnd) || expense.amountVnd <= 0) return false
+    return expense.date <= today
+  })
+}
 
 function mean(values: number[]) {
   if (values.length === 0) return 0
@@ -160,29 +174,73 @@ function buildDailyBuckets(
   return buckets
 }
 
+function buildHistoricalDailyBuckets(expenses: Expense[]) {
+  const byDate = new Map<ISODate, DayBucket>()
+  for (const expense of expenses) {
+    const date = expense.date
+    if (!byDate.has(date)) {
+      byDate.set(date, {
+        day: dayOfMonthFromIsoDate(date),
+        date,
+        weekday: parseIsoDateLocal(date).getDay(),
+        total: 0,
+        categories: new Set<ExpenseCategory>(),
+        categoryTotals: {} as Record<ExpenseCategory, number>,
+      })
+    }
+    const bucket = byDate.get(date)!
+    const amount = Number.isFinite(expense.amountVnd) ? expense.amountVnd : 0
+    bucket.total += amount
+    bucket.categories.add(expense.category)
+    bucket.categoryTotals[expense.category] =
+      (bucket.categoryTotals[expense.category] ?? 0) + amount
+  }
+
+  return Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date))
+}
+
 export function computeAdvancedInsights(input: {
   expenses: Expense[]
+  historyExpenses?: Expense[]
   month: YearMonth
   today: ISODate
 }): AdvancedInsights {
-  const buckets = buildDailyBuckets(input.expenses, input.month, input.today)
-  const totalDays = buckets.length
-  const allDailyTotals = buckets.map((b) => b.total)
+  const periodSourceExpenses = sanitizeInsightExpenses(input.expenses, input.today)
+  const historySourceExpenses = sanitizeInsightExpenses(
+    input.historyExpenses ?? input.expenses,
+    input.today,
+  )
+
+  const periodBuckets = buildDailyBuckets(periodSourceExpenses, input.month, input.today)
+  const historicalBuckets = buildHistoricalDailyBuckets(historySourceExpenses)
+
+  const totalDays = periodBuckets.length
+  const allDailyTotals = periodBuckets.map((b) => b.total)
   const totalSpent = allDailyTotals.reduce((sum, v) => sum + v, 0)
-  const activeBuckets = buckets.filter((b) => b.total > 0)
+  const activeBuckets = periodBuckets.filter((b) => b.total > 0)
   const activeDays = activeBuckets.length
   const zeroDays = Math.max(0, totalDays - activeDays)
-  const activeDailyTotals = activeBuckets.map((b) => b.total)
+
+  const historicalActiveBuckets = historicalBuckets.filter((b) => b.total > 0)
+  const historicalActiveDays = historicalActiveBuckets.length
+  const historicalFrom = historicalBuckets[0]?.date ?? null
+  const historicalTo = historicalBuckets[historicalBuckets.length - 1]?.date ?? null
+  const activeDailyTotals = historicalActiveBuckets.map((b) => b.total)
 
   let cluster: ClusterInsight | null = null
-  if (activeDays >= MIN_CLUSTER_DAYS && activeDays >= MIN_ACTIVE_DAYS) {
-    const { assignments } = kMeans1D(activeDailyTotals, 3)
+  if (
+    historicalActiveDays >= MIN_CLUSTER_DAYS &&
+    historicalActiveDays >= MIN_ACTIVE_DAYS
+  ) {
+    // Log-scale clustering is more stable on skewed spending distributions.
+    const clusteredTotals = activeDailyTotals.map((value) => Math.log1p(value))
+    const { assignments } = kMeans1D(clusteredTotals, 3)
     const CLUSTER_TIER_ORDER: readonly ClusterTier[] = ["low", "mid", "high"]
     const tiers: ClusterTierSummary[] = CLUSTER_TIER_ORDER.map((tier, idx) => {
-      const days = activeBuckets
+      const days = historicalActiveBuckets
         .map((b, dayIndex) => (assignments[dayIndex] === idx ? b.day : null))
         .filter((day): day is number => typeof day === "number")
-      const total = activeBuckets.reduce((sum, b, dayIndex) => {
+      const total = historicalActiveBuckets.reduce((sum, b, dayIndex) => {
         return assignments[dayIndex] === idx ? sum + b.total : sum
       }, 0)
       const count = days.length
@@ -190,7 +248,7 @@ export function computeAdvancedInsights(input: {
         tier,
         avg: count > 0 ? total / count : 0,
         count,
-        share: activeDays > 0 ? count / activeDays : 0,
+        share: historicalActiveDays > 0 ? count / historicalActiveDays : 0,
         total,
         days,
       }
@@ -203,7 +261,7 @@ export function computeAdvancedInsights(input: {
         number
       >
       const weekdayTotals: Record<number, { sum: number; count: number }> = {}
-      activeBuckets.forEach((bucket, index) => {
+      historicalActiveBuckets.forEach((bucket, index) => {
         if (assignments[index] !== CLUSTER_TIER_ORDER.indexOf("high")) return
         Object.entries(bucket.categoryTotals).forEach(([key, value]) => {
           const category = key as ExpenseCategory
@@ -235,6 +293,7 @@ export function computeAdvancedInsights(input: {
 
       cluster = {
         tiers,
+        sampleDays: historicalActiveDays,
         highDays: highTier.days,
         highTotal: highTier.total,
         highAvg: highTier.avg,
@@ -244,6 +303,7 @@ export function computeAdvancedInsights(input: {
     } else {
       cluster = {
         tiers,
+        sampleDays: historicalActiveDays,
         highDays: [],
         highTotal: 0,
         highAvg: 0,
@@ -254,8 +314,8 @@ export function computeAdvancedInsights(input: {
   }
 
   let association: AssociationInsight | null = null
-  if (activeDays >= MIN_ASSOCIATION_DAYS) {
-    const associationBuckets = buckets.filter((b) => b.categories.size > 0)
+  if (historicalActiveDays >= MIN_ASSOCIATION_DAYS) {
+    const associationBuckets = historicalBuckets.filter((b) => b.categories.size > 0)
     const total = associationBuckets.length
     const categoryCounts: Record<ExpenseCategory, number> = {} as Record<
       ExpenseCategory,
@@ -277,7 +337,9 @@ export function computeAdvancedInsights(input: {
       }
     }
 
-    const minPairDays = Math.max(2, Math.ceil(total * 0.2))
+    const minPairDays = Math.max(3, Math.min(24, Math.ceil(Math.sqrt(total))))
+    const minSupport = total >= 120 ? 0.025 : total >= 60 ? 0.03 : 0.04
+    const minConfidence = 0.3
     let best:
       | (AssociationInsight & { score: number })
       | null = null
@@ -297,7 +359,16 @@ export function computeAdvancedInsights(input: {
       const otherDays = confA >= confB ? countB : countA
       const support = count / total
       const lift = otherDays > 0 ? confidence / (otherDays / total) : 0
-      const score = lift * support
+      if (
+        support < minSupport ||
+        confidence < minConfidence ||
+        lift < MIN_ASSOCIATION_LIFT
+      ) {
+        continue
+      }
+      const unionDays = countA + countB - count
+      const jaccard = unionDays > 0 ? count / unionDays : 0
+      const score = (lift - 1) * confidence * Math.sqrt(support) * (0.6 + jaccard)
 
       if (!best || score > best.score) {
         best = {
@@ -308,6 +379,7 @@ export function computeAdvancedInsights(input: {
           lift,
           days: count,
           baseDays,
+          sampleDays: total,
           score,
         }
       }
@@ -322,6 +394,7 @@ export function computeAdvancedInsights(input: {
         lift: best.lift,
         days: best.days,
         baseDays: best.baseDays,
+        sampleDays: best.sampleDays,
       }
     }
   }
@@ -360,6 +433,9 @@ export function computeAdvancedInsights(input: {
     activeDays,
     zeroDays,
     totalSpent,
+    historicalActiveDays,
+    historicalFrom,
+    historicalTo,
     cluster,
     association,
     trend,

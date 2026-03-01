@@ -128,5 +128,27 @@ describe("evaluatePurchaseAdvisor", () => {
     expect(res.savingsPlan?.isFeasible).toBe(false)
     expect(res.savingsPlan?.warning).toBeTruthy()
   })
-})
 
+  it("uses pace + emergency hard-stop for risky wants purchases", () => {
+    const res = evaluatePurchaseAdvisor({
+      purchase: { name: "Gaming Console", priceVnd: 2_500_000, bucket: "wants", forced: false, priority: "low" },
+      context: {
+        incomeVnd: 12_000_000,
+        fixedCostsVnd: 5_500_000,
+        essentialVariableBaselineVnd: 3_000_000,
+        variableNeedsSpentVnd: 2_700_000,
+        variableWantsSpentVnd: 2_100_000,
+        wantsBudgetVnd: 1_500_000,
+        savingsBudgetVnd: 400_000,
+        emergencyCoverageMonths: 0.4,
+        emergencyFundTargetMonths: 3,
+        dayOfMonth: 8,
+        daysInMonth: 30,
+      },
+    })
+
+    expect(res.decisionEngine.hardStops.length).toBeGreaterThan(0)
+    expect(res.recommendation).toBe("KHÔNG NÊN")
+    expect(res.decisionEngine.riskScore).toBeGreaterThanOrEqual(78)
+  })
+})

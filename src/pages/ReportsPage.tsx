@@ -867,6 +867,13 @@ export default function ReportsPage() {
   const totals = useMemo(() => getMonthTotals(data, month), [data, month])
   const categories = useMemo(() => getCategoryTotals(data, month), [data, month])
   const expenses = useMemo(() => getExpensesByMonth(data, month), [data, month])
+  const allVariableExpenses = useMemo(
+    () =>
+      data.entities.expenses.allIds
+        .map((id) => data.entities.expenses.byId[id])
+        .filter((expense): expense is NonNullable<typeof expense> => !!expense),
+    [data.entities.expenses.allIds, data.entities.expenses.byId],
+  )
 
   const settingsForMonth = useMemo(
     () => getEffectiveSettingsForMonth(data, month),
@@ -986,8 +993,8 @@ export default function ReportsPage() {
   }, [expenses, month, today])
 
   const advancedInsights = useMemo(
-    () => computeAdvancedInsights({ expenses, month, today }),
-    [expenses, month, today],
+    () => computeAdvancedInsights({ expenses, historyExpenses: allVariableExpenses, month, today }),
+    [expenses, allVariableExpenses, month, today],
   )
   const trendMax = Math.max(
     advancedInsights.trend?.recentAvg ?? 0,
@@ -1632,8 +1639,19 @@ export default function ReportsPage() {
                   <Badge variant="outline">Chi biến đổi</Badge>
                 </div>
                 <div className="mt-1 text-[11px] text-muted-foreground">
-                  Kỳ phân tích = tháng đang chọn (đến hôm nay nếu là tháng hiện tại). Nhịp được tính trên các ngày có chi biến đổi.
+                  Nhịp được phân cụm trên toàn bộ lịch sử chi biến đổi để tăng độ ổn định theo thời gian.
                 </div>
+                {advancedInsights.historicalActiveDays > 0 ? (
+                  <div className="mt-1 text-[11px] text-muted-foreground">
+                    Mẫu lịch sử:{" "}
+                    <span className="font-medium text-foreground">
+                      {advancedInsights.historicalActiveDays} ngày có chi
+                    </span>
+                    {advancedInsights.historicalFrom && advancedInsights.historicalTo
+                      ? ` (${advancedInsights.historicalFrom} → ${advancedInsights.historicalTo})`
+                      : ""}
+                  </div>
+                ) : null}
                 {advancedInsights.zeroDays > 0 ? (
                   <div className="mt-1 text-[11px] text-muted-foreground">
                     Ngày không ghi chi biến đổi:{" "}
@@ -1665,7 +1683,7 @@ export default function ReportsPage() {
                                 className="text-[11px] text-muted-foreground text-right leading-tight"
                                 title="Số ngày trong kỳ phân tích thuộc nhịp này."
                               >
-                                {tier.count}/{advancedInsights.activeDays} ngày
+                                {tier.count}/{advancedInsights.cluster?.sampleDays ?? 0} ngày
                                 <span className="block">có chi</span>
                               </span>
                             </div>
@@ -1747,8 +1765,7 @@ export default function ReportsPage() {
                   </>
                 ) : (
                   <div className="mt-3 text-xs text-muted-foreground">
-                    Chưa đủ dữ liệu để phân cụm (cần tối thiểu 7 ngày trong tháng và
-                    4 ngày có chi).
+                    Chưa đủ dữ liệu để phân cụm (cần tối thiểu 7 ngày chi trong toàn bộ lịch sử).
                   </div>
                 )}
               </div>
@@ -1756,7 +1773,7 @@ export default function ReportsPage() {
               <div className="rounded-lg border bg-muted/20 p-4">
                 <div className="flex items-center justify-between gap-2">
                   <div className="text-sm font-semibold">Tổ hợp danh mục</div>
-                  <Badge variant="outline">Theo ngày</Badge>
+                  <Badge variant="outline">Theo ngày (toàn lịch sử)</Badge>
                 </div>
                 {advancedInsights.association ? (
                   <>
@@ -1769,6 +1786,12 @@ export default function ReportsPage() {
                       </div>
                     </div>
                     <div className="mt-3 grid gap-2">
+                      <LabelValueRow
+                        className="text-xs"
+                        label="Số ngày mẫu"
+                        labelTitle="Số ngày có chi dùng để tính tổ hợp"
+                        value={`${advancedInsights.association.sampleDays} ngày`}
+                      />
                       <LabelValueRow
                         className="text-xs"
                         label="Tần suất"
@@ -1791,7 +1814,7 @@ export default function ReportsPage() {
                   </>
                 ) : (
                   <div className="mt-3 text-xs text-muted-foreground">
-                    Chưa đủ dữ liệu để rút ra tổ hợp ổn định.
+                    Chưa đủ dữ liệu để rút ra tổ hợp ổn định trên lịch sử chi tiêu.
                   </div>
                 )}
               </div>
