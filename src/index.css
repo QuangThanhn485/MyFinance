@@ -32,6 +32,28 @@
     --chart-4: 0 84.2% 60.2%;
     --chart-5: 262.1 83.3% 57.8%;
     --chart-6: 199.4 89.5% 48%;
+
+    --pivot-series-7: 41 96% 42%;
+    --pivot-series-8: 171 77% 34%;
+    --pivot-series-9: 332 79% 43%;
+    --pivot-series-10: 84 84% 33%;
+    --pivot-series-11: 239 84% 60%;
+    --pivot-series-12: 345 83% 44%;
+    --pivot-series-13: 201 92% 38%;
+    --pivot-series-14: 268 83% 56%;
+    --pivot-series-15: 152 76% 36%;
+    --pivot-series-16: 25 95% 44%;
+
+    --pivot-heat-1-bg: 160 84% 39% / 0.22;
+    --pivot-heat-1-accent: 160 84% 39% / 0.84;
+    --pivot-heat-2-bg: 84 84% 45% / 0.22;
+    --pivot-heat-2-accent: 84 84% 45% / 0.82;
+    --pivot-heat-3-bg: 43 96% 49% / 0.24;
+    --pivot-heat-3-accent: 43 96% 49% / 0.84;
+    --pivot-heat-4-bg: 24 95% 53% / 0.26;
+    --pivot-heat-4-accent: 24 95% 53% / 0.86;
+    --pivot-heat-5-bg: 348 83% 57% / 0.28;
+    --pivot-heat-5-accent: 348 83% 57% / 0.88;
   }
 
   * {
@@ -70,6 +92,28 @@
   --chart-4: 0 84.2% 65%;
   --chart-5: 262.1 83.3% 67.8%;
   --chart-6: 199.4 89.5% 60%;
+
+  --pivot-series-7: 41 96% 56%;
+  --pivot-series-8: 171 70% 52%;
+  --pivot-series-9: 332 80% 62%;
+  --pivot-series-10: 84 78% 56%;
+  --pivot-series-11: 239 85% 71%;
+  --pivot-series-12: 345 80% 64%;
+  --pivot-series-13: 201 90% 63%;
+  --pivot-series-14: 268 85% 72%;
+  --pivot-series-15: 152 70% 58%;
+  --pivot-series-16: 25 92% 62%;
+
+  --pivot-heat-1-bg: 160 84% 39% / 0.34;
+  --pivot-heat-1-accent: 160 84% 39% / 0.98;
+  --pivot-heat-2-bg: 84 84% 45% / 0.34;
+  --pivot-heat-2-accent: 84 84% 45% / 0.98;
+  --pivot-heat-3-bg: 43 96% 49% / 0.36;
+  --pivot-heat-3-accent: 43 96% 49% / 0.98;
+  --pivot-heat-4-bg: 24 95% 53% / 0.38;
+  --pivot-heat-4-accent: 24 95% 53% / 0.98;
+  --pivot-heat-5-bg: 348 83% 57% / 0.42;
+  --pivot-heat-5-accent: 348 83% 57% / 0.99;
 }
 
 /* Recharts (SVG): prevent ugly black focus rectangle on mouse click.
@@ -93,4 +137,121 @@
 .recharts-wrapper svg *:focus-visible {
   outline: 2px solid hsl(var(--ring));
   outline-offset: 2px;
+}
+
+.recharts-cartesian-grid-horizontal line,
+.recharts-cartesian-grid-vertical line,
+.recharts-polar-grid line,
+.recharts-polar-grid-concentric circle {
+  stroke: hsl(var(--border));
+  stroke-opacity: 0.65;
+}
+
+.recharts-cartesian-axis-tick-value,
+.recharts-polar-angle-axis text,
+.recharts-polar-radius-axis text,
+.recharts-label {
+  fill: hsl(var(--muted-foreground));
+}
+
+.recharts-legend-item-text {
+  color: hsl(var(--foreground)) !important;
+  fill: hsl(var(--foreground)) !important;
+}
+
+.recharts-tooltip-wrapper .recharts-default-tooltip {
+  background: hsl(var(--popover)) !important;
+  border: 1px solid hsl(var(--border)) !important;
+  border-radius: 0.5rem !important;
+  color: hsl(var(--popover-foreground)) !important;
+  box-shadow: 0 8px 24px hsl(var(--foreground) / 0.14);
+}
+
+.recharts-tooltip-wrapper .recharts-tooltip-label,
+.recharts-tooltip-wrapper .recharts-tooltip-item {
+  color: hsl(var(--popover-foreground)) !important;
+}
+
+/* Flatpickr theme harmonized with app tokens for both light/dark. */
+.flatpickr-calendar {
+  background: hsl(var(--popover));
+  color: hsl(var(--popover-foreground));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  box-shadow: 0 12px 28px hsl(var(--foreground) / 0.12);
+}
+
+.flatpickr-months .flatpickr-month,
+.flatpickr-weekdays {
+  background: transparent;
+  color: hsl(var(--popover-foreground));
+}
+
+.flatpickr-current-month .cur-month,
+.flatpickr-current-month input.cur-year,
+.flatpickr-current-month .flatpickr-monthDropdown-months,
+span.flatpickr-weekday {
+  color: hsl(var(--popover-foreground));
+}
+
+.flatpickr-day {
+  color: hsl(var(--foreground));
+  border-radius: calc(var(--radius) - 4px);
+}
+
+.flatpickr-day:hover,
+.flatpickr-day:focus {
+  background: hsl(var(--muted));
+  border-color: hsl(var(--muted));
+}
+
+.flatpickr-day.today {
+  border-color: hsl(var(--primary));
+}
+
+.flatpickr-day.selected,
+.flatpickr-day.startRange,
+.flatpickr-day.endRange,
+.flatpickr-day.selected:hover,
+.flatpickr-day.startRange:hover,
+.flatpickr-day.endRange:hover {
+  background: hsl(var(--primary));
+  border-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+
+.flatpickr-day.flatpickr-disabled,
+.flatpickr-day.flatpickr-disabled:hover {
+  color: hsl(var(--muted-foreground));
+  opacity: 0.45;
+}
+
+.flatpickr-time input,
+.flatpickr-time .flatpickr-am-pm {
+  color: hsl(var(--foreground));
+}
+
+.flatpickr-time .numInputWrapper span.arrowUp:after {
+  border-bottom-color: hsl(var(--muted-foreground));
+}
+
+.flatpickr-time .numInputWrapper span.arrowDown:after {
+  border-top-color: hsl(var(--muted-foreground));
+}
+
+.flatpickr-monthSelect-month {
+  color: hsl(var(--foreground));
+  border-color: hsl(var(--border));
+}
+
+.flatpickr-monthSelect-month:hover,
+.flatpickr-monthSelect-month:focus {
+  background: hsl(var(--muted));
+  border-color: hsl(var(--border));
+}
+
+.flatpickr-monthSelect-month.selected {
+  background: hsl(var(--primary));
+  border-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
 }

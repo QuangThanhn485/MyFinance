@@ -113,23 +113,22 @@ const CHART_COLORS = [
 ]
 
 const PIVOT_SERIES_PALETTE = [
-  // High-contrast, mostly color-blind-friendly palette (avoid light yellows on white).
-  "#2563eb", // blue
-  "#16a34a", // green
-  "#dc2626", // red
-  "#7c3aed", // purple
-  "#0ea5e9", // sky
-  "#f97316", // orange
-  "#b45309", // amber (darker)
-  "#0f766e", // teal (darker)
-  "#db2777", // pink
-  "#4d7c0f", // lime (darker)
-  "#4f46e5", // indigo
-  "#be123c", // rose (darker)
-  "#0369a1", // blue-cyan (darker)
-  "#6d28d9", // violet (darker)
-  "#15803d", // green (darker)
-  "#c2410c", // burnt orange
+  "hsl(var(--chart-1))",
+  "hsl(var(--chart-2))",
+  "hsl(var(--chart-3))",
+  "hsl(var(--chart-4))",
+  "hsl(var(--chart-5))",
+  "hsl(var(--chart-6))",
+  "hsl(var(--pivot-series-7))",
+  "hsl(var(--pivot-series-8))",
+  "hsl(var(--pivot-series-9))",
+  "hsl(var(--pivot-series-10))",
+  "hsl(var(--pivot-series-11))",
+  "hsl(var(--pivot-series-12))",
+  "hsl(var(--pivot-series-13))",
+  "hsl(var(--pivot-series-14))",
+  "hsl(var(--pivot-series-15))",
+  "hsl(var(--pivot-series-16))",
 ]
 
 function pivotSeriesColor(index: number) {
@@ -137,9 +136,8 @@ function pivotSeriesColor(index: number) {
     return PIVOT_SERIES_PALETTE[index]
   }
   const hue = (index * 137.508 + 18) % 360
-  // Keep all generated colors sufficiently dark for white backgrounds.
-  const saturation = 72
-  const lightness = 45
+  const saturation = 76
+  const lightness = 56
   return `hsl(${hue.toFixed(1)} ${saturation}% ${lightness}%)`
 }
 
@@ -534,11 +532,11 @@ function pivotMoneyHeatmapStyle(
 ): CSSProperties | undefined {
   if (!(value > 0)) return undefined
   const palette = [
-    { bg: "rgba(16,185,129,0.22)", accent: "rgba(16,185,129,0.75)" }, // emerald
-    { bg: "rgba(132,204,22,0.22)", accent: "rgba(132,204,22,0.75)" }, // lime
-    { bg: "rgba(245,158,11,0.24)", accent: "rgba(245,158,11,0.78)" }, // amber
-    { bg: "rgba(249,115,22,0.26)", accent: "rgba(249,115,22,0.82)" }, // orange
-    { bg: "rgba(244,63,94,0.28)", accent: "rgba(244,63,94,0.82)" }, // rose
+    { bg: "hsl(var(--pivot-heat-1-bg))", accent: "hsl(var(--pivot-heat-1-accent))" },
+    { bg: "hsl(var(--pivot-heat-2-bg))", accent: "hsl(var(--pivot-heat-2-accent))" },
+    { bg: "hsl(var(--pivot-heat-3-bg))", accent: "hsl(var(--pivot-heat-3-accent))" },
+    { bg: "hsl(var(--pivot-heat-4-bg))", accent: "hsl(var(--pivot-heat-4-accent))" },
+    { bg: "hsl(var(--pivot-heat-5-bg))", accent: "hsl(var(--pivot-heat-5-accent))" },
   ]
 
   const bucketIndex = thresholds.reduce((acc, t) => (value > t ? acc + 1 : acc), 0)

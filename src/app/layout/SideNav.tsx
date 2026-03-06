@@ -14,6 +14,7 @@ import {
   Wallet,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import ThemeToggle from "@/components/ThemeToggle"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Separator } from "@/components/ui/separator"
 import { cn } from "@/lib/utils"
@@ -439,6 +440,12 @@ export default function SideNav({
           })}
         </div>
       </nav>
+
+      <Separator />
+
+      <div className={cn("py-2", collapsed ? "px-1.5" : "px-2.5")}>
+        <ThemeToggle compact={collapsed} />
+      </div>
 
       <Separator />
 

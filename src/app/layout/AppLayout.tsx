@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react"
 import { Outlet } from "react-router-dom"
+import { PanelLeftOpen } from "lucide-react"
 import AppOverlays from "@/app/layout/AppOverlays"
 import SideNav from "@/app/layout/SideNav"
+import ThemeToggle from "@/components/ThemeToggle"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { useAppStore } from "@/store/useAppStore"
-import { PanelLeftOpen } from "lucide-react"
 
 const SIDEBAR_COLLAPSED_KEY = "smartSpend.ui.sidebarCollapsed.v1"
 
@@ -54,13 +55,14 @@ export default function AppLayout() {
                 type="button"
                 variant="ghost"
                 size="icon"
-                aria-label="Mở menu"
+                aria-label="Open menu"
                 onClick={() => setMobileNavOpen(true)}
               >
                 <PanelLeftOpen className="h-5 w-5" />
               </Button>
-              <div className="font-semibold tracking-tight truncate">
-                Chi Tiêu Thông Minh
+              <div className="font-semibold tracking-tight truncate">Chi Tieu Thong Minh</div>
+              <div className="ml-auto">
+                <ThemeToggle compact />
               </div>
             </div>
           </header>
@@ -87,3 +89,4 @@ export default function AppLayout() {
     </div>
   )
 }
+

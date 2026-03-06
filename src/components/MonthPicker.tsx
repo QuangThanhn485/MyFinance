@@ -2,6 +2,7 @@ import Flatpickr from "react-flatpickr"
 import { CalendarIcon } from "lucide-react"
 import monthSelectPlugin from "flatpickr/dist/plugins/monthSelect"
 import { Vietnamese } from "flatpickr/dist/l10n/vn"
+import { useTheme } from "@/app/theme/ThemeProvider"
 import type { YearMonth } from "@/domain/types"
 import { cn } from "@/lib/utils"
 
@@ -26,11 +27,14 @@ function formatYearMonth(date: Date): YearMonth {
 
 export default function MonthPicker({ value, onChange, disabled, className }: MonthPickerProps) {
   const selected = parseYearMonthLocal(value)
+  const { resolvedTheme } = useTheme()
+  const monthSelectTheme = resolvedTheme === "dark" ? "dark" : "light"
 
   return (
     <div className="relative">
       <CalendarIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
       <Flatpickr
+        key={monthSelectTheme}
         value={selected}
         disabled={disabled}
         options={{
@@ -40,7 +44,7 @@ export default function MonthPicker({ value, onChange, disabled, className }: Mo
               shorthand: true,
               dateFormat: "m/Y",
               altFormat: "m/Y",
-              theme: "light",
+              theme: monthSelectTheme,
             }),
           ],
           allowInput: true,
@@ -61,4 +65,3 @@ export default function MonthPicker({ value, onChange, disabled, className }: Mo
     </div>
   )
 }
-
