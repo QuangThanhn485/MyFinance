@@ -3,7 +3,7 @@ import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { Controller, useForm } from "react-hook-form"
 import { toast } from "sonner"
-import { ChartColumn, Info, ListChecks, PlusSquare } from "lucide-react"
+import { ChartColumn, Info, ListChecks, Lock, LockOpen, PlusSquare } from "lucide-react"
 import { CATEGORY_LABELS_VI, BUCKET_LABELS_VI, EXPENSE_CATEGORIES, suggestBucketByCategory } from "@/domain/constants"
 import type { BudgetBucket, ExpenseCategory, ISODate } from "@/domain/types"
 import DatePicker from "@/components/DatePicker"
@@ -50,6 +50,7 @@ import {
 import {
   evaluateBudgetHealth,
   type BudgetHealthWarning,
+  type BudgetHealthWarningType,
 } from "@/domain/finance/budgetHealth"
 import { computePaceSurplus, computeRecoveryCaps, computeTodayCaps } from "@/domain/finance/dailySafeCap"
 import { Badge } from "@/components/ui/badge"
@@ -69,6 +70,13 @@ import {
   upsertExpenseTemplate,
   type ExpenseTemplate,
 } from "@/storage/templates"
+import {
+  isDayLocked,
+  loadDayLockMemory,
+  saveDayLockMemory,
+  setDayLocked,
+  type DayLockMemory,
+} from "@/storage/dayLock"
 import type { CttmState } from "@/storage/schema"
 import CollapsibleCard from "@/components/expenses/CollapsibleCard"
 import QuickTemplateList from "@/components/expenses/QuickTemplateList"
@@ -87,6 +95,79 @@ import {
 const STATS_COLLAPSED_KEY = "expenses.panel.stats.collapsed"
 const ADD_COLLAPSED_KEY = "expenses.panel.add.collapsed"
 const LIST_COLLAPSED_KEY = "expenses.panel.list.collapsed"
+const WARNING_POPUP_MEMORY_KEY = "expenses.warning.popup.memory.v2"
+
+type WarningPopupMemoryEntry = {
+  date: ISODate
+  severity: BudgetHealthWarning["severity"]
+  score: number
+}
+
+type WarningPopupMemory = Record<string, WarningPopupMemoryEntry>
+
+function loadWarningPopupMemory(): WarningPopupMemory {
+  if (typeof localStorage === "undefined") return {}
+  try {
+    const raw = localStorage.getItem(WARNING_POPUP_MEMORY_KEY)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw) as unknown
+    if (!parsed || typeof parsed !== "object") return {}
+    const next: WarningPopupMemory = {}
+    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!value || typeof value !== "object") continue
+      const item = value as Partial<WarningPopupMemoryEntry>
+      if (typeof item.date !== "string") continue
+      if (item.severity !== "warning" && item.severity !== "danger") continue
+      if (typeof item.score !== "number" || !Number.isFinite(item.score)) continue
+      next[key] = {
+        date: item.date as ISODate,
+        severity: item.severity,
+        score: Math.max(0, Math.round(item.score)),
+      }
+    }
+    return next
+  } catch {
+    return {}
+  }
+}
+
+function saveWarningPopupMemory(memory: WarningPopupMemory) {
+  if (typeof localStorage === "undefined") return
+  try {
+    localStorage.setItem(WARNING_POPUP_MEMORY_KEY, JSON.stringify(memory))
+  } catch {
+    // ignore
+  }
+}
+
+function warningMemoryKey(month: string, type: BudgetHealthWarningType) {
+  return `${month}:${type}`
+}
+
+function warningSeverityRank(severity: BudgetHealthWarning["severity"]) {
+  return severity === "danger" ? 2 : 1
+}
+
+function warningScore(warning: BudgetHealthWarning) {
+  if (warning.type === "PACE_VARIABLE" || warning.type === "PACE_WANTS") {
+    return Math.max(0, Math.round(warning.details.overspendVnd ?? 0))
+  }
+  if (warning.type === "ESSENTIAL_SAFETY_CAP") {
+    const dailyBaseline = Math.max(0, Math.round(warning.details.essentialDailyBaselineVnd ?? 0))
+    const dailyCap = Math.max(0, Math.round(warning.details.remainingEssentialDailyCapVnd ?? 0))
+    return Math.max(0, dailyBaseline - dailyCap)
+  }
+  return 0
+}
+
+function warningDeltaThreshold(warning: BudgetHealthWarning) {
+  if (warning.type === "ESSENTIAL_SAFETY_CAP") {
+    const dailyBaseline = Math.max(0, Math.round(warning.details.essentialDailyBaselineVnd ?? 0))
+    return Math.max(20_000, Math.round(dailyBaseline * 0.2))
+  }
+  const tolerance = Math.max(0, Math.round(warning.details.toleranceVnd ?? 0))
+  return Math.max(30_000, tolerance)
+}
 
 function readCollapsedState(key: string, fallback = false) {
   if (typeof localStorage === "undefined") return fallback
@@ -123,6 +204,13 @@ export default function ExpensesPage() {
   const [healthWarnings, setHealthWarnings] = useState<BudgetHealthWarning[]>([])
   const [healthDialogOpen, setHealthDialogOpen] = useState(false)
   const [healthWarningsDate, setHealthWarningsDate] = useState<ISODate | null>(null)
+  const [warningPopupMemory, setWarningPopupMemory] = useState<WarningPopupMemory>(
+    () => loadWarningPopupMemory(),
+  )
+  const [dayLockMemory, setDayLockMemory] = useState<DayLockMemory>(() =>
+    loadDayLockMemory(),
+  )
+  const warningPopupMemoryRef = useRef<WarningPopupMemory>(warningPopupMemory)
   const [lastAppliedTemplateId, setLastAppliedTemplateId] = useState<string | null>(
     null,
   )
@@ -155,6 +243,15 @@ export default function ExpensesPage() {
     LIST_COLLAPSED_KEY,
     false,
   )
+
+  useEffect(() => {
+    warningPopupMemoryRef.current = warningPopupMemory
+    saveWarningPopupMemory(warningPopupMemory)
+  }, [warningPopupMemory])
+
+  useEffect(() => {
+    saveDayLockMemory(dayLockMemory)
+  }, [dayLockMemory])
 
   const rootRef = useRef<HTMLDivElement | null>(null)
   const listScrollRef = useRef<HTMLDivElement | null>(null)
@@ -203,7 +300,14 @@ export default function ExpensesPage() {
   const month = monthFromIsoDate(selectedDate)
   const dom = dayOfMonthFromIsoDate(selectedDate)
   const dim = daysInMonth(month)
+  const currentMonth = monthFromIsoDate(todayIso())
+  const selectedMonthPast = month < currentMonth
   const selectedMonthLocked = isMonthLocked(data, month)
+  const selectedDateLocked = !selectedMonthPast && isDayLocked(selectedDate, dayLockMemory)
+  const showDayLockActions = !selectedMonthPast && !selectedMonthLocked
+  const selectedDateReadOnly = selectedMonthLocked || selectedDateLocked
+  const capComputationDay = selectedDateLocked ? Math.min(dim, dom + 1) : dom
+  const capLabelSuffix = selectedDateLocked ? "ngày kế tiếp" : "hôm nay"
   const monthTotals = getMonthTotals(data, month)
   const monthToDateTotals = useMemo(
     () => getMonthToDateTotals(data, selectedDate),
@@ -265,28 +369,30 @@ export default function ExpensesPage() {
     (sum, ex) => sum + (ex.bucket === "wants" ? ex.amountVnd : 0),
     0,
   )
+  const capNeedsSpentTodayVnd = selectedDateLocked ? 0 : needsSpentTodayVnd
+  const capWantsSpentTodayVnd = selectedDateLocked ? 0 : wantsSpentTodayVnd
 
   const todayCaps = computeTodayCaps({
     daysInMonth: dim,
     essentialBaselineMonthlyVnd: budgets.essentialVariableBaselineVnd,
     wantsBudgetMonthlyVnd: budgets.wantsBudgetVnd,
-    needsSpentTodayVnd,
-    wantsSpentTodayVnd,
+    needsSpentTodayVnd: capNeedsSpentTodayVnd,
+    wantsSpentTodayVnd: capWantsSpentTodayVnd,
   })
 
   const recoveryCaps = computeRecoveryCaps({
-    dayOfMonth: dom,
+    dayOfMonth: capComputationDay,
     daysInMonth: dim,
     plannedMonthlyNeedsVariableVnd: budgets.essentialVariableBaselineVnd,
     plannedMonthlyWantsVnd: budgets.wantsBudgetVnd,
     actualNeedsToDateVnd: monthToDateTotals.variableNeedsToDateVnd,
     actualWantsToDateVnd: monthToDateTotals.variableWantsToDateVnd,
-    needsSpentTodayVnd,
-    wantsSpentTodayVnd,
+    needsSpentTodayVnd: capNeedsSpentTodayVnd,
+    wantsSpentTodayVnd: capWantsSpentTodayVnd,
   })
 
   const paceSurplus = computePaceSurplus({
-    dayOfMonth: dom,
+    dayOfMonth: capComputationDay,
     daysInMonth: dim,
     plannedMonthlyNeedsVariableVnd: budgets.essentialVariableBaselineVnd,
     plannedMonthlyWantsVnd: budgets.wantsBudgetVnd,
@@ -325,10 +431,11 @@ export default function ExpensesPage() {
     return () => window.clearTimeout(timer)
   }, [addExpenseDialogOpen, form])
 
-  const formMonthLocked = isMonthLocked(
-    data,
-    monthFromIsoDate(form.watch("date") as unknown as ISODate),
-  )
+  const formDate = form.watch("date") as unknown as ISODate
+  const formDateMonth = monthFromIsoDate(formDate)
+  const formMonthLocked = isMonthLocked(data, formDateMonth)
+  const formDateLocked = isDayLocked(formDate, dayLockMemory)
+  const formDateReadOnly = formMonthLocked || formDateLocked
 
   const [editingId, setEditingId] = useState<string | null>(null)
 
@@ -375,12 +482,29 @@ export default function ExpensesPage() {
   ) => {
     const store = useAppStore.getState()
     const warnings = computeBudgetHealthWarnings(store.data, date)
+    const month = monthFromIsoDate(date)
+    const popupMemory = warningPopupMemoryRef.current
 
     setHealthWarnings(warnings)
     setHealthWarningsDate(date)
 
     if (warnings.length === 0) {
       setHealthDialogOpen(false)
+      setWarningPopupMemory((prev) => {
+        const prefix = `${month}:`
+        const next: WarningPopupMemory = { ...prev }
+        let changed = false
+        for (const key of Object.keys(next)) {
+          if (!key.startsWith(prefix)) continue
+          delete next[key]
+          changed = true
+        }
+        if (changed) {
+          warningPopupMemoryRef.current = next
+          return next
+        }
+        return prev
+      })
       return
     }
 
@@ -389,18 +513,93 @@ export default function ExpensesPage() {
       return
     }
 
-    const baselineByType = new Map(
-      (baselineWarnings ?? []).map((w) => [w.type, w.severity] as const),
+    const baselineByTypeFull = new Map(
+      (baselineWarnings ?? []).map((w) => [w.type, w] as const),
     )
-    const severityRank = (s: BudgetHealthWarning["severity"]) =>
-      s === "danger" ? 2 : 1
-    const hasNewWarning = warnings.some((w) => {
-      const prev = baselineByType.get(w.type)
-      if (!prev) return true
-      return severityRank(w.severity) > severityRank(prev)
+    const activeTypeSet = new Set(warnings.map((w) => w.type))
+    const triggeredTypes = new Set<BudgetHealthWarningType>()
+
+    warnings.forEach((warning) => {
+      const baseline = baselineByTypeFull.get(warning.type)
+      const currentSeverity = warningSeverityRank(warning.severity)
+      const baselineSeverity = baseline ? warningSeverityRank(baseline.severity) : 0
+      const currentScore = warningScore(warning)
+      const baselineScore = baseline ? warningScore(baseline) : 0
+      const grewFromThisAction = currentScore - baselineScore
+      const deltaThreshold = warningDeltaThreshold(warning)
+
+      const becameWorseNow =
+        !baseline ||
+        currentSeverity > baselineSeverity ||
+        grewFromThisAction >= deltaThreshold
+
+      if (!becameWorseNow) return
+
+      const memory = popupMemory[warningMemoryKey(month, warning.type)]
+      if (!memory) {
+        triggeredTypes.add(warning.type)
+        return
+      }
+
+      if (currentSeverity > warningSeverityRank(memory.severity)) {
+        triggeredTypes.add(warning.type)
+        return
+      }
+
+      const rearmThreshold = Math.max(
+        deltaThreshold,
+        Math.round(Math.max(memory.score, baselineScore) * 0.15),
+      )
+      if (currentScore >= memory.score + rearmThreshold) {
+        triggeredTypes.add(warning.type)
+      }
     })
 
+    const hasNewWarning = triggeredTypes.size > 0
     setHealthDialogOpen(hasNewWarning)
+
+    setWarningPopupMemory((prev) => {
+      const next: WarningPopupMemory = { ...prev }
+      const prefix = `${month}:`
+      let changed = false
+
+      for (const key of Object.keys(next)) {
+        if (!key.startsWith(prefix)) continue
+        const type = key.slice(prefix.length) as BudgetHealthWarningType
+        if (!activeTypeSet.has(type)) {
+          delete next[key]
+          changed = true
+        }
+      }
+
+      if (hasNewWarning) {
+        warnings.forEach((warning) => {
+          if (!triggeredTypes.has(warning.type)) return
+          const key = warningMemoryKey(month, warning.type)
+          const nextValue: WarningPopupMemoryEntry = {
+            date,
+            severity: warning.severity,
+            score: warningScore(warning),
+          }
+          const prevValue = next[key]
+          if (
+            !prevValue ||
+            prevValue.date !== nextValue.date ||
+            prevValue.severity !== nextValue.severity ||
+            prevValue.score !== nextValue.score
+          ) {
+            next[key] = nextValue
+            changed = true
+          }
+        })
+      }
+
+      if (changed) {
+        warningPopupMemoryRef.current = next
+        return next
+      }
+      return prev
+    })
   }
 
   const editForm = useForm<FormValues>({
@@ -447,6 +646,10 @@ export default function ExpensesPage() {
       toast.error(`Tháng ${targetMonth} đã chốt báo cáo nên không thể thêm chi tiêu.`)
       return
     }
+    if (isDayLocked(selectedDate, dayLockMemory)) {
+      toast.error(`Ngày ${selectedDate} đã khoá. Mở khoá để thêm hoặc sửa dữ liệu.`)
+      return
+    }
 
     const baseline = computeBudgetHealthWarnings(storeData, selectedDate)
     const templateNote = template.note?.trim() ? template.note : template.name
@@ -472,6 +675,10 @@ export default function ExpensesPage() {
     const targetMonth = monthFromIsoDate(selectedDate)
     if (isMonthLocked(storeData, targetMonth)) {
       toast.error(`Tháng ${targetMonth} đã chốt báo cáo nên không thể thêm chi tiêu.`)
+      return
+    }
+    if (isDayLocked(selectedDate, dayLockMemory)) {
+      toast.error(`Ngày ${selectedDate} đã khoá. Mở khoá để thêm hoặc sửa dữ liệu.`)
       return
     }
 
@@ -536,6 +743,10 @@ export default function ExpensesPage() {
       const targetMonth = monthFromIsoDate(values.date)
       if (isMonthLocked(storeData, targetMonth)) {
         toast.error(`Tháng ${targetMonth} đã chốt báo cáo nên không thể thêm chi tiêu.`)
+        return
+      }
+      if (isDayLocked(values.date, dayLockMemory)) {
+        toast.error(`Ngày ${values.date} đã khoá. Mở khoá để thêm hoặc sửa dữ liệu.`)
         return
       }
 
@@ -649,6 +860,11 @@ export default function ExpensesPage() {
       setDeleteExpenseId(null)
       return
     }
+    if (isDayLocked(expense.date, dayLockMemory)) {
+      toast.error(`Ngày ${expense.date} đã khoá. Mở khoá để xóa dữ liệu.`)
+      setDeleteExpenseId(null)
+      return
+    }
 
     deleteExpense(deleteExpenseId)
     setDeleteExpenseId(null)
@@ -694,6 +910,38 @@ export default function ExpensesPage() {
           <Button type="button" variant="secondary" size="sm" onClick={() => setSelectedDate(todayIso())}>
             Hôm nay
           </Button>
+          {showDayLockActions ? (
+            <>
+              <Button
+                type="button"
+                variant={selectedDateLocked ? "secondary" : "outline"}
+                size="sm"
+                disabled={selectedDateLocked}
+                onClick={() =>
+                  setDayLockMemory((prev) =>
+                    setDayLocked({ date: selectedDate, locked: true, memory: prev }),
+                  )
+                }
+              >
+                <Lock className="mr-1.5 h-4 w-4" />
+                Khoá
+              </Button>
+              <Button
+                type="button"
+                variant={selectedDateLocked ? "default" : "outline"}
+                size="sm"
+                disabled={!selectedDateLocked}
+                onClick={() =>
+                  setDayLockMemory((prev) =>
+                    setDayLocked({ date: selectedDate, locked: false, memory: prev }),
+                  )
+                }
+              >
+                <LockOpen className="mr-1.5 h-4 w-4" />
+                Mở khoá
+              </Button>
+            </>
+          ) : null}
         </div>
       </div>
 
@@ -748,6 +996,12 @@ export default function ExpensesPage() {
               contentClassName="h-full min-h-0"
             >
               <div className="h-full overflow-y-auto pr-1 text-sm space-y-2">
+                {selectedDateLocked ? (
+                  <div className="rounded-md border border-primary/30 bg-primary/5 px-2 py-1.5 text-xs text-muted-foreground">
+                    Ngày {selectedDate} đã khoá. Các cap bên dưới đang tính theo{" "}
+                    <span className="font-medium text-foreground">ngày kế tiếp</span>.
+                  </div>
+                ) : null}
                 <LabelValueRow label="Tổng ngày" value={formatVnd(dailyTotal)} />
                 <LabelValueRow label="7 ngày gần nhất" value={formatVnd(weekTotal)} />
                 <LabelValueRow
@@ -756,15 +1010,15 @@ export default function ExpensesPage() {
                 />
                 <Separator />
                 <LabelValueRow
-                  label="Thiết yếu hôm nay còn được chi"
+                  label={`Thiết yếu ${capLabelSuffix} còn được chi`}
                   value={formatVnd(todayCaps.needsRemainingTodayVnd)}
                 />
                 <LabelValueRow
-                  label="Mong muốn hôm nay còn được chi"
+                  label={`Mong muốn ${capLabelSuffix} còn được chi`}
                   value={formatVnd(todayCaps.wantsRemainingTodayVnd)}
                 />
                 <LabelValueRow
-                  label="Thiết yếu cap hồi phục"
+                  label={`Thiết yếu cap hồi phục (${capLabelSuffix})`}
                   labelTrailing={
                     <Popover>
                       <PopoverTrigger asChild>
@@ -782,16 +1036,16 @@ export default function ExpensesPage() {
                   value={formatVnd(recoveryCaps.needsRemainingTodayVnd)}
                 />
                 <LabelValueRow
-                  label="Mong muốn cap hồi phục"
+                  label={`Mong muốn cap hồi phục (${capLabelSuffix})`}
                   value={formatVnd(recoveryCaps.wantsRemainingTodayVnd)}
                 />
                 <Separator />
                 <LabelValueRow
-                  label="Thiết yếu dư so với nhịp"
+                  label={`Thiết yếu dư so với nhịp (${capLabelSuffix})`}
                   value={formatVnd(paceSurplus.needsSurplusToPaceVnd)}
                 />
                 <LabelValueRow
-                  label="Mong muốn dư so với nhịp"
+                  label={`Mong muốn dư so với nhịp (${capLabelSuffix})`}
                   value={formatVnd(paceSurplus.wantsSurplusToPaceVnd)}
                 />
               </div>
@@ -822,11 +1076,13 @@ export default function ExpensesPage() {
                   <Button
                     type="button"
                     size="sm"
-                    disabled={selectedMonthLocked}
+                    disabled={selectedDateReadOnly}
                     title={
                       selectedMonthLocked
                         ? `Tháng ${selectedDate.slice(0, 7)} đã chốt báo cáo nên không thể thêm chi tiêu.`
-                        : undefined
+                        : selectedDateLocked
+                          ? `Ngày ${selectedDate} đã khoá. Mở khoá để thêm hoặc sửa dữ liệu.`
+                          : undefined
                     }
                     onClick={() => {
                       form.reset({
@@ -895,7 +1151,13 @@ export default function ExpensesPage() {
               onToggle={() => setListCollapsed((prev) => !prev)}
               summary={`${expensesToday.length} item • ${formatVnd(dailyTotal)}`}
               contentClassName="h-full min-h-0"
-              headerActions={selectedMonthLocked ? <Badge variant="outline">Đã chốt tháng</Badge> : null}
+              headerActions={
+                selectedMonthLocked ? (
+                  <Badge variant="outline">Đã chốt tháng</Badge>
+                ) : selectedDateLocked ? (
+                  <Badge variant="secondary">Đã khoá ngày</Badge>
+                ) : null
+              }
             >
               <div className="h-full min-h-0 flex flex-col">
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 pb-2">
@@ -911,6 +1173,8 @@ export default function ExpensesPage() {
                     expensesToday.map((expense) => {
                       const expenseMonth = monthFromIsoDate(expense.date)
                       const expenseMonthLocked = isMonthLocked(data, expenseMonth)
+                      const expenseDateLocked = isDayLocked(expense.date, dayLockMemory)
+                      const expenseReadOnly = expenseMonthLocked || expenseDateLocked
 
                       return (
                         <div
@@ -940,11 +1204,13 @@ export default function ExpensesPage() {
                                 type="button"
                                 size="sm"
                                 variant="outline"
-                                disabled={expenseMonthLocked}
+                                disabled={expenseReadOnly}
                                 title={
                                   expenseMonthLocked
                                     ? `Tháng ${expenseMonth} đã chốt báo cáo nên không thể sửa.`
-                                    : undefined
+                                    : expenseDateLocked
+                                      ? `Ngày ${expense.date} đã khoá. Mở khoá để sửa dữ liệu.`
+                                      : undefined
                                 }
                                 onClick={() => setEditingId(expense.id)}
                               >
@@ -954,11 +1220,13 @@ export default function ExpensesPage() {
                                 type="button"
                                 size="sm"
                                 variant="destructive"
-                                disabled={expenseMonthLocked}
+                                disabled={expenseReadOnly}
                                 title={
                                   expenseMonthLocked
                                     ? `Tháng ${expenseMonth} đã chốt báo cáo nên không thể xóa.`
-                                    : undefined
+                                    : expenseDateLocked
+                                      ? `Ngày ${expense.date} đã khoá. Mở khoá để xóa dữ liệu.`
+                                      : undefined
                                 }
                                 onClick={() => setDeleteExpenseId(expense.id)}
                               >
@@ -1101,22 +1369,26 @@ export default function ExpensesPage() {
               </Button>
               <Button
                 type="submit"
-                disabled={formMonthLocked}
+                disabled={formDateReadOnly}
                 title={
                   formMonthLocked
-                    ? `Tháng ${monthFromIsoDate(form.getValues("date") as unknown as ISODate)} đã chốt báo cáo nên không thể thêm chi tiêu.`
-                    : undefined
+                    ? `Tháng ${formDateMonth} đã chốt báo cáo nên không thể thêm chi tiêu.`
+                    : formDateLocked
+                      ? `Ngày ${formDate} đã khoá. Mở khoá để thêm hoặc sửa dữ liệu.`
+                      : undefined
                 }
               >
                 Thêm
               </Button>
               <Button
                 type="button"
-                disabled={formMonthLocked}
+                disabled={formDateReadOnly}
                 title={
                   formMonthLocked
-                    ? `Tháng ${monthFromIsoDate(form.getValues("date") as unknown as ISODate)} đã chốt báo cáo nên không thể thêm chi tiêu.`
-                    : undefined
+                    ? `Tháng ${formDateMonth} đã chốt báo cáo nên không thể thêm chi tiêu.`
+                    : formDateLocked
+                      ? `Ngày ${formDate} đã khoá. Mở khoá để thêm hoặc sửa dữ liệu.`
+                      : undefined
                 }
                 onClick={() =>
                   form.handleSubmit((values) =>
@@ -1153,10 +1425,18 @@ export default function ExpensesPage() {
                 const storeData = useAppStore.getState().data
                 const originalMonth = monthFromIsoDate(editingExpense.date)
                 const nextMonth = monthFromIsoDate(values.date)
+                const originalDateLocked = isDayLocked(editingExpense.date, dayLockMemory)
+                const nextDateLocked = isDayLocked(values.date, dayLockMemory)
 
                 if (isMonthLocked(storeData, originalMonth) || isMonthLocked(storeData, nextMonth)) {
                   toast.error(
                     `Tháng đã chốt báo cáo (${isMonthLocked(storeData, originalMonth) ? originalMonth : nextMonth}) nên không thể cập nhật.`,
+                  )
+                  return
+                }
+                if (originalDateLocked || nextDateLocked) {
+                  toast.error(
+                    `Ngày đã khoá (${originalDateLocked ? editingExpense.date : values.date}). Mở khoá để cập nhật dữ liệu.`,
                   )
                   return
                 }
@@ -1265,9 +1545,9 @@ export default function ExpensesPage() {
             ) : null}
 
             <div className="rounded-md border bg-muted p-3 text-sm text-muted-foreground">
-              Popup chỉ tự bật khi bạn <span className="text-foreground font-medium">vừa vượt ngưỡng</span> ở lần thêm này. Nếu
-              cảnh báo đã tồn tại từ các ngày trước, hệ thống chỉ hiển thị banner để
-              bạn theo dõi, không lặp popup.
+              Popup chỉ tự bật khi lần thêm này làm cảnh báo <span className="text-foreground font-medium">xấu đi rõ rệt</span>{" "}
+              (mới vượt ngưỡng, tăng cấp độ, hoặc vượt sâu hơn đáng kể). Cảnh báo cũ từ
+              các ngày trước sẽ giữ ở banner để theo dõi, tránh lặp popup liên tục.
             </div>
 
             {healthWarnings.length === 0 ? (

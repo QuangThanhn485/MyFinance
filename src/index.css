@@ -194,6 +194,22 @@ span.flatpickr-weekday {
   color: hsl(var(--popover-foreground));
 }
 
+.flatpickr-current-month .flatpickr-monthDropdown-months {
+  background: hsl(var(--popover));
+  color: hsl(var(--popover-foreground));
+  border: 1px solid hsl(var(--border));
+  border-radius: calc(var(--radius) - 4px);
+}
+
+.flatpickr-current-month .flatpickr-monthDropdown-months option {
+  background: hsl(var(--popover));
+  color: hsl(var(--popover-foreground));
+}
+
+.flatpickr-current-month input.cur-year {
+  background: transparent;
+}
+
 .flatpickr-day {
   color: hsl(var(--foreground));
   border-radius: calc(var(--radius) - 4px);

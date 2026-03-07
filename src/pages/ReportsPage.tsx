@@ -214,6 +214,7 @@ const PIVOT_FIELDS: { id: PivotGroupKey; label: string }[] = [
   { id: "weekday", label: "Thứ" },
   { id: "day", label: "Ngày" },
   { id: "week", label: "Tuần" },
+  { id: "dailyCap", label: "Cap chi mỗi ngày" },
   { id: "amountRange", label: "Mức chi" },
   { id: "savingsImpact", label: "Ảnh hưởng S" },
   { id: "mssImpact", label: "Ảnh hưởng MSS" },
@@ -246,6 +247,7 @@ const PIVOT_MSS_IMPACT_RANGES = [
 type PivotContext = {
   savingsTargetVnd: number
   mssVnd: number
+  dailyCapVnd: number
 }
 
 const pivotCollisionDetection: CollisionDetection = (args) => {
@@ -456,6 +458,15 @@ function getPivotGroupValue(
     }
     case "amountRange": {
       return getAmountRangeGroup(expense.amountVnd)
+    }
+    case "dailyCap": {
+      const label = "Cap/ngày (động)"
+      return {
+        key: "daily-cap-dynamic",
+        label,
+        parts: [label],
+        sortValue: 0,
+      }
     }
     case "savingsImpact": {
       return getPercentImpactGroup({
@@ -804,6 +815,7 @@ function buildPivotTable(
     rowPrimary === "day" ||
     rowPrimary === "week" ||
     rowPrimary === "weekday" ||
+    rowPrimary === "dailyCap" ||
     rowPrimary === "amountRange" ||
     rowPrimary === "savingsImpact" ||
     rowPrimary === "mssImpact"
@@ -824,6 +836,7 @@ function buildPivotTable(
     colPrimary === "day" ||
     colPrimary === "week" ||
     colPrimary === "weekday" ||
+    colPrimary === "dailyCap" ||
     colPrimary === "amountRange" ||
     colPrimary === "savingsImpact" ||
     colPrimary === "mssImpact"
@@ -990,6 +1003,43 @@ export default function ReportsPage() {
     return rows
   }, [expenses, month, today])
 
+  const baseDailyCapVnd = useMemo(() => {
+    const dim = Math.max(1, daysInMonth(month))
+    const monthlyVariableBudgetVnd = Math.max(
+      0,
+      budgets.essentialVariableBaselineVnd + budgets.wantsBudgetVnd,
+    )
+    return Math.floor(monthlyVariableBudgetVnd / dim)
+  }, [month, budgets.essentialVariableBaselineVnd, budgets.wantsBudgetVnd])
+
+  const dailyChartData = useMemo(
+    () => dailyData.map((row) => ({ ...row, baseDailyCapVnd })),
+    [dailyData, baseDailyCapVnd],
+  )
+  const dailyCapByDayMap = useMemo(() => {
+    const dim = Math.max(1, daysInMonth(month))
+    const monthlyVariableBudgetVnd = Math.max(
+      0,
+      budgets.essentialVariableBaselineVnd + budgets.wantsBudgetVnd,
+    )
+    const spentByDay = Array.from({ length: dim + 1 }, () => 0)
+    for (const expense of expenses) {
+      const day = dayOfMonthFromIsoDate(expense.date)
+      if (day < 1 || day > dim) continue
+      spentByDay[day] += expense.amountVnd
+    }
+
+    const map: Record<number, number> = {}
+    let spentBeforeDay = 0
+    for (let day = 1; day <= dim; day += 1) {
+      const remainingBudgetVnd = Math.max(0, monthlyVariableBudgetVnd - spentBeforeDay)
+      const remainingDays = Math.max(1, dim - day + 1)
+      map[day] = Math.floor(remainingBudgetVnd / remainingDays)
+      spentBeforeDay += spentByDay[day]
+    }
+    return map
+  }, [month, budgets.essentialVariableBaselineVnd, budgets.wantsBudgetVnd, expenses])
+
   const advancedInsights = useMemo(
     () => computeAdvancedInsights({ expenses, historyExpenses: allVariableExpenses, month, today }),
     [expenses, allVariableExpenses, month, today],
@@ -1016,6 +1066,7 @@ export default function ReportsPage() {
         {
           savingsTargetVnd: budgets.savingsTargetVnd,
           mssVnd: budgets.mssVnd,
+          dailyCapVnd: baseDailyCapVnd,
         },
       ),
     [
@@ -1025,6 +1076,7 @@ export default function ReportsPage() {
       config.pivot.metric,
       budgets.savingsTargetVnd,
       budgets.mssVnd,
+      baseDailyCapVnd,
     ],
   )
   const pivotChartPrimary = config.pivot.rowFields[0]
@@ -1111,6 +1163,72 @@ export default function ReportsPage() {
       shortenLabel(series.label, 18),
     ]),
   )
+  const PIVOT_DYNAMIC_DAILY_CAP_DATA_KEY = "pivotDynamicDailyCapVnd"
+  const PIVOT_DYNAMIC_DAILY_CAP_LABEL = "Cap chi/ngày (động)"
+  const pivotDailyCapColumnIndex = config.pivot.columnFields.indexOf("dailyCap")
+  const pivotDayRowIndex = config.pivot.rowFields.indexOf("day")
+  const pivotDailyCapByDayMode =
+    config.pivot.metric === "sum" &&
+    pivotDayRowIndex >= 0 &&
+    pivotDailyCapColumnIndex >= 0 &&
+    Object.keys(dailyCapByDayMap).length > 0
+  const pivotDayByRowKey = useMemo(() => {
+    const out = new Map<string, number>()
+    if (pivotDayRowIndex < 0) return out
+    for (const row of pivotTable.rows) {
+      const dayRaw = row.sortValues?.[pivotDayRowIndex]
+      const day = typeof dayRaw === "number" ? dayRaw : Number(dayRaw)
+      if (Number.isFinite(day) && day >= 1) {
+        out.set(row.key, Math.trunc(day))
+      }
+    }
+    return out
+  }, [pivotTable.rows, pivotDayRowIndex])
+  const pivotDailyCapColumnKeySet = useMemo(() => {
+    if (!pivotDailyCapByDayMode || pivotDailyCapColumnIndex < 0) return new Set<string>()
+    const out = new Set<string>()
+    for (const col of pivotTable.cols) {
+      if (col.parts[pivotDailyCapColumnIndex]) {
+        out.add(col.key)
+      }
+    }
+    return out
+  }, [pivotDailyCapByDayMode, pivotDailyCapColumnIndex, pivotTable.cols])
+  const getPivotDailyCapForRowKey = (rowKey: string) => {
+    const day = pivotDayByRowKey.get(rowKey)
+    if (!day) return baseDailyCapVnd
+    return dailyCapByDayMap[day] ?? baseDailyCapVnd
+  }
+  const getPivotDisplayCellValue = (rowKey: string, colKey: string) => {
+    if (pivotDailyCapByDayMode && pivotDailyCapColumnKeySet.has(colKey)) {
+      return getPivotDailyCapForRowKey(rowKey)
+    }
+    return pivotMetricValue(pivotTable.cells[rowKey]?.[colKey], config.pivot.metric)
+  }
+  const pivotDisplayColTotals = useMemo(() => {
+    const map: Record<string, number> = {}
+    for (const col of pivotTable.cols) {
+      if (pivotDailyCapByDayMode && pivotDailyCapColumnKeySet.has(col.key)) {
+        map[col.key] = pivotTable.rows.reduce(
+          (sum, row) => sum + getPivotDailyCapForRowKey(row.key),
+          0,
+        )
+      } else {
+        map[col.key] = pivotMetricValue(pivotTable.colTotals[col.key], config.pivot.metric)
+      }
+    }
+    return map
+  }, [
+    pivotTable.cols,
+    pivotTable.rows.length,
+    pivotTable.colTotals,
+    pivotDailyCapByDayMode,
+    pivotDailyCapColumnKeySet,
+    dailyCapByDayMap,
+    pivotDayByRowKey,
+    baseDailyCapVnd,
+    config.pivot.metric,
+  ])
   const pivotChartData = pivotChartRows.map((row) => {
     const label =
       pivotChartPrimary === "day"
@@ -1118,21 +1236,46 @@ export default function ReportsPage() {
         : pivotChartPrimary === "week"
           ? `W${row.sortValue}`
           : shortenLabel(row.label, 16)
+    const dynamicCapForRow = getPivotDailyCapForRowKey(row.key)
     if (!pivotHasColumns) {
       const value = pivotMetricValue(
         pivotTable.rowTotals[row.key],
         config.pivot.metric,
       )
-      return { name: label, value }
+      return { name: label, value, [PIVOT_DYNAMIC_DAILY_CAP_DATA_KEY]: dynamicCapForRow }
     }
-    const entry: Record<string, number | string> = { name: label }
+    const entry: Record<string, number | string> = {
+      name: label,
+      [PIVOT_DYNAMIC_DAILY_CAP_DATA_KEY]: dynamicCapForRow,
+    }
     pivotChartSeries.forEach((series) => {
-      const cell = pivotTable.cells[row.key]?.[series.colKey]
-      entry[series.key] = pivotMetricValue(cell, config.pivot.metric)
+      entry[series.key] = getPivotDisplayCellValue(row.key, series.colKey)
     })
     return entry
   })
   const pivotChartLimited = pivotTable.rows.length > pivotChartLimit
+  const pivotChartHasDailyCapSeries =
+    pivotHasColumns &&
+    pivotChartSeries.some((series) => pivotDailyCapColumnKeySet.has(series.colKey))
+  const pivotChartShowsTotalByDay = !pivotHasColumns
+  const showPivotDynamicDailyCapLine =
+    pivotChartPrimary === "day" &&
+    config.pivot.metric === "sum" &&
+    Object.keys(dailyCapByDayMap).length > 0 &&
+    pivotChartShowsTotalByDay
+  const showPivotBaseDailyCap =
+    pivotChartPrimary === "day" &&
+    config.pivot.metric === "sum" &&
+    baseDailyCapVnd > 0 &&
+    (pivotChartShowsTotalByDay || pivotChartHasDailyCapSeries)
+  const formatPivotSeriesDisplayName = (name: string) => {
+    if (name === PIVOT_DYNAMIC_DAILY_CAP_DATA_KEY) return PIVOT_DYNAMIC_DAILY_CAP_LABEL
+    return pivotChartSeriesLabelByKey.get(name) ?? name
+  }
+  const formatPivotSeriesLegendName = (name: string) => {
+    if (name === PIVOT_DYNAMIC_DAILY_CAP_DATA_KEY) return PIVOT_DYNAMIC_DAILY_CAP_LABEL
+    return pivotChartSeriesShortLabelByKey.get(name) ?? name
+  }
   const togglePivotSeries = (seriesKey: string) => {
     if (!pivotHasColumns) return
     setConfig((s) => {
@@ -2789,6 +2932,12 @@ export default function ReportsPage() {
               <div className="text-xs text-muted-foreground">
                 Chi theo từng ngày (từ đầu tháng), chỉ tính chi biến đổi đã ghi.
               </div>
+              <div className="text-xs text-muted-foreground">
+                Cap chi mỗi ngày gốc đầu tháng (sau khi trừ chi phí cố định):{" "}
+                <span className="font-semibold text-foreground whitespace-nowrap tabular-nums">
+                  {formatVnd(baseDailyCapVnd)}
+                </span>
+              </div>
 
               {/*
               <DndMultiSelect
@@ -2816,7 +2965,7 @@ export default function ReportsPage() {
                   <ResponsiveContainer width="100%" height="100%">
                     {config.daily.chartType === "bar" ? (
                       <ComposedChart
-                        data={dailyData}
+                        data={dailyChartData}
                         margin={{ left: 8, right: 16, top: 8, bottom: 8 }}
                       >
                         <CartesianGrid strokeDasharray="3 3" />
@@ -2868,10 +3017,22 @@ export default function ReportsPage() {
                             type="monotone"
                           />
                         ) : null}
+                        {baseDailyCapVnd > 0 ? (
+                          <Line
+                            dataKey="baseDailyCapVnd"
+                            name="Cap chi/ngày gốc"
+                            stroke="hsl(var(--primary))"
+                            strokeWidth={1.75}
+                            strokeDasharray="6 4"
+                            dot={false}
+                            type="linear"
+                            isAnimationActive={false}
+                          />
+                        ) : null}
                       </ComposedChart>
                     ) : config.daily.chartType === "area" ? (
                       <AreaChart
-                        data={dailyData}
+                        data={dailyChartData}
                         margin={{ left: 8, right: 16, top: 8, bottom: 8 }}
                       >
                         <CartesianGrid strokeDasharray="3 3" />
@@ -2898,10 +3059,22 @@ export default function ReportsPage() {
                             type="monotone"
                           />
                         ))}
+                        {baseDailyCapVnd > 0 ? (
+                          <Line
+                            dataKey="baseDailyCapVnd"
+                            name="Cap chi/ngày gốc"
+                            stroke="hsl(var(--primary))"
+                            strokeWidth={1.75}
+                            strokeDasharray="6 4"
+                            dot={false}
+                            type="linear"
+                            isAnimationActive={false}
+                          />
+                        ) : null}
                       </AreaChart>
                     ) : (
                       <LineChart
-                        data={dailyData}
+                        data={dailyChartData}
                         margin={{ left: 8, right: 16, top: 8, bottom: 8 }}
                       >
                         <CartesianGrid strokeDasharray="3 3" />
@@ -2928,6 +3101,18 @@ export default function ReportsPage() {
                             type="monotone"
                           />
                         ))}
+                        {baseDailyCapVnd > 0 ? (
+                          <Line
+                            dataKey="baseDailyCapVnd"
+                            name="Cap chi/ngày gốc"
+                            stroke="hsl(var(--primary))"
+                            strokeWidth={1.75}
+                            strokeDasharray="6 4"
+                            dot={false}
+                            type="linear"
+                            isAnimationActive={false}
+                          />
+                        ) : null}
                       </LineChart>
                     )}
                   </ResponsiveContainer>
@@ -3346,12 +3531,7 @@ export default function ReportsPage() {
                                   )
                                 })}
                                 {pivotTable.cols.map((col) => {
-                                  const cell =
-                                    pivotTable.cells[row.key]?.[col.key]
-                                  const value = pivotMetricValue(
-                                    cell,
-                                    config.pivot.metric,
-                                  )
+                                  const value = getPivotDisplayCellValue(row.key, col.key)
                                   const style = pivotHeatmapScale
                                     ? pivotMoneyHeatmapStyle(
                                         value,
@@ -3405,10 +3585,7 @@ export default function ReportsPage() {
                                 </td>
                               ))}
                               {pivotTable.cols.map((col) => {
-                                const value = pivotMetricValue(
-                                  pivotTable.colTotals[col.key],
-                                  config.pivot.metric,
-                                )
+                                const value = pivotDisplayColTotals[col.key] ?? 0
                                 const style = pivotHeatmapScale
                                   ? pivotMoneyHeatmapStyle(
                                       value,
@@ -3482,6 +3659,21 @@ export default function ReportsPage() {
                           </div>
                         ) : null}
                       </div>
+                      {showPivotBaseDailyCap || showPivotDynamicDailyCapLine ? (
+                        <div className="text-xs text-muted-foreground">
+                          {showPivotBaseDailyCap ? (
+                            <>
+                              Nét đứt = Cap chi/ngày gốc đầu tháng (ngày 1):{" "}
+                              <span className="font-semibold text-foreground whitespace-nowrap tabular-nums">
+                                {formatVnd(baseDailyCapVnd)}
+                              </span>
+                            </>
+                          ) : null}
+                          {showPivotDynamicDailyCapLine ? (
+                            <span>{showPivotBaseDailyCap ? " • " : ""}Nét liền = {PIVOT_DYNAMIC_DAILY_CAP_LABEL}</span>
+                          ) : null}
+                        </div>
+                      ) : null}
                     <div className="h-[460px]">
                       {pivotChartData.length === 0 ? (
                         <div className="text-sm text-muted-foreground">
@@ -3490,7 +3682,7 @@ export default function ReportsPage() {
                       ) : (
                         <ResponsiveContainer width="100%" height="100%">
                           {config.pivot.chartType === "bar" ? (
-                            <BarChart
+                            <ComposedChart
                               data={pivotChartData}
                               margin={{ left: 8, right: 16, top: 8, bottom: 8 }}
                             >
@@ -3505,15 +3697,13 @@ export default function ReportsPage() {
                                 cursor={false}
                                 formatter={(v, name) => [
                                   formatPivotValue(Number(v), config.pivot.metric),
-                                  pivotChartSeriesLabelByKey.get(String(name)) ??
-                                    String(name),
+                                  formatPivotSeriesDisplayName(String(name)),
                                 ]}
                               />
-                              {pivotChartSeries.length > 1 ? (
+                              {pivotChartSeries.length > 1 || showPivotDynamicDailyCapLine ? (
                                 <Legend
                                   formatter={(value) =>
-                                    pivotChartSeriesShortLabelByKey.get(String(value)) ??
-                                    value
+                                    formatPivotSeriesLegendName(String(value))
                                   }
                                 />
                               ) : null}
@@ -3534,7 +3724,33 @@ export default function ReportsPage() {
                                   }
                                 />
                               ))}
-                            </BarChart>
+                              {showPivotDynamicDailyCapLine ? (
+                                <Line
+                                  dataKey={PIVOT_DYNAMIC_DAILY_CAP_DATA_KEY}
+                                  name={PIVOT_DYNAMIC_DAILY_CAP_LABEL}
+                                  stroke="hsl(var(--chart-3))"
+                                  strokeWidth={2}
+                                  dot={false}
+                                  type="monotone"
+                                  isAnimationActive={false}
+                                />
+                              ) : null}
+                              {showPivotBaseDailyCap ? (
+                                <ReferenceLine
+                                  y={baseDailyCapVnd}
+                                  stroke="hsl(var(--chart-4))"
+                                  strokeDasharray="6 4"
+                                  strokeWidth={2}
+                                  ifOverflow="extendDomain"
+                                  label={{
+                                    value: "Cap gốc/ngày",
+                                    position: "insideTopRight",
+                                    fill: "hsl(var(--muted-foreground))",
+                                    fontSize: 11,
+                                  }}
+                                />
+                              ) : null}
+                            </ComposedChart>
                           ) : config.pivot.chartType === "area" ? (
                             <AreaChart
                               data={pivotChartData}
@@ -3551,15 +3767,13 @@ export default function ReportsPage() {
                                 cursor={false}
                                 formatter={(v, name) => [
                                   formatPivotValue(Number(v), config.pivot.metric),
-                                  pivotChartSeriesLabelByKey.get(String(name)) ??
-                                    String(name),
+                                  formatPivotSeriesDisplayName(String(name)),
                                 ]}
                               />
-                              {pivotChartSeries.length > 1 ? (
+                              {pivotChartSeries.length > 1 || showPivotDynamicDailyCapLine ? (
                                 <Legend
                                   formatter={(value) =>
-                                    pivotChartSeriesShortLabelByKey.get(String(value)) ??
-                                    value
+                                    formatPivotSeriesLegendName(String(value))
                                   }
                                 />
                               ) : null}
@@ -3578,6 +3792,32 @@ export default function ReportsPage() {
                                   }
                                 />
                               ))}
+                              {showPivotDynamicDailyCapLine ? (
+                                <Line
+                                  dataKey={PIVOT_DYNAMIC_DAILY_CAP_DATA_KEY}
+                                  name={PIVOT_DYNAMIC_DAILY_CAP_LABEL}
+                                  stroke="hsl(var(--chart-3))"
+                                  strokeWidth={2}
+                                  dot={false}
+                                  type="monotone"
+                                  isAnimationActive={false}
+                                />
+                              ) : null}
+                              {showPivotBaseDailyCap ? (
+                                <ReferenceLine
+                                  y={baseDailyCapVnd}
+                                  stroke="hsl(var(--chart-4))"
+                                  strokeDasharray="6 4"
+                                  strokeWidth={2}
+                                  ifOverflow="extendDomain"
+                                  label={{
+                                    value: "Cap gốc/ngày",
+                                    position: "insideTopRight",
+                                    fill: "hsl(var(--muted-foreground))",
+                                    fontSize: 11,
+                                  }}
+                                />
+                              ) : null}
                             </AreaChart>
                           ) : (
                             <LineChart
@@ -3595,15 +3835,13 @@ export default function ReportsPage() {
                                 cursor={false}
                                 formatter={(v, name) => [
                                   formatPivotValue(Number(v), config.pivot.metric),
-                                  pivotChartSeriesLabelByKey.get(String(name)) ??
-                                    String(name),
+                                  formatPivotSeriesDisplayName(String(name)),
                                 ]}
                               />
-                              {pivotChartSeries.length > 1 ? (
+                              {pivotChartSeries.length > 1 || showPivotDynamicDailyCapLine ? (
                                 <Legend
                                   formatter={(value) =>
-                                    pivotChartSeriesShortLabelByKey.get(String(value)) ??
-                                    value
+                                    formatPivotSeriesLegendName(String(value))
                                   }
                                 />
                               ) : null}
@@ -3617,6 +3855,32 @@ export default function ReportsPage() {
                                   type="monotone"
                                 />
                               ))}
+                              {showPivotDynamicDailyCapLine ? (
+                                <Line
+                                  dataKey={PIVOT_DYNAMIC_DAILY_CAP_DATA_KEY}
+                                  name={PIVOT_DYNAMIC_DAILY_CAP_LABEL}
+                                  stroke="hsl(var(--chart-3))"
+                                  strokeWidth={2}
+                                  dot={false}
+                                  type="monotone"
+                                  isAnimationActive={false}
+                                />
+                              ) : null}
+                              {showPivotBaseDailyCap ? (
+                                <ReferenceLine
+                                  y={baseDailyCapVnd}
+                                  stroke="hsl(var(--chart-4))"
+                                  strokeDasharray="6 4"
+                                  strokeWidth={2}
+                                  ifOverflow="extendDomain"
+                                  label={{
+                                    value: "Cap gốc/ngày",
+                                    position: "insideTopRight",
+                                    fill: "hsl(var(--muted-foreground))",
+                                    fontSize: 11,
+                                  }}
+                                />
+                              ) : null}
                             </LineChart>
                           )}
                         </ResponsiveContainer>

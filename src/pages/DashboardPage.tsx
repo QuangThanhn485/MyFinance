@@ -34,6 +34,7 @@ import {
   getEffectiveSettingsForMonth,
   getMonthlyIncomeTotalVnd,
 } from "@/domain/finance/monthLock"
+import { isDayLocked } from "@/storage/dayLock"
 import { getCategoryTotals, getExpensesByDate, getMonthTotals } from "@/selectors/expenses"
 import { useAppStore } from "@/store/useAppStore"
 
@@ -107,7 +108,11 @@ export default function DashboardPage() {
 
   const dim = daysInMonth(month)
   const dom = dayOfMonthFromIsoDate(today)
-  const daysRemaining = Math.max(0, dim - dom)
+  const todayLocked = isDayLocked(today)
+  const daysRemainingBase = Math.max(0, dim - dom + 1)
+  const daysRemaining = todayLocked
+    ? Math.max(0, daysRemainingBase - 1)
+    : daysRemainingBase
   const recommendedDailyCap =
     daysRemaining > 0 ? Math.floor(Math.max(0, totalRemaining) / daysRemaining) : 0
   const caps = getEffectiveCapsForMonth(data, month)
@@ -179,7 +184,7 @@ export default function DashboardPage() {
         <MetricCard
           title="Cap chi mỗi ngày"
           value={formatVnd(shownDailyCap)}
-          subValue={`${daysRemaining} ngày còn lại`}
+          subValue={`${daysRemaining} ngày còn lại${todayLocked ? " (đã khoá hôm nay)" : ""}`}
         />
         <MetricCard
           title="Quỹ khẩn cấp phủ được"
