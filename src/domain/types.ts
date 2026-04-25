@@ -49,6 +49,21 @@ export interface PurchasePlan {
   updatedAt: string
 }
 
+export type SavingsFund = "emergency"
+export type SavingsTransactionType = "deposit" | "withdraw"
+
+export interface SavingsTransaction {
+  id: string
+  fund: SavingsFund
+  type: SavingsTransactionType
+  amountVnd: number
+  date: ISODate
+  reason: string
+  note: string
+  createdAt: string
+  updatedAt: string
+}
+
 export type BudgetRule =
   | { type: "50_30_20" }
   | { type: "60_20_20" }

@@ -47,6 +47,7 @@ import { buildForcedPurchaseRescue, type ForcedPurchaseRescueResult } from "@/do
 import { formatVnd } from "@/lib/currency"
 import { monthFromIsoDate, todayIso } from "@/lib/date"
 import { getMonthToDateTotals, getMonthTotals } from "@/selectors/expenses"
+import { getEffectiveEmergencyFundBalance } from "@/selectors/savings"
 import { cn } from "@/lib/utils"
 import { useAppStore } from "@/store/useAppStore"
 import { getEffectiveSettingsForMonth, getMonthlyIncomeTotalVnd } from "@/domain/finance/monthLock"
@@ -76,13 +77,14 @@ export default function AdvisorPage() {
   })
   const savingsMin = budgets.savingsTargetVnd
   const MSS = computeMinimumSafetySavings(budgets.incomeVnd)
+  const emergencyFundCurrentVnd = getEffectiveEmergencyFundBalance(data, month)
   const actualSavingsBalanceVnd = settingsForMonth.actualSavingsBalanceVnd ?? 0
   const flexibleEmergencyBorrowVnd = Math.max(0, actualSavingsBalanceVnd - MSS)
   const emergency = computeEmergencyFund({
     fixedCostsVnd: totals.fixedCostsTotal,
     essentialVariableBaselineVnd: settingsForMonth.essentialVariableBaselineVnd,
     targetMonths: settingsForMonth.emergencyFundTargetMonths,
-    currentBalanceVnd: settingsForMonth.emergencyFundCurrentVnd,
+    currentBalanceVnd: emergencyFundCurrentVnd,
   })
 
   const schema = z.object({
@@ -135,7 +137,7 @@ export default function AdvisorPage() {
       incomeVnd: budgets.incomeVnd,
       fixedCostsVnd: totals.fixedCostsTotal,
       essentialVariableBaselineVnd: settingsForMonth.essentialVariableBaselineVnd,
-      emergencyFundCurrentVnd: settingsForMonth.emergencyFundCurrentVnd,
+      emergencyFundCurrentVnd,
       emergencyFundTargetMonths: settingsForMonth.emergencyFundTargetMonths,
       debtPaymentMonthlyVnd: settingsForMonth.debtPaymentMonthlyVnd,
       budgets: {

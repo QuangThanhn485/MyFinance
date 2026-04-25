@@ -9,6 +9,8 @@ import type {
   ISODate,
   PurchasePlan,
   PurchasePriority,
+  SavingsTransaction,
+  SavingsTransactionType,
   Settings,
   YearMonth,
 } from "@/domain/types"
@@ -27,6 +29,10 @@ import {
 } from "@/lib/date"
 import { formatVnd } from "@/lib/currency"
 import { getMonthTotals } from "@/selectors/expenses"
+import {
+  getEffectiveEmergencyFundBalance,
+  getNextMonthEmergencyOpeningBalance,
+} from "@/selectors/savings"
 import { getEffectiveSettingsForMonth, getMonthlyIncomeTotalVnd } from "@/domain/finance/monthLock"
 import {
   addExpenseToIndexes,
@@ -61,6 +67,7 @@ type Actions = {
 
   setSettings: (patch: Partial<Settings>) => void
   setSettingsForMonth: (input: { month: YearMonth; patch: Partial<Settings> }) => void
+  ensureSettingsForMonth: (month: YearMonth) => void
 
   addFixedCost: (input: {
     month: YearMonth
@@ -86,6 +93,16 @@ type Actions = {
     patch: Partial<Pick<Expense, "amountVnd" | "category" | "bucket" | "note" | "date">>,
   ) => void
   deleteExpense: (id: string) => void
+
+  addSavingsTransaction: (input: {
+    fund?: "emergency"
+    type: SavingsTransactionType
+    amountVnd: number
+    reason: string
+    note?: string
+    date: ISODate
+  }) => string
+  deleteSavingsTransaction: (id: string) => void
 
   addPurchasePlan: (input: {
     name: string
@@ -137,7 +154,7 @@ function touch(state: CttmState): CttmState {
   return { ...state, updatedAt: nowIso() }
 }
 
-function id(prefix: "ex_" | "fc_" | "pp_") {
+function id(prefix: "ex_" | "fc_" | "pp_" | "st_") {
   return `${prefix}${nanoid(10)}`
 }
 
@@ -156,26 +173,31 @@ function cloneSettings(settings: Settings): Settings {
   }
 }
 
-function ensureCurrentMonthConfigurationFromPrevious(state: CttmState): CttmState {
+function ensureMonthConfigurationFromPrevious(
+  state: CttmState,
+  targetMonth: YearMonth,
+): CttmState {
   const now = nowIso()
-  const currentMonth = monthFromIsoDate(todayIso())
-  const prevMonth = previousMonth(currentMonth)
-  const hasCurrentSettings = !!state.settingsByMonth[currentMonth]
-  const hasCurrentFixedCosts = state.entities.fixedCosts.allIds.some((fixedCostId) => {
+  const prevMonth = previousMonth(targetMonth)
+  const hasTargetSettings = !!state.settingsByMonth[targetMonth]
+  const hasTargetFixedCosts = state.entities.fixedCosts.allIds.some((fixedCostId) => {
     const fixedCost = state.entities.fixedCosts.byId[fixedCostId]
-    return !!fixedCost && fixedCost.month === currentMonth
+    return !!fixedCost && fixedCost.month === targetMonth
   })
 
-  if (hasCurrentSettings) return state
+  if (hasTargetSettings) return state
 
   // Tháng mới kế thừa cấu hình "hiệu lực" của tháng liền trước.
-  const inheritedSettings = cloneSettings(getEffectiveSettingsForMonth(state, prevMonth))
+  const inheritedSettings = {
+    ...cloneSettings(getEffectiveSettingsForMonth(state, prevMonth)),
+    emergencyFundCurrentVnd: getNextMonthEmergencyOpeningBalance(state, prevMonth),
+  }
   const nextSettingsByMonth = {
     ...state.settingsByMonth,
-    [currentMonth]: inheritedSettings,
+    [targetMonth]: inheritedSettings,
   }
 
-  if (hasCurrentFixedCosts) {
+  if (hasTargetFixedCosts) {
     return touch({
       ...state,
       settingsByMonth: nextSettingsByMonth,
@@ -193,7 +215,7 @@ function ensureCurrentMonthConfigurationFromPrevious(state: CttmState): CttmStat
       return {
         ...fixedCost,
         id: newId,
-        month: currentMonth,
+        month: targetMonth,
         createdAt: now,
         updatedAt: now,
       }
@@ -216,6 +238,10 @@ function ensureCurrentMonthConfigurationFromPrevious(state: CttmState): CttmStat
       fixedCosts: nextFixedCosts,
     },
   })
+}
+
+function ensureCurrentMonthConfigurationFromPrevious(state: CttmState): CttmState {
+  return ensureMonthConfigurationFromPrevious(state, monthFromIsoDate(todayIso()))
 }
 
 function autoClosePreviousMonthIfNeeded(state: CttmState): CttmState {
@@ -513,6 +539,9 @@ export const useAppStore = create<AppStore>()(
           }
         })
       },
+      ensureSettingsForMonth: (month) => {
+        set((s) => ({ data: ensureMonthConfigurationFromPrevious(s.data, month) }))
+      },
 
       addFixedCost: ({ month, name, amountVnd, category }) => {
         const newId = id("fc_")
@@ -620,7 +649,7 @@ export const useAppStore = create<AppStore>()(
           fixedCostsVnd: totals.fixedCostsTotal,
           essentialVariableBaselineVnd: settingsForMonth.essentialVariableBaselineVnd,
           targetMonths: settingsForMonth.emergencyFundTargetMonths,
-          currentBalanceVnd: settingsForMonth.emergencyFundCurrentVnd,
+          currentBalanceVnd: getEffectiveEmergencyFundBalance(state, month),
         })
 
         const result = evaluateOverspending({
@@ -692,6 +721,57 @@ export const useAppStore = create<AppStore>()(
               ...s.data,
               entities: { ...s.data.entities, expenses: { byId: rest, allIds: table.allIds.filter((x) => x !== expenseId) } },
               indexes: nextIndexes,
+            }),
+          }
+        })
+      },
+
+      addSavingsTransaction: ({ fund = "emergency", type, amountVnd, reason, note, date }) => {
+        const newId = id("st_")
+        const now = nowIso()
+        const tx: SavingsTransaction = {
+          id: newId,
+          fund,
+          type,
+          amountVnd: Math.max(0, Math.trunc(amountVnd)),
+          reason: reason.trim(),
+          note: note?.trim() ?? "",
+          date,
+          createdAt: now,
+          updatedAt: now,
+        }
+        set((s) => {
+          const table = s.data.entities.savingsTransactions
+          const nextTable = {
+            byId: { ...table.byId, [newId]: tx },
+            allIds: [...table.allIds, newId],
+          }
+          return {
+            data: touch({
+              ...s.data,
+              entities: { ...s.data.entities, savingsTransactions: nextTable },
+            }),
+          }
+        })
+        return newId
+      },
+
+      deleteSavingsTransaction: (transactionId) => {
+        set((s) => {
+          const table = s.data.entities.savingsTransactions
+          const existing = table.byId[transactionId]
+          if (!existing) return s
+          const { [transactionId]: _removed, ...rest } = table.byId
+          return {
+            data: touch({
+              ...s.data,
+              entities: {
+                ...s.data.entities,
+                savingsTransactions: {
+                  byId: rest,
+                  allIds: table.allIds.filter((x) => x !== transactionId),
+                },
+              },
             }),
           }
         })
@@ -921,6 +1001,13 @@ export const useAppStore = create<AppStore>()(
           },
           settingsByMonth: {
             ...((incoming as CttmState).settingsByMonth ?? {}),
+          },
+          entities: {
+            ...baseImportState.entities,
+            ...((incoming as CttmState).entities ?? {}),
+            savingsTransactions:
+              (incoming as CttmState).entities?.savingsTransactions ??
+              baseImportState.entities.savingsTransactions,
           },
           indexes: rebuildExpenseIndexesFromEntities(
             (incoming as CttmState).entities.expenses,

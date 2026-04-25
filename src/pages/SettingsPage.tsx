@@ -1,9 +1,19 @@
 ﻿import { zodResolver } from "@hookform/resolvers/zod"
-import { ChevronLeft, ChevronRight, Lock, Plus } from "lucide-react"
+import {
+  ArrowDownCircle,
+  ArrowUpCircle,
+  ChevronLeft,
+  ChevronRight,
+  Lock,
+  Plus,
+  Trash2,
+  WalletCards,
+} from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { Controller, useForm } from "react-hook-form"
 import { z } from "zod"
 import { toast } from "sonner"
+import DatePicker from "@/components/DatePicker"
 import { CATEGORY_LABELS_VI, EXPENSE_CATEGORIES } from "@/domain/constants"
 import {
   computeDebtToIncome,
@@ -14,7 +24,14 @@ import {
   getMonthlyIncomeTotalVnd,
   isMonthLocked,
 } from "@/domain/finance/monthLock"
-import type { BudgetRule, ExpenseCategory, Settings, YearMonth } from "@/domain/types"
+import type {
+  BudgetRule,
+  ExpenseCategory,
+  ISODate,
+  SavingsTransactionType,
+  Settings,
+  YearMonth,
+} from "@/domain/types"
 import MoneyInput from "@/components/MoneyInput"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -34,6 +51,7 @@ import LabelValueRow from "@/components/LabelValueRow"
 import { formatVnd } from "@/lib/currency"
 import { monthFromIsoDate, previousMonth, todayIso } from "@/lib/date"
 import { cn } from "@/lib/utils"
+import { getActualMonthlySavingsVnd, getEmergencyFundMonthSummary } from "@/selectors/savings"
 import { useAppStore } from "@/store/useAppStore"
 
 const MONTH_LABELS = [
@@ -51,8 +69,22 @@ const MONTH_LABELS = [
   "Tháng 12",
 ] as const
 
+const SAVINGS_REASONS = [
+  "Y tế",
+  "Gia đình",
+  "Sửa chữa",
+  "Mất việc/thu nhập",
+  "Khẩn cấp khác",
+  "Nạp lại quỹ",
+  "Điều chỉnh số dư",
+] as const
+
 function toYearMonth(year: number, month1To12: number): YearMonth {
   return `${year}-${String(month1To12).padStart(2, "0")}` as YearMonth
+}
+
+function defaultDateForMonth(month: YearMonth, currentMonth: YearMonth): ISODate {
+  return (month === currentMonth ? todayIso() : `${month}-01`) as ISODate
 }
 
 function toRuleType(settings: Settings): "50_30_20" | "60_20_20" | "custom" {
@@ -74,9 +106,12 @@ function toCustomRulePercents(settings: Settings) {
 export default function SettingsPage() {
   const data = useAppStore((s) => s.data)
   const setSettingsForMonth = useAppStore((s) => s.actions.setSettingsForMonth)
+  const ensureSettingsForMonth = useAppStore((s) => s.actions.ensureSettingsForMonth)
   const addFixedCost = useAppStore((s) => s.actions.addFixedCost)
   const updateFixedCost = useAppStore((s) => s.actions.updateFixedCost)
   const deleteFixedCost = useAppStore((s) => s.actions.deleteFixedCost)
+  const addSavingsTransaction = useAppStore((s) => s.actions.addSavingsTransaction)
+  const deleteSavingsTransaction = useAppStore((s) => s.actions.deleteSavingsTransaction)
 
   const currentMonth = monthFromIsoDate(todayIso())
   const currentYear = Number(currentMonth.slice(0, 4))
@@ -92,6 +127,12 @@ export default function SettingsPage() {
       setSelectedMonth(nextMonth)
     }
   }, [selectedMonth, selectedYear])
+
+  useEffect(() => {
+    if (selectedMonth >= currentMonth) {
+      ensureSettingsForMonth(selectedMonth)
+    }
+  }, [currentMonth, ensureSettingsForMonth, selectedMonth])
 
   const selectedMonthLocked = isMonthLocked(data, selectedMonth)
   const hasOwnSettings = !!data.settingsByMonth[selectedMonth]
@@ -127,12 +168,20 @@ export default function SettingsPage() {
   const debtPaymentMonthlyVnd = Math.max(0, Math.trunc(settingsForMonth.debtPaymentMonthlyVnd ?? 0))
   const fixedCostsWithDebtTotal = fixedCostsTotal + debtPaymentMonthlyVnd
   const incomeTotalVnd = getMonthlyIncomeTotalVnd(settingsForMonth)
+  const emergencyFundSummary = useMemo(
+    () => getEmergencyFundMonthSummary(data, selectedMonth),
+    [data, selectedMonth],
+  )
+  const actualMonthlySavingsVnd = useMemo(
+    () => getActualMonthlySavingsVnd(data, selectedMonth),
+    [data, selectedMonth],
+  )
 
   const emergency = computeEmergencyFund({
     fixedCostsVnd: fixedCostsWithDebtTotal,
     essentialVariableBaselineVnd: settingsForMonth.essentialVariableBaselineVnd,
     targetMonths: settingsForMonth.emergencyFundTargetMonths,
-    currentBalanceVnd: settingsForMonth.emergencyFundCurrentVnd,
+    currentBalanceVnd: emergencyFundSummary.effectiveBalanceVnd,
   })
 
   const debt = computeDebtToIncome({
@@ -201,6 +250,13 @@ export default function SettingsPage() {
   const [editingAmountId, setEditingAmountId] = useState<string | null>(null)
   const [editingAmountVnd, setEditingAmountVnd] = useState(0)
   const editingFixedCost = editingAmountId ? data.entities.fixedCosts.byId[editingAmountId] : null
+  const [fundDialogType, setFundDialogType] = useState<SavingsTransactionType | null>(null)
+  const [fundAmountVnd, setFundAmountVnd] = useState(0)
+  const [fundDate, setFundDate] = useState<ISODate>(() =>
+    defaultDateForMonth(currentMonth, currentMonth),
+  )
+  const [fundReason, setFundReason] = useState<string>("Khẩn cấp khác")
+  const [fundNote, setFundNote] = useState("")
 
   const ruleType = form.watch("ruleType")
 
@@ -209,12 +265,50 @@ export default function SettingsPage() {
     setNewFcName("")
     setNewFcAmountVnd(0)
     setNewFcCategory("Bills")
+    setFundDialogType(null)
+    setFundAmountVnd(0)
+    setFundDate(defaultDateForMonth(selectedMonth, currentMonth))
+    setFundReason("Khẩn cấp khác")
+    setFundNote("")
   }, [selectedMonth])
 
   const resetFixedCostDraft = () => {
     setNewFcName("")
     setNewFcAmountVnd(0)
     setNewFcCategory("Bills")
+  }
+
+  const openFundDialog = (type: SavingsTransactionType) => {
+    setFundDialogType(type)
+    setFundAmountVnd(0)
+    setFundDate(defaultDateForMonth(selectedMonth, currentMonth))
+    setFundReason(type === "deposit" ? "Nạp lại quỹ" : "Khẩn cấp khác")
+    setFundNote("")
+  }
+
+  const handleCreateSavingsTransaction = () => {
+    if (!fundDialogType) return
+    if (fundAmountVnd <= 0) {
+      toast.error("Vui lòng nhập số tiền hợp lệ.")
+      return
+    }
+    if (monthFromIsoDate(fundDate) !== selectedMonth) {
+      toast.error(`Ngày biến động phải thuộc tháng ${selectedMonth}.`)
+      return
+    }
+    if (fundDialogType === "withdraw" && fundAmountVnd > emergencyFundSummary.effectiveBalanceVnd) {
+      toast.error("Số tiền rút lớn hơn số dư quỹ hiện tại.")
+      return
+    }
+    addSavingsTransaction({
+      type: fundDialogType,
+      amountVnd: fundAmountVnd,
+      reason: fundReason,
+      note: fundNote,
+      date: fundDate,
+    })
+    toast.success(fundDialogType === "deposit" ? "Đã nạp quỹ." : "Đã ghi nhận rút quỹ.")
+    setFundDialogType(null)
   }
 
   const handleCreateFixedCost = () => {
@@ -465,7 +559,7 @@ export default function SettingsPage() {
                   <Input inputMode="numeric" {...form.register("emergencyFundTargetMonths")} />
                 </div>
                 <div className="grid gap-2">
-                  <Label>Số dư quỹ khẩn cấp hiện tại</Label>
+                  <Label>Số dư quỹ đầu tháng</Label>
                   <Controller
                     control={form.control}
                     name="emergencyFundCurrentVnd"
@@ -478,6 +572,92 @@ export default function SettingsPage() {
 
               <Button type="submit">Lưu cấu hình tháng</Button>
             </form>
+
+            <Separator />
+
+            <div className="rounded-md border bg-muted/20 p-3 text-sm">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-2 font-medium">
+                  <WalletCards className="h-4 w-4 text-muted-foreground" />
+                  <span>Biến động quỹ khẩn cấp</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" size="sm" variant="outline" onClick={() => openFundDialog("withdraw")}>
+                    <ArrowDownCircle className="mr-1.5 h-4 w-4" />
+                    Rút quỹ
+                  </Button>
+                  <Button type="button" size="sm" variant="secondary" onClick={() => openFundDialog("deposit")}>
+                    <ArrowUpCircle className="mr-1.5 h-4 w-4" />
+                    Nạp lại
+                  </Button>
+                </div>
+              </div>
+
+              <div className="grid gap-2 rounded-md bg-background p-3">
+                <LabelValueRow
+                  label="Số dư đầu tháng"
+                  value={formatVnd(emergencyFundSummary.openingBalanceVnd)}
+                />
+                <LabelValueRow label="Đã nạp trong tháng" value={formatVnd(emergencyFundSummary.depositedVnd)} />
+                <LabelValueRow label="Đã rút trong tháng" value={formatVnd(emergencyFundSummary.withdrawnVnd)} />
+                <Separator />
+                <LabelValueRow
+                  label="Số dư hiện tại sau biến động"
+                  value={formatVnd(emergencyFundSummary.effectiveBalanceVnd)}
+                  valueClassName="font-semibold"
+                />
+                <LabelValueRow
+                  label="Tiết kiệm tháng này sẽ chuyển sang tháng sau"
+                  labelTitle="Tiết kiệm tháng này sẽ chuyển sang tháng sau"
+                  value={formatVnd(actualMonthlySavingsVnd)}
+                />
+              </div>
+
+              <div className="mt-3 grid max-h-56 gap-2 overflow-y-auto pr-1">
+                {emergencyFundSummary.transactions.length === 0 ? (
+                  <div className="rounded-md border border-dashed bg-background p-3 text-muted-foreground">
+                    Chưa có biến động quỹ trong tháng này.
+                  </div>
+                ) : (
+                  emergencyFundSummary.transactions.map((tx) => (
+                    <div key={tx.id} className="rounded-md border bg-background p-3">
+                      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span
+                              className={cn(
+                                "font-medium tabular-nums",
+                                tx.type === "withdraw" ? "text-destructive" : "text-emerald-700 dark:text-emerald-400",
+                              )}
+                            >
+                              {tx.type === "withdraw" ? "-" : "+"}
+                              {formatVnd(tx.amountVnd)}
+                            </span>
+                            <span className="text-xs text-muted-foreground">{tx.date}</span>
+                          </div>
+                          <div className="truncate text-sm text-muted-foreground" title={tx.note || tx.reason}>
+                            {tx.reason}{tx.note ? ` • ${tx.note}` : ""}
+                          </div>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                          onClick={() => {
+                            deleteSavingsTransaction(tx.id)
+                            toast.success("Đã xoá biến động quỹ.")
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          <span className="sr-only">Xoá biến động quỹ</span>
+                        </Button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
           </CardContent>
         </Card>
 
@@ -601,6 +781,79 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Dialog
+        open={fundDialogType !== null}
+        onOpenChange={(open) => {
+          if (!open) setFundDialogType(null)
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{fundDialogType === "deposit" ? "Nạp lại quỹ khẩn cấp" : "Rút quỹ khẩn cấp"}</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <div className="grid gap-2">
+              <Label>Số tiền (VND)</Label>
+              <MoneyInput
+                value={fundAmountVnd}
+                onValueChange={setFundAmountVnd}
+                placeholder="Ví dụ: 1.000.000"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label>Ngày</Label>
+              <DatePicker value={fundDate} onChange={(value) => value && setFundDate(value)} />
+            </div>
+            <div className="grid gap-2">
+              <Label>Lý do</Label>
+              <Select value={fundReason} onValueChange={setFundReason}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SAVINGS_REASONS.map((reason) => (
+                    <SelectItem key={reason} value={reason}>
+                      {reason}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label>Ghi chú</Label>
+              <Input
+                value={fundNote}
+                onChange={(event) => setFundNote(event.target.value)}
+                maxLength={200}
+                placeholder="Tuỳ chọn"
+              />
+            </div>
+            <div className="rounded-md bg-muted p-3 text-sm">
+              <LabelValueRow label="Số dư hiện tại" value={formatVnd(emergencyFundSummary.effectiveBalanceVnd)} />
+              {fundDialogType === "withdraw" ? (
+                <LabelValueRow
+                  label="Sau khi rút"
+                  value={formatVnd(Math.max(0, emergencyFundSummary.effectiveBalanceVnd - fundAmountVnd))}
+                />
+              ) : (
+                <LabelValueRow
+                  label="Sau khi nạp"
+                  value={formatVnd(emergencyFundSummary.effectiveBalanceVnd + Math.max(0, fundAmountVnd))}
+                />
+              )}
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => setFundDialogType(null)}>
+                Huỷ
+              </Button>
+              <Button type="button" onClick={handleCreateSavingsTransaction}>
+                {fundDialogType === "deposit" ? "Nạp quỹ" : "Rút quỹ"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={createFixedCostOpen}

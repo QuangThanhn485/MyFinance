@@ -3,6 +3,7 @@ import type {
   Expense,
   FixedCost,
   PurchasePlan,
+  SavingsTransaction,
   Settings,
   SpendingCaps,
 } from "@/domain/types"
@@ -48,6 +49,7 @@ export interface CttmState {
     expenses: EntityTable<Expense>
     fixedCosts: EntityTable<FixedCost>
     purchasePlans: EntityTable<PurchasePlan>
+    savingsTransactions: EntityTable<SavingsTransaction>
   }
   indexes: ExpenseIndexes
   budgetAdjustmentsByMonth: Record<string, BudgetAdjustment>
@@ -94,6 +96,7 @@ export function createInitialState(nowIso: string): CttmState {
       expenses: createEmptyEntityTable(),
       fixedCosts: createEmptyEntityTable(),
       purchasePlans: createEmptyEntityTable(),
+      savingsTransactions: createEmptyEntityTable(),
     },
     indexes: createEmptyExpenseIndexes(),
     budgetAdjustmentsByMonth: {},

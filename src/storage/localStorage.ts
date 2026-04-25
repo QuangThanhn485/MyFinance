@@ -128,6 +128,10 @@ export function loadCttmStateFromKey(storageKey: string): CttmState {
         empty.entities.purchasePlans,
         state.entities?.purchasePlans,
       ),
+      savingsTransactions: mergeEntityTable(
+        empty.entities.savingsTransactions,
+        state.entities?.savingsTransactions,
+      ),
     },
     budgetAdjustmentsByMonth: isRecord(state.budgetAdjustmentsByMonth)
       ? (state.budgetAdjustmentsByMonth as any)

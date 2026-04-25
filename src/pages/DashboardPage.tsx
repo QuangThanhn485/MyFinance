@@ -35,6 +35,7 @@ import {
 } from "@/domain/finance/monthLock"
 import { getDayLockMonthContext } from "@/storage/dayLock"
 import { getCategoryTotals, getExpensesByDate, getMonthTotals } from "@/selectors/expenses"
+import { getEffectiveEmergencyFundBalance } from "@/selectors/savings"
 import { useAppStore } from "@/store/useAppStore"
 
 function clampPct(value: number) {
@@ -118,7 +119,7 @@ export default function DashboardPage() {
     fixedCostsVnd: totals.fixedCostsTotal,
     essentialVariableBaselineVnd: settingsForMonth.essentialVariableBaselineVnd,
     targetMonths: settingsForMonth.emergencyFundTargetMonths,
-    currentBalanceVnd: settingsForMonth.emergencyFundCurrentVnd,
+    currentBalanceVnd: getEffectiveEmergencyFundBalance(data, month),
   })
   const emergencyProgress = clampPct(
     emergency.targetVnd > 0 ? (emergency.currentVnd / emergency.targetVnd) * 100 : 0,
