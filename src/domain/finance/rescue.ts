@@ -5,6 +5,7 @@ import {
   computeMinimumSafetySavings,
 } from "@/domain/finance/finance"
 import { formatVnd } from "@/lib/currency"
+import { addDaysIsoDate } from "@/lib/date"
 
 export type OverspendSeverity = "nhẹ" | "trung bình" | "mạnh"
 
@@ -52,24 +53,6 @@ export type RecoveryOption = {
   actions: PlanAction
   warnings?: string[]
   recommended?: boolean
-}
-
-function parseIsoDateLocal(date: ISODate) {
-  const [y, m, d] = date.split("-").map((x) => Number(x))
-  return new Date(y, (m ?? 1) - 1, d ?? 1)
-}
-
-function formatIsoDateLocal(date: Date): ISODate {
-  const y = date.getFullYear()
-  const m = String(date.getMonth() + 1).padStart(2, "0")
-  const d = String(date.getDate()).padStart(2, "0")
-  return `${y}-${m}-${d}` as ISODate
-}
-
-function addDaysIso(date: ISODate, days: number): ISODate {
-  const dt = parseIsoDateLocal(date)
-  dt.setDate(dt.getDate() + days)
-  return formatIsoDateLocal(dt)
 }
 
 function computeEmergencyMonthsToTarget(input: {
@@ -433,7 +416,7 @@ export function buildForcedPurchaseRescue(input: {
     Math.floor(Math.max(0, remainingVariableBudgetToKeepMssVnd) / daysRemaining),
   )
   const essentialDailyNeedVnd = Math.ceil(remainingEssentialsAfterVnd / daysRemaining)
-  const freezeUntilEnd = addDaysIso(input.today, Math.max(0, daysRemaining - 1))
+  const freezeUntilEnd = addDaysIsoDate(input.today, Math.max(0, daysRemaining - 1))
   const maxSavingsCutVnd = Math.max(0, savingsTargetVnd - mssVnd)
 
   const requiredDailyCutVnd =
@@ -442,7 +425,7 @@ export function buildForcedPurchaseRescue(input: {
     mssDeficitVnd > 0 ? Math.ceil(mssDeficitVnd / Math.ceil(daysRemaining / 7)) : 0
 
   const freezeDays = Math.min(14, daysRemaining)
-  const freezeUntil = addDaysIso(input.today, freezeDays)
+  const freezeUntil = addDaysIsoDate(input.today, freezeDays)
 
   const options: RecoveryOption[] = []
 

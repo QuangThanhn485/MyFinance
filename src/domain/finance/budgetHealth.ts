@@ -1,4 +1,9 @@
 import { clampMoneyVnd } from "@/domain/finance/finance"
+import {
+  computePacedAmountToDateVnd,
+  normalizeFinanceDay,
+  normalizeFinanceDaysInMonth,
+} from "@/domain/finance/pace"
 
 export type BudgetHealthWarningType =
   | "PACE_VARIABLE"
@@ -35,8 +40,8 @@ export function evaluateBudgetHealth(input: {
     essentialSpentVnd: number
   }
 }): BudgetHealthWarning[] {
-  const day = Math.max(1, Math.trunc(input.dayOfMonth))
-  const dim = Math.max(1, Math.trunc(input.daysInMonth))
+  const day = normalizeFinanceDay(input.dayOfMonth)
+  const dim = normalizeFinanceDaysInMonth(input.daysInMonth)
 
   const I = clampMoneyVnd(input.monthlyIncomeVnd)
   if (I <= 0) return []
@@ -51,10 +56,16 @@ export function evaluateBudgetHealth(input: {
   const actualWantsToDateVnd = clampMoneyVnd(input.actualToDate.wantsVnd)
   const essentialSpentToDateVnd = clampMoneyVnd(input.actualToDate.essentialSpentVnd)
 
-  const plannedToDateVariableVnd = Math.round(
-    plannedMonthlyVariableVnd * (day / dim),
-  )
-  const plannedToDateWantsVnd = Math.round(W * (day / dim))
+  const plannedToDateVariableVnd = computePacedAmountToDateVnd({
+    monthlyAmountVnd: plannedMonthlyVariableVnd,
+    dayOfMonth: day,
+    daysInMonth: dim,
+  })
+  const plannedToDateWantsVnd = computePacedAmountToDateVnd({
+    monthlyAmountVnd: W,
+    dayOfMonth: day,
+    daysInMonth: dim,
+  })
 
   const warnings: BudgetHealthWarning[] = []
 

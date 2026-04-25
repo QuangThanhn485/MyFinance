@@ -1,5 +1,10 @@
 import type { BudgetBucket, PurchasePriority } from "@/domain/types"
 import { clampMoneyVnd, computeMinimumSafetySavings } from "@/domain/finance/finance"
+import {
+  computePacedAmountToDateVnd,
+  normalizeFinanceDay,
+  normalizeFinanceDaysInMonth,
+} from "@/domain/finance/pace"
 import { formatVnd } from "@/lib/currency"
 
 export type PurchaseRecommendation = "NÊN MUA" | "CÂN NHẮC" | "KHÔNG NÊN"
@@ -78,6 +83,29 @@ export type PurchaseAdvisorResult = {
   }
 }
 
+export type PurchaseAdvisorInput = {
+  purchase: {
+    name: string
+    priceVnd: number
+    bucket: BudgetBucket
+    forced: boolean
+    priority?: PurchasePriority
+  }
+  context: {
+    incomeVnd: number
+    fixedCostsVnd: number
+    essentialVariableBaselineVnd: number
+    variableNeedsSpentVnd: number
+    variableWantsSpentVnd: number
+    wantsBudgetVnd: number
+    savingsBudgetVnd: number
+    emergencyCoverageMonths: number
+    emergencyFundTargetMonths: number
+    dayOfMonth?: number
+    daysInMonth?: number
+  }
+}
+
 function clampPct(value: number) {
   if (!Number.isFinite(value)) return 0
   return Math.max(0, Math.min(100, Math.round(value)))
@@ -103,28 +131,23 @@ function baseRecommendation(input: {
   return "CÂN NHẮC"
 }
 
-export function evaluatePurchaseAdvisor(input: {
-  purchase: {
-    name: string
-    priceVnd: number
-    bucket: BudgetBucket
-    forced: boolean
-    priority?: PurchasePriority
+function buildDecisionEngine(input: {
+  riskScore: number
+  confidencePct: number
+  hardStops: string[]
+  signals: PurchaseDecisionSignal[]
+  pace: PurchaseDecisionEngine["pace"]
+}): PurchaseDecisionEngine {
+  return {
+    riskScore: input.riskScore,
+    confidencePct: input.confidencePct,
+    hardStops: input.hardStops,
+    signals: input.signals,
+    pace: input.pace,
   }
-  context: {
-    incomeVnd: number
-    fixedCostsVnd: number
-    essentialVariableBaselineVnd: number
-    variableNeedsSpentVnd: number
-    variableWantsSpentVnd: number
-    wantsBudgetVnd: number
-    savingsBudgetVnd: number
-    emergencyCoverageMonths: number
-    emergencyFundTargetMonths: number
-    dayOfMonth?: number
-    daysInMonth?: number
-  }
-}): PurchaseAdvisorResult {
+}
+
+export function evaluatePurchaseAdvisor(input: PurchaseAdvisorInput): PurchaseAdvisorResult {
   const I = clampMoneyVnd(input.context.incomeVnd)
   const F = clampMoneyVnd(input.context.fixedCostsVnd)
   const Ebaseline = clampMoneyVnd(input.context.essentialVariableBaselineVnd)
@@ -136,8 +159,8 @@ export function evaluatePurchaseAdvisor(input: {
     ? input.context.emergencyCoverageMonths
     : 0
 
-  const dim = Math.max(1, Math.trunc(input.context.daysInMonth ?? 30))
-  const dom = Math.max(1, Math.min(dim, Math.trunc(input.context.dayOfMonth ?? dim)))
+  const dim = normalizeFinanceDaysInMonth(input.context.daysInMonth ?? 30)
+  const dom = Math.min(dim, normalizeFinanceDay(input.context.dayOfMonth ?? dim))
   const price = clampMoneyVnd(input.purchase.priceVnd)
   const bucket = input.purchase.bucket
   const priority = input.purchase.priority ?? "med"
@@ -187,8 +210,16 @@ export function evaluatePurchaseAdvisor(input: {
   const deficitIfBuyVnd = Math.max(0, -deficitVnd)
   const violatesSafety = remainingAfterPurchaseVnd < safetyLockVnd
 
-  const plannedNeedsToDateVnd = Math.round((Ebaseline * dom) / dim)
-  const plannedWantsToDateVnd = Math.round((wantsBudget * dom) / dim)
+  const plannedNeedsToDateVnd = computePacedAmountToDateVnd({
+    monthlyAmountVnd: Ebaseline,
+    dayOfMonth: dom,
+    daysInMonth: dim,
+  })
+  const plannedWantsToDateVnd = computePacedAmountToDateVnd({
+    monthlyAmountVnd: wantsBudget,
+    dayOfMonth: dom,
+    daysInMonth: dim,
+  })
   const plannedToDateVnd = plannedNeedsToDateVnd + plannedWantsToDateVnd
   const actualToDateVnd = variableSpentToDateVnd
   const paceOverspendVnd = Math.max(0, actualToDateVnd - plannedToDateVnd)
@@ -316,6 +347,46 @@ export function evaluatePurchaseAdvisor(input: {
     },
   ]
 
+  const purchaseSnapshot: PurchaseAdvisorResult["purchase"] = {
+    name: input.purchase.name,
+    priceVnd: price,
+    bucket,
+    forced: input.purchase.forced,
+    priority,
+  }
+  const impactBase = {
+    ratio: impactRatio,
+    thresholdVnd: impactThresholdVnd,
+  }
+  const fullDecisionEngine = buildDecisionEngine({
+    riskScore,
+    confidencePct,
+    hardStops,
+    signals,
+    pace: {
+      plannedToDateVnd,
+      actualToDateVnd,
+      overspendVnd: paceOverspendVnd,
+      toleranceVnd,
+    },
+  })
+  const fullSafetySnapshot: PurchaseAdvisorResult["safetySnapshot"] = {
+    violatesSafety,
+    emergencyCoverageMonths: coverage,
+    fixedCostsVnd: F,
+    essentialBaselineVnd: Ebaseline,
+    needsSpentToDateVnd: needsSpent,
+    wantsSpentToDateVnd: wantsSpent,
+    variableSpentToDateVnd,
+    minimumSafetySavingsVnd: MSS,
+    safetyBufferVnd,
+    safetyLockVnd,
+    remainingBeforePurchaseVnd,
+    remainingAfterPurchaseVnd,
+    deficitVnd,
+    deficitIfBuyVnd,
+  }
+
   const reasons: string[] = []
   reasons.push(
     `Điểm rủi ro hiện tại: ${riskScore}/100 (độ tin cậy ${confidencePct}%).`,
@@ -332,16 +403,9 @@ export function evaluatePurchaseAdvisor(input: {
         : "Quyết định máy: cân nhắc lại vì ngân sách bucket hiện không đủ."
 
     return {
-      purchase: {
-        name: input.purchase.name,
-        priceVnd: price,
-        bucket,
-        forced: input.purchase.forced,
-        priority,
-      },
+      purchase: purchaseSnapshot,
       impact: {
-        ratio: impactRatio,
-        thresholdVnd: impactThresholdVnd,
+        ...impactBase,
         isNegligible: true,
       },
       recommendation:
@@ -354,7 +418,7 @@ export function evaluatePurchaseAdvisor(input: {
             : "CÂN NHẮC",
       reasons,
       behaviorReminder,
-      decisionEngine: {
+      decisionEngine: buildDecisionEngine({
         riskScore,
         confidencePct,
         hardStops: [],
@@ -365,21 +429,13 @@ export function evaluatePurchaseAdvisor(input: {
           overspendVnd: 0,
           toleranceVnd,
         },
-      },
+      }),
       budgetSnapshot,
       safetySnapshot: {
+        ...fullSafetySnapshot,
         violatesSafety: false,
-        emergencyCoverageMonths: coverage,
-        fixedCostsVnd: F,
-        essentialBaselineVnd: Ebaseline,
-        needsSpentToDateVnd: needsSpent,
-        wantsSpentToDateVnd: wantsSpent,
-        variableSpentToDateVnd,
-        minimumSafetySavingsVnd: MSS,
         safetyBufferVnd: 0,
         safetyLockVnd: 0,
-        remainingBeforePurchaseVnd,
-        remainingAfterPurchaseVnd,
         deficitVnd: 0,
         deficitIfBuyVnd: 0,
       },
@@ -497,50 +553,17 @@ export function evaluatePurchaseAdvisor(input: {
     }
 
     return {
-      purchase: {
-        name: input.purchase.name,
-        priceVnd: price,
-        bucket,
-        forced: input.purchase.forced,
-        priority,
-      },
+      purchase: purchaseSnapshot,
       impact: {
-        ratio: impactRatio,
-        thresholdVnd: impactThresholdVnd,
+        ...impactBase,
         isNegligible: false,
       },
       recommendation,
       reasons,
       behaviorReminder,
-      decisionEngine: {
-        riskScore,
-        confidencePct,
-        hardStops,
-        signals,
-        pace: {
-          plannedToDateVnd,
-          actualToDateVnd,
-          overspendVnd: paceOverspendVnd,
-          toleranceVnd,
-        },
-      },
+      decisionEngine: fullDecisionEngine,
       budgetSnapshot,
-      safetySnapshot: {
-        violatesSafety,
-        emergencyCoverageMonths: coverage,
-        fixedCostsVnd: F,
-        essentialBaselineVnd: Ebaseline,
-        needsSpentToDateVnd: needsSpent,
-        wantsSpentToDateVnd: wantsSpent,
-        variableSpentToDateVnd,
-        minimumSafetySavingsVnd: MSS,
-        safetyBufferVnd,
-        safetyLockVnd,
-        remainingBeforePurchaseVnd,
-        remainingAfterPurchaseVnd,
-        deficitVnd,
-        deficitIfBuyVnd,
-      },
+      safetySnapshot: fullSafetySnapshot,
       savingsPlan: {
         isFeasible,
         warning,
@@ -554,49 +577,16 @@ export function evaluatePurchaseAdvisor(input: {
   }
 
   return {
-    purchase: {
-      name: input.purchase.name,
-      priceVnd: price,
-      bucket,
-      forced: input.purchase.forced,
-      priority,
-    },
+    purchase: purchaseSnapshot,
     impact: {
-      ratio: impactRatio,
-      thresholdVnd: impactThresholdVnd,
+      ...impactBase,
       isNegligible: false,
     },
     recommendation,
     reasons,
     behaviorReminder,
-    decisionEngine: {
-      riskScore,
-      confidencePct,
-      hardStops,
-      signals,
-      pace: {
-        plannedToDateVnd,
-        actualToDateVnd,
-        overspendVnd: paceOverspendVnd,
-        toleranceVnd,
-      },
-    },
+    decisionEngine: fullDecisionEngine,
     budgetSnapshot,
-    safetySnapshot: {
-      violatesSafety,
-      emergencyCoverageMonths: coverage,
-      fixedCostsVnd: F,
-      essentialBaselineVnd: Ebaseline,
-      needsSpentToDateVnd: needsSpent,
-      wantsSpentToDateVnd: wantsSpent,
-      variableSpentToDateVnd,
-      minimumSafetySavingsVnd: MSS,
-      safetyBufferVnd,
-      safetyLockVnd,
-      remainingBeforePurchaseVnd,
-      remainingAfterPurchaseVnd,
-      deficitVnd,
-      deficitIfBuyVnd,
-    },
+    safetySnapshot: fullSafetySnapshot,
   }
 }

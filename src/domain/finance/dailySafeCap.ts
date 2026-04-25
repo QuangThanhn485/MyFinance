@@ -1,4 +1,9 @@
 import { clampMoneyVnd } from "@/domain/finance/finance"
+import {
+  computePacedAmountToDateVnd,
+  normalizeFinanceDay,
+  normalizeFinanceDaysInMonth,
+} from "@/domain/finance/pace"
 
 export type PaceSurplusSnapshot = {
   plannedNeedsToDateVnd: number
@@ -34,8 +39,8 @@ export function computePaceSurplus(input: {
   actualNeedsToDateVnd: number
   actualWantsToDateVnd: number
 }): PaceSurplusSnapshot {
-  const day = Math.max(1, Math.trunc(input.dayOfMonth))
-  const dim = Math.max(1, Math.trunc(input.daysInMonth))
+  const day = normalizeFinanceDay(input.dayOfMonth)
+  const dim = normalizeFinanceDaysInMonth(input.daysInMonth)
 
   const plannedNeedsMonthly = clampMoneyVnd(input.plannedMonthlyNeedsVariableVnd)
   const plannedWantsMonthly = clampMoneyVnd(input.plannedMonthlyWantsVnd)
@@ -43,8 +48,16 @@ export function computePaceSurplus(input: {
   const actualNeedsToDateVnd = clampMoneyVnd(input.actualNeedsToDateVnd)
   const actualWantsToDateVnd = clampMoneyVnd(input.actualWantsToDateVnd)
 
-  const plannedNeedsToDateVnd = Math.round(plannedNeedsMonthly * (day / dim))
-  const plannedWantsToDateVnd = Math.round(plannedWantsMonthly * (day / dim))
+  const plannedNeedsToDateVnd = computePacedAmountToDateVnd({
+    monthlyAmountVnd: plannedNeedsMonthly,
+    dayOfMonth: day,
+    daysInMonth: dim,
+  })
+  const plannedWantsToDateVnd = computePacedAmountToDateVnd({
+    monthlyAmountVnd: plannedWantsMonthly,
+    dayOfMonth: day,
+    daysInMonth: dim,
+  })
 
   const needsSurplusToPaceVnd = Math.max(
     0,
@@ -72,7 +85,7 @@ export function computeTodayCaps(input: {
   needsSpentTodayVnd: number
   wantsSpentTodayVnd: number
 }): TodayCapsSnapshot {
-  const dim = Math.max(1, Math.trunc(input.daysInMonth))
+  const dim = normalizeFinanceDaysInMonth(input.daysInMonth)
 
   const essentialBaselineMonthlyVnd = clampMoneyVnd(input.essentialBaselineMonthlyVnd)
   const wantsBudgetMonthlyVnd = clampMoneyVnd(input.wantsBudgetMonthlyVnd)
@@ -104,8 +117,8 @@ export function computeRecoveryCaps(input: {
   wantsSpentTodayVnd: number
   relaxMultiplier?: number
 }): RecoveryCapsSnapshot {
-  const day = Math.max(1, Math.trunc(input.dayOfMonth))
-  const dim = Math.max(1, Math.trunc(input.daysInMonth))
+  const day = normalizeFinanceDay(input.dayOfMonth)
+  const dim = normalizeFinanceDaysInMonth(input.daysInMonth)
   const remainingDays = Math.max(1, dim - day + 1)
 
   const plannedNeedsMonthlyVnd = clampMoneyVnd(input.plannedMonthlyNeedsVariableVnd)
@@ -117,8 +130,16 @@ export function computeRecoveryCaps(input: {
   const needsSpentTodayVnd = clampMoneyVnd(input.needsSpentTodayVnd)
   const wantsSpentTodayVnd = clampMoneyVnd(input.wantsSpentTodayVnd)
 
-  const plannedNeedsToDateVnd = Math.round(plannedNeedsMonthlyVnd * (day / dim))
-  const plannedWantsToDateVnd = Math.round(plannedWantsMonthlyVnd * (day / dim))
+  const plannedNeedsToDateVnd = computePacedAmountToDateVnd({
+    monthlyAmountVnd: plannedNeedsMonthlyVnd,
+    dayOfMonth: day,
+    daysInMonth: dim,
+  })
+  const plannedWantsToDateVnd = computePacedAmountToDateVnd({
+    monthlyAmountVnd: plannedWantsMonthlyVnd,
+    dayOfMonth: day,
+    daysInMonth: dim,
+  })
 
   const baselineNeedsDailyVnd = Math.floor(plannedNeedsMonthlyVnd / dim)
   const baselineWantsDailyVnd = Math.floor(plannedWantsMonthlyVnd / dim)
