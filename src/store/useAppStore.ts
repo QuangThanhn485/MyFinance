@@ -47,6 +47,7 @@ import {
   type WorkspaceId,
 } from "@/storage/workspace"
 import { writeLastBackup } from "@/storage/backups"
+import { getDayLockMonthContext } from "@/storage/dayLock"
 
 type UiState = {
   overspending: OverspendingResult | null
@@ -833,9 +834,8 @@ export const useAppStore = create<AppStore>()(
                const spendingBudgetVnd = Math.max(0, b.incomeVnd - b.savingsTargetVnd)
                const remainingVnd = spendingBudgetVnd - totals.totalSpent
                const wantsRemainingVnd = b.wantsBudgetVnd - totals.variableWants
-               const dim = daysInMonth(month)
-               const dom = dayOfMonthFromIsoDate(todayIso())
-               const daysRem = Math.max(0, dim - dom)
+               const dayContext = getDayLockMonthContext(todayIso())
+               const daysRem = dayContext.remainingDaysInMonth
 
               autoDailyTotalCap =
                 daysRem > 0

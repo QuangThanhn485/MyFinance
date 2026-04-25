@@ -103,6 +103,7 @@ export type PurchaseAdvisorInput = {
     emergencyFundTargetMonths: number
     dayOfMonth?: number
     daysInMonth?: number
+    remainingDaysInMonth?: number
   }
 }
 
@@ -161,6 +162,10 @@ export function evaluatePurchaseAdvisor(input: PurchaseAdvisorInput): PurchaseAd
 
   const dim = normalizeFinanceDaysInMonth(input.context.daysInMonth ?? 30)
   const dom = Math.min(dim, normalizeFinanceDay(input.context.dayOfMonth ?? dim))
+  const remainingDaysInMonth = Math.max(
+    0,
+    Math.trunc(input.context.remainingDaysInMonth ?? (dim - dom + 1)),
+  )
   const price = clampMoneyVnd(input.purchase.priceVnd)
   const bucket = input.purchase.bucket
   const priority = input.purchase.priority ?? "med"
@@ -543,7 +548,7 @@ export function evaluatePurchaseAdvisor(input: PurchaseAdvisorInput): PurchaseAd
       }
       if (paceOver) {
         cutSuggestions.push(
-          `Giảm chi biến đổi thêm khoảng ${formatVnd(Math.ceil(paceOverspendVnd / Math.max(1, dim - dom + 1)))}/ngày để kéo nhịp về kế hoạch.`,
+          `Giảm chi biến đổi thêm khoảng ${formatVnd(Math.ceil(paceOverspendVnd / Math.max(1, remainingDaysInMonth)))}/ngày để kéo nhịp về kế hoạch.`,
         )
       }
     } else {

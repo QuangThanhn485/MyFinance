@@ -21,7 +21,6 @@ import {
 import type { YearMonth } from "@/domain/types"
 import { formatVnd } from "@/lib/currency"
 import {
-  dayOfMonthFromIsoDate,
   daysInMonth,
   monthFromIsoDate,
   todayIso,
@@ -29,6 +28,7 @@ import {
 import { getCategoryTotals, getMonthTotals } from "@/selectors/expenses"
 import { cn } from "@/lib/utils"
 import { useAppStore } from "@/store/useAppStore"
+import { getDayLockMonthContext } from "@/storage/dayLock"
 import {
   Cell,
   Pie,
@@ -896,9 +896,10 @@ export default function BudgetsPage() {
 
   const now = todayIso()
   const currentMonth = monthFromIsoDate(now)
+  const currentDayContext = getDayLockMonthContext(now)
   const dim = daysInMonth(month)
   const dom =
-    month === currentMonth ? dayOfMonthFromIsoDate(now) : month < currentMonth ? dim : 1
+    month === currentMonth ? currentDayContext.dayOfMonth : month < currentMonth ? dim : 1
   const isCurrentMonth = month === currentMonth
   const needsPace = dom > 0 ? totals.variableNeeds / dom : 0
   const wantsPace = dom > 0 ? totals.variableWants / dom : 0

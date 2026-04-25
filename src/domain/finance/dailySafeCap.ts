@@ -109,6 +109,7 @@ export function computeTodayCaps(input: {
 export function computeRecoveryCaps(input: {
   dayOfMonth: number
   daysInMonth: number
+  remainingDaysInMonth?: number
   plannedMonthlyNeedsVariableVnd: number
   plannedMonthlyWantsVnd: number
   actualNeedsToDateVnd: number
@@ -119,7 +120,10 @@ export function computeRecoveryCaps(input: {
 }): RecoveryCapsSnapshot {
   const day = normalizeFinanceDay(input.dayOfMonth)
   const dim = normalizeFinanceDaysInMonth(input.daysInMonth)
-  const remainingDays = Math.max(1, dim - day + 1)
+  const remainingDays =
+    input.remainingDaysInMonth === undefined
+      ? Math.max(1, dim - day + 1)
+      : Math.max(0, Math.trunc(input.remainingDaysInMonth))
 
   const plannedNeedsMonthlyVnd = clampMoneyVnd(input.plannedMonthlyNeedsVariableVnd)
   const plannedWantsMonthlyVnd = clampMoneyVnd(input.plannedMonthlyWantsVnd)
@@ -129,6 +133,16 @@ export function computeRecoveryCaps(input: {
 
   const needsSpentTodayVnd = clampMoneyVnd(input.needsSpentTodayVnd)
   const wantsSpentTodayVnd = clampMoneyVnd(input.wantsSpentTodayVnd)
+
+  if (remainingDays <= 0) {
+    return {
+      needsRecoveryDailyVnd: 0,
+      wantsRecoveryDailyVnd: 0,
+      needsRemainingTodayVnd: 0,
+      wantsRemainingTodayVnd: 0,
+      remainingDays: 0,
+    }
+  }
 
   const plannedNeedsToDateVnd = computePacedAmountToDateVnd({
     monthlyAmountVnd: plannedNeedsMonthlyVnd,

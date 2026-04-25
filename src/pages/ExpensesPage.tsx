@@ -22,8 +22,6 @@ import {
 import { formatVnd } from "@/lib/currency"
 import {
   addDaysIsoDate,
-  dayOfMonthFromIsoDate,
-  daysInMonth,
   monthFromIsoDate,
   todayIso,
 } from "@/lib/date"
@@ -71,6 +69,7 @@ import {
   type ExpenseTemplate,
 } from "@/storage/templates"
 import {
+  getDayLockMonthContext,
   isDayLocked,
   loadDayLockMemory,
   saveDayLockMemory,
@@ -298,15 +297,20 @@ export default function ExpensesPage() {
     0,
   )
   const month = monthFromIsoDate(selectedDate)
-  const dom = dayOfMonthFromIsoDate(selectedDate)
-  const dim = daysInMonth(month)
+  const dayContext = getDayLockMonthContext(selectedDate, dayLockMemory)
+  const dom = dayContext.dayOfMonth
+  const dim = dayContext.daysInMonth
   const currentMonth = monthFromIsoDate(todayIso())
   const selectedMonthPast = month < currentMonth
   const selectedMonthLocked = isMonthLocked(data, month)
-  const selectedDateLocked = !selectedMonthPast && isDayLocked(selectedDate, dayLockMemory)
+  const selectedDateLocked = !selectedMonthPast && dayContext.locked
   const showDayLockActions = !selectedMonthPast && !selectedMonthLocked
   const selectedDateReadOnly = selectedMonthLocked || selectedDateLocked
-  const capComputationDay = selectedDateLocked ? Math.min(dim, dom + 1) : dom
+  const remainingStartDay = selectedDateLocked ? dayContext.remainingStartDayOfMonth : dom
+  const remainingDaysInMonth = selectedDateLocked
+    ? dayContext.remainingDaysInMonth
+    : Math.max(0, dim - dom + 1)
+  const capComputationDay = Math.min(dim, remainingStartDay)
   const capLabelSuffix = selectedDateLocked ? "ngày kế tiếp" : "hôm nay"
   const monthTotals = getMonthTotals(data, month)
   const monthToDateTotals = useMemo(
@@ -371,18 +375,29 @@ export default function ExpensesPage() {
   )
   const capNeedsSpentTodayVnd = selectedDateLocked ? 0 : needsSpentTodayVnd
   const capWantsSpentTodayVnd = selectedDateLocked ? 0 : wantsSpentTodayVnd
+  const hasRemainingDayInMonth = remainingDaysInMonth > 0
 
-  const todayCaps = computeTodayCaps({
-    daysInMonth: dim,
-    essentialBaselineMonthlyVnd: budgets.essentialVariableBaselineVnd,
-    wantsBudgetMonthlyVnd: budgets.wantsBudgetVnd,
-    needsSpentTodayVnd: capNeedsSpentTodayVnd,
-    wantsSpentTodayVnd: capWantsSpentTodayVnd,
-  })
+  const todayCaps = hasRemainingDayInMonth
+    ? computeTodayCaps({
+        daysInMonth: dim,
+        essentialBaselineMonthlyVnd: budgets.essentialVariableBaselineVnd,
+        wantsBudgetMonthlyVnd: budgets.wantsBudgetVnd,
+        needsSpentTodayVnd: capNeedsSpentTodayVnd,
+        wantsSpentTodayVnd: capWantsSpentTodayVnd,
+      })
+    : {
+        essentialDailyVnd: 0,
+        wantsDailyCapVnd: 0,
+        needsSpentTodayVnd: 0,
+        wantsSpentTodayVnd: 0,
+        needsRemainingTodayVnd: 0,
+        wantsRemainingTodayVnd: 0,
+      }
 
   const recoveryCaps = computeRecoveryCaps({
     dayOfMonth: capComputationDay,
     daysInMonth: dim,
+    remainingDaysInMonth,
     plannedMonthlyNeedsVariableVnd: budgets.essentialVariableBaselineVnd,
     plannedMonthlyWantsVnd: budgets.wantsBudgetVnd,
     actualNeedsToDateVnd: monthToDateTotals.variableNeedsToDateVnd,
@@ -442,9 +457,10 @@ export default function ExpensesPage() {
   const editingExpense = editingId ? data.entities.expenses.byId[editingId] : null
 
   const computeBudgetHealthWarnings = (state: CttmState, date: ISODate) => {
-    const month = monthFromIsoDate(date)
-    const dom = dayOfMonthFromIsoDate(date)
-    const dim = daysInMonth(month)
+    const dayContext = getDayLockMonthContext(date, dayLockMemory)
+    const month = dayContext.month
+    const dom = dayContext.dayOfMonth
+    const dim = dayContext.daysInMonth
 
     const totalsForBudget = getMonthTotals(state, month)
     const settingsForMonth = getEffectiveSettingsForMonth(state, month)
@@ -998,8 +1014,16 @@ export default function ExpensesPage() {
               <div className="h-full overflow-y-auto pr-1 text-sm space-y-2">
                 {selectedDateLocked ? (
                   <div className="rounded-md border border-primary/30 bg-primary/5 px-2 py-1.5 text-xs text-muted-foreground">
-                    Ngày {selectedDate} đã khoá. Các cap bên dưới đang tính theo{" "}
-                    <span className="font-medium text-foreground">ngày kế tiếp</span>.
+                    {remainingDaysInMonth > 0 ? (
+                      <>
+                        Ngày {selectedDate} đã khoá. Các cap bên dưới đang tính theo{" "}
+                        <span className="font-medium text-foreground">ngày kế tiếp</span>.
+                      </>
+                    ) : (
+                      <>
+                        Ngày {selectedDate} đã khoá và không còn ngày nào trong tháng này.
+                      </>
+                    )}
                   </div>
                 ) : null}
                 <LabelValueRow label="Tổng ngày" value={formatVnd(dailyTotal)} />
@@ -1009,6 +1033,10 @@ export default function ExpensesPage() {
                   value={formatVnd(monthTotals.totalSpent)}
                 />
                 <Separator />
+                <LabelValueRow
+                  label="Ngày còn lại trong tháng"
+                  value={new Intl.NumberFormat("vi-VN").format(remainingDaysInMonth)}
+                />
                 <LabelValueRow
                   label={`Thiết yếu ${capLabelSuffix} còn được chi`}
                   value={formatVnd(todayCaps.needsRemainingTodayVnd)}

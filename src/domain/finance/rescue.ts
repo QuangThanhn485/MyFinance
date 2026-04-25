@@ -326,6 +326,8 @@ export function buildForcedPurchaseRescue(input: {
   today: ISODate
   dayOfMonth: number
   daysInMonth: number
+  remainingDaysInMonth?: number
+  remainingStartDate?: ISODate
   incomeVnd: number
   fixedCostsVnd: number
   essentialVariableBaselineVnd: number
@@ -405,7 +407,11 @@ export function buildForcedPurchaseRescue(input: {
 
   const day = Math.max(1, Math.trunc(input.dayOfMonth))
   const daysInMonth = Math.max(1, Math.trunc(input.daysInMonth))
-  const daysRemaining = Math.max(1, daysInMonth - day + 1)
+  const daysRemaining = Math.max(
+    1,
+    Math.trunc(input.remainingDaysInMonth ?? (daysInMonth - day + 1)),
+  )
+  const remainingStartDate = input.remainingStartDate ?? input.today
   const variableSpentAfterVnd = Math.max(0, totalSpentAfterVnd - F)
   const variableBudgetToKeepMssVnd = Math.max(0, I - F - mssVnd)
   const remainingVariableBudgetToKeepMssVnd = Math.trunc(
@@ -416,7 +422,7 @@ export function buildForcedPurchaseRescue(input: {
     Math.floor(Math.max(0, remainingVariableBudgetToKeepMssVnd) / daysRemaining),
   )
   const essentialDailyNeedVnd = Math.ceil(remainingEssentialsAfterVnd / daysRemaining)
-  const freezeUntilEnd = addDaysIsoDate(input.today, Math.max(0, daysRemaining - 1))
+  const freezeUntilEnd = addDaysIsoDate(remainingStartDate, Math.max(0, daysRemaining - 1))
   const maxSavingsCutVnd = Math.max(0, savingsTargetVnd - mssVnd)
 
   const requiredDailyCutVnd =
@@ -425,7 +431,7 @@ export function buildForcedPurchaseRescue(input: {
     mssDeficitVnd > 0 ? Math.ceil(mssDeficitVnd / Math.ceil(daysRemaining / 7)) : 0
 
   const freezeDays = Math.min(14, daysRemaining)
-  const freezeUntil = addDaysIsoDate(input.today, freezeDays)
+  const freezeUntil = addDaysIsoDate(remainingStartDate, freezeDays)
 
   const options: RecoveryOption[] = []
 

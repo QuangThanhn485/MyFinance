@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { computePaceSurplus, computeTodayCaps } from "@/domain/finance/dailySafeCap"
+import { computePaceSurplus, computeRecoveryCaps, computeTodayCaps } from "@/domain/finance/dailySafeCap"
 
 describe("computePaceSurplus", () => {
   it("wantsSurplusToPace decreases after adding 600k wants spend", () => {
@@ -42,6 +42,26 @@ describe("computeTodayCaps", () => {
     expect(caps.essentialDailyVnd).toBe(100_000)
     expect(caps.wantsDailyCapVnd).toBe(140_000)
     expect(caps.needsRemainingTodayVnd).toBe(50_000)
+    expect(caps.wantsRemainingTodayVnd).toBe(0)
+  })
+})
+
+describe("computeRecoveryCaps", () => {
+  it("returns zero caps when no days remain in the month", () => {
+    const caps = computeRecoveryCaps({
+      dayOfMonth: 30,
+      daysInMonth: 30,
+      remainingDaysInMonth: 0,
+      plannedMonthlyNeedsVariableVnd: 3_000_000,
+      plannedMonthlyWantsVnd: 4_200_000,
+      actualNeedsToDateVnd: 1_000_000,
+      actualWantsToDateVnd: 1_000_000,
+      needsSpentTodayVnd: 0,
+      wantsSpentTodayVnd: 0,
+    })
+
+    expect(caps.remainingDays).toBe(0)
+    expect(caps.needsRemainingTodayVnd).toBe(0)
     expect(caps.wantsRemainingTodayVnd).toBe(0)
   })
 })

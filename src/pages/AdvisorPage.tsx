@@ -45,11 +45,12 @@ import { computeBudgets, computeEmergencyFund, computeMinimumSafetySavings } fro
 import { evaluatePurchaseAdvisor } from "@/domain/finance/advisor"
 import { buildForcedPurchaseRescue, type ForcedPurchaseRescueResult } from "@/domain/finance/rescue"
 import { formatVnd } from "@/lib/currency"
-import { dayOfMonthFromIsoDate, daysInMonth, monthFromIsoDate, todayIso } from "@/lib/date"
+import { monthFromIsoDate, todayIso } from "@/lib/date"
 import { getMonthToDateTotals, getMonthTotals } from "@/selectors/expenses"
 import { cn } from "@/lib/utils"
 import { useAppStore } from "@/store/useAppStore"
 import { getEffectiveSettingsForMonth, getMonthlyIncomeTotalVnd } from "@/domain/finance/monthLock"
+import { getDayLockMonthContext } from "@/storage/dayLock"
 
 export default function AdvisorPage() {
   const data = useAppStore((s) => s.data)
@@ -60,6 +61,7 @@ export default function AdvisorPage() {
 
   const today = todayIso()
   const month = monthFromIsoDate(today)
+  const dayContext = getDayLockMonthContext(today)
   const totals = getMonthTotals(data, month)
   const settingsForMonth = getEffectiveSettingsForMonth(data, month)
   const toDateTotals = getMonthToDateTotals(data, today)
@@ -126,8 +128,10 @@ export default function AdvisorPage() {
     const rescue = buildForcedPurchaseRescue({
       month,
       today,
-      dayOfMonth: dayOfMonthFromIsoDate(today),
-      daysInMonth: daysInMonth(month),
+      dayOfMonth: dayContext.dayOfMonth,
+      daysInMonth: dayContext.daysInMonth,
+      remainingDaysInMonth: dayContext.remainingDaysInMonth,
+      remainingStartDate: dayContext.remainingStartDate,
       incomeVnd: budgets.incomeVnd,
       fixedCostsVnd: totals.fixedCostsTotal,
       essentialVariableBaselineVnd: settingsForMonth.essentialVariableBaselineVnd,
@@ -171,8 +175,9 @@ export default function AdvisorPage() {
         savingsBudgetVnd: budgets.savingsBudgetVnd,
         emergencyCoverageMonths: emergency.coverageMonths,
         emergencyFundTargetMonths: settingsForMonth.emergencyFundTargetMonths,
-        dayOfMonth: dayOfMonthFromIsoDate(today),
-        daysInMonth: daysInMonth(month),
+        dayOfMonth: dayContext.dayOfMonth,
+        daysInMonth: dayContext.daysInMonth,
+        remainingDaysInMonth: dayContext.remainingDaysInMonth,
       },
     })
     setResult(advisor)

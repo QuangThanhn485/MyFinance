@@ -1,8 +1,26 @@
-import type { ISODate } from "@/domain/types"
+import type { ISODate, YearMonth } from "@/domain/types"
+import {
+  addDaysIsoDate,
+  dayOfMonthFromIsoDate,
+  daysInMonth,
+  monthFromIsoDate,
+} from "@/lib/date"
 
 export const DAY_LOCK_STORAGE_KEY = "expenses.day.lock.v1"
 
 export type DayLockMemory = Record<string, true>
+
+export type DayLockMonthContext = {
+  date: ISODate
+  month: YearMonth
+  dayOfMonth: number
+  daysInMonth: number
+  locked: boolean
+  remainingStartDate: ISODate
+  remainingStartMonth: YearMonth
+  remainingStartDayOfMonth: number
+  remainingDaysInMonth: number
+}
 
 function isIsoDateKey(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value)
@@ -52,3 +70,36 @@ export function setDayLocked(input: {
   return next
 }
 
+export function getDayLockMonthContext(
+  date: ISODate,
+  memory?: DayLockMemory,
+): DayLockMonthContext {
+  const month = monthFromIsoDate(date)
+  const dim = daysInMonth(month)
+  const day = Math.min(dim, Math.max(1, dayOfMonthFromIsoDate(date)))
+  const locked = isDayLocked(date, memory)
+
+  // Business rule: after a day is locked, all remaining-month calculations
+  // start from the next calendar day instead of the locked date.
+  const remainingStartDate = locked ? addDaysIsoDate(date, 1) : date
+  const remainingStartMonth = monthFromIsoDate(remainingStartDate)
+  const remainingStartInSameMonth = remainingStartMonth === month
+  const remainingStartDayOfMonth = remainingStartInSameMonth
+    ? Math.min(dim, Math.max(1, dayOfMonthFromIsoDate(remainingStartDate)))
+    : dim + 1
+  const remainingDaysInMonth = remainingStartInSameMonth
+    ? Math.max(0, dim - remainingStartDayOfMonth + 1)
+    : 0
+
+  return {
+    date,
+    month,
+    dayOfMonth: day,
+    daysInMonth: dim,
+    locked,
+    remainingStartDate,
+    remainingStartMonth,
+    remainingStartDayOfMonth,
+    remainingDaysInMonth,
+  }
+}
