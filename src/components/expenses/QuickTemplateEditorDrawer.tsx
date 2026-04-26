@@ -132,6 +132,7 @@ export default function QuickTemplateEditorDrawer({
                     value={Number(field.value) || 0}
                     onValueChange={field.onChange}
                     placeholder="Ví dụ: 35.000"
+                    showSteppers
                   />
                 )}
               />

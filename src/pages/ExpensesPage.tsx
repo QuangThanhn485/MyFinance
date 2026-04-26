@@ -216,7 +216,6 @@ export default function ExpensesPage() {
   const [templates, setTemplates] = useState<ExpenseTemplate[]>(() =>
     loadExpenseTemplates(),
   )
-  const [templateSearch, setTemplateSearch] = useState("")
   const [selectedTemplateIds, setSelectedTemplateIds] = useState<Set<string>>(
     () => new Set(),
   )
@@ -263,15 +262,6 @@ export default function ExpensesPage() {
     () => getAllExpenseTemplatesSorted(templates),
     [templates],
   )
-
-  const filteredTemplates = useMemo(() => {
-    const query = templateSearch.trim().toLowerCase()
-    if (!query) return sortedTemplates
-    return sortedTemplates.filter((template) => {
-      const haystack = `${template.name} ${CATEGORY_LABELS_VI[template.category]} ${template.bucket} ${template.note ?? ""}`.toLowerCase()
-      return haystack.includes(query)
-    })
-  }, [sortedTemplates, templateSearch])
 
   useEffect(() => {
     setSelectedTemplateIds((prev) => {
@@ -1089,7 +1079,7 @@ export default function ExpensesPage() {
               icon={<PlusSquare className="h-4 w-4" />}
               collapsed={addCollapsed}
               onToggle={() => setAddCollapsed((prev) => !prev)}
-              summary={`${filteredTemplates.length} item thêm nhanh`}
+              summary={`${sortedTemplates.length} item thêm nhanh`}
               contentClassName="h-full min-h-0"
               headerActions={
                 <div className="flex items-center gap-1">
@@ -1131,10 +1121,8 @@ export default function ExpensesPage() {
               <div className="h-full min-h-0 flex flex-col gap-3">
                 <div className="flex-1 min-h-0">
                   <QuickTemplateList
-                    templates={filteredTemplates}
+                    templates={sortedTemplates}
                     selectedIds={selectedTemplateIds}
-                    searchValue={templateSearch}
-                    onSearchChange={setTemplateSearch}
                     onToggleSelect={(id, checked) => {
                       setSelectedTemplateIds((prev) => {
                         const next = new Set(prev)
@@ -1143,11 +1131,11 @@ export default function ExpensesPage() {
                         return next
                       })
                     }}
-                    onToggleSelectAllVisible={(checked) => {
+                    onToggleSelectAllVisible={(checked, visibleTemplates) => {
                       setSelectedTemplateIds((prev) => {
                         const next = new Set(prev)
-                        if (checked) filteredTemplates.forEach((template) => next.add(template.id))
-                        else filteredTemplates.forEach((template) => next.delete(template.id))
+                        if (checked) visibleTemplates.forEach((template) => next.add(template.id))
+                        else visibleTemplates.forEach((template) => next.delete(template.id))
                         return next
                       })
                     }}
@@ -1311,6 +1299,7 @@ export default function ExpensesPage() {
                       placeholder="Ví dụ: 35.000"
                       value={Number(field.value) || 0}
                       onValueChange={field.onChange}
+                      showSteppers
                     />
                   )}
                 />
@@ -1490,6 +1479,7 @@ export default function ExpensesPage() {
                       placeholder="Ví dụ: 35.000"
                       value={Number(field.value) || 0}
                       onValueChange={field.onChange}
+                      showSteppers
                     />
                   )}
                 />

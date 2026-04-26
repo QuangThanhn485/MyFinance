@@ -159,16 +159,17 @@ export function getRecentExpenseTemplates(
 }
 
 export function getAllExpenseTemplatesSorted(templates: ExpenseTemplate[]) {
-  const lastUsedScore = (t: ExpenseTemplate) => Date.parse(t.lastUsedAt) || 0
-  const createdScore = (t: ExpenseTemplate) => Date.parse(t.createdAt) || 0
   return templates
     .slice()
     .sort((a, b) => {
-      const usedDiff = lastUsedScore(b) - lastUsedScore(a)
-      if (usedDiff !== 0) return usedDiff
-      const createdDiff = createdScore(b) - createdScore(a)
-      if (createdDiff !== 0) return createdDiff
-      return a.name.localeCompare(b.name, "vi")
+      const nameDiff = a.name.localeCompare(b.name, "vi")
+      if (nameDiff !== 0) return nameDiff
+      const categoryDiff = CATEGORY_LABELS_VI[a.category].localeCompare(
+        CATEGORY_LABELS_VI[b.category],
+        "vi",
+      )
+      if (categoryDiff !== 0) return categoryDiff
+      return a.id.localeCompare(b.id)
     })
 }
 

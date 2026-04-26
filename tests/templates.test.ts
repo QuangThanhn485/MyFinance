@@ -2,8 +2,10 @@
 import { beforeEach, describe, expect, it } from "vitest"
 import {
   EXPENSE_TEMPLATES_STORAGE_KEY,
+  getAllExpenseTemplatesSorted,
   getRecentExpenseTemplates,
   loadExpenseTemplates,
+  type ExpenseTemplate,
   upsertExpenseTemplate,
 } from "@/storage/templates"
 
@@ -56,5 +58,34 @@ describe("expense templates", () => {
     expect(t2[0]?.useCount).toBe(2)
     expect(t2[0]?.lastUsedAt).toBe("2026-01-06T00:00:00.000Z")
   })
-})
 
+  it("sorts the full quick item menu alphabetically instead of by last used time", () => {
+    const templates: ExpenseTemplate[] = [
+      {
+        id: "tpl_z",
+        name: "Zoo",
+        amount: 1000,
+        category: "Food",
+        bucket: "NEEDS",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        lastUsedAt: "2026-01-03T00:00:00.000Z",
+        useCount: 4,
+      },
+      {
+        id: "tpl_a",
+        name: "Apple",
+        amount: 1000,
+        category: "Food",
+        bucket: "NEEDS",
+        createdAt: "2026-01-02T00:00:00.000Z",
+        lastUsedAt: "2026-01-01T00:00:00.000Z",
+        useCount: 1,
+      },
+    ]
+
+    expect(getAllExpenseTemplatesSorted(templates).map((template) => template.name)).toEqual([
+      "Apple",
+      "Zoo",
+    ])
+  })
+})
