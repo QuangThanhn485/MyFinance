@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { computePaceSurplus, computeRecoveryCaps, computeTodayCaps } from "@/domain/finance/dailySafeCap"
+import {
+  computePaceSurplus,
+  computeRecoveryCaps,
+  computeRemainingDailySpendingCap,
+  computeTodayCaps,
+} from "@/domain/finance/dailySafeCap"
 
 describe("computePaceSurplus", () => {
   it("wantsSurplusToPace decreases after adding 600k wants spend", () => {
@@ -43,6 +48,21 @@ describe("computeTodayCaps", () => {
     expect(caps.wantsDailyCapVnd).toBe(140_000)
     expect(caps.needsRemainingTodayVnd).toBe(50_000)
     expect(caps.wantsRemainingTodayVnd).toBe(0)
+  })
+})
+
+describe("computeRemainingDailySpendingCap", () => {
+  it("matches the total daily cap formula used by overview screens", () => {
+    const cap = computeRemainingDailySpendingCap({
+      incomeVnd: 10_000_000,
+      savingsTargetVnd: 1_000_000,
+      totalSpentVnd: 8_932_900,
+      remainingDaysInMonth: 1,
+    })
+
+    expect(cap.spendingBudgetVnd).toBe(9_000_000)
+    expect(cap.totalRemainingVnd).toBe(67_100)
+    expect(cap.dailyTotalCapVnd).toBe(67_100)
   })
 })
 

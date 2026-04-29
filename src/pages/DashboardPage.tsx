@@ -6,6 +6,7 @@ import {
   computeEmergencyFund,
   computeMinimumSafetySavings,
 } from "@/domain/finance/finance"
+import { computeRemainingDailySpendingCap } from "@/domain/finance/dailySafeCap"
 import type { ExpenseCategory } from "@/domain/types"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -102,18 +103,22 @@ export default function DashboardPage() {
 
   const savingsMin = budgets.savingsTargetVnd
   const MSS = computeMinimumSafetySavings(budgets.incomeVnd)
-  const spendingBudgetVnd = Math.max(0, budgets.incomeVnd - savingsMin)
-  const totalRemaining = spendingBudgetVnd - totals.totalSpent
-  const essentialRemaining = budgets.essentialVariableBaselineVnd - totals.variableNeeds
-  const wantsRemaining = budgets.wantsBudgetVnd - totals.variableWants
 
   const todayLocked = dayContext.locked
   const monthLocked = isMonthLocked(data, month)
   const daysRemaining = dayContext.remainingDaysInMonth
-  const recommendedDailyCap =
-    daysRemaining > 0 ? Math.floor(Math.max(0, totalRemaining) / daysRemaining) : 0
+  const remainingDailyCap = computeRemainingDailySpendingCap({
+    incomeVnd: budgets.incomeVnd,
+    savingsTargetVnd: savingsMin,
+    totalSpentVnd: totals.totalSpent,
+    remainingDaysInMonth: daysRemaining,
+  })
+  const spendingBudgetVnd = remainingDailyCap.spendingBudgetVnd
+  const totalRemaining = remainingDailyCap.totalRemainingVnd
+  const essentialRemaining = budgets.essentialVariableBaselineVnd - totals.variableNeeds
+  const wantsRemaining = budgets.wantsBudgetVnd - totals.variableWants
   const caps = getEffectiveCapsForMonth(data, month)
-  const shownDailyCap = caps?.dailyTotalCapVnd ?? recommendedDailyCap
+  const shownDailyCap = caps?.dailyTotalCapVnd ?? remainingDailyCap.dailyTotalCapVnd
 
   const emergency = computeEmergencyFund({
     fixedCostsVnd: totals.fixedCostsTotal,

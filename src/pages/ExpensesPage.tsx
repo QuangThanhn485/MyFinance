@@ -3,7 +3,7 @@ import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { Controller, useForm } from "react-hook-form"
 import { toast } from "sonner"
-import { ChartColumn, Info, ListChecks, Lock, LockOpen, PlusSquare } from "lucide-react"
+import { ChartColumn, ListChecks, Lock, LockOpen, PlusSquare } from "lucide-react"
 import { CATEGORY_LABELS_VI, BUCKET_LABELS_VI, EXPENSE_CATEGORIES, suggestBucketByCategory } from "@/domain/constants"
 import type { BudgetBucket, ExpenseCategory, ISODate } from "@/domain/types"
 import DatePicker from "@/components/DatePicker"
@@ -41,6 +41,7 @@ import { cn } from "@/lib/utils"
 import { computeBudgets } from "@/domain/finance/finance"
 import {
   getEffectiveBudgetAdjustmentForMonth,
+  getEffectiveCapsForMonth,
   getEffectiveSettingsForMonth,
   getMonthlyIncomeTotalVnd,
   isMonthLocked,
@@ -50,13 +51,8 @@ import {
   type BudgetHealthWarning,
   type BudgetHealthWarningType,
 } from "@/domain/finance/budgetHealth"
-import { computePaceSurplus, computeRecoveryCaps, computeTodayCaps } from "@/domain/finance/dailySafeCap"
+import { computeRemainingDailySpendingCap } from "@/domain/finance/dailySafeCap"
 import { Badge } from "@/components/ui/badge"
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover"
 import { Separator } from "@/components/ui/separator"
 import LabelValueRow from "@/components/LabelValueRow"
 import {
@@ -296,17 +292,11 @@ export default function ExpensesPage() {
   const selectedDateLocked = !selectedMonthPast && dayContext.locked
   const showDayLockActions = !selectedMonthPast && !selectedMonthLocked
   const selectedDateReadOnly = selectedMonthLocked || selectedDateLocked
-  const remainingStartDay = selectedDateLocked ? dayContext.remainingStartDayOfMonth : dom
   const remainingDaysInMonth = selectedDateLocked
     ? dayContext.remainingDaysInMonth
     : Math.max(0, dim - dom + 1)
-  const capComputationDay = Math.min(dim, remainingStartDay)
   const capLabelSuffix = selectedDateLocked ? "ngày kế tiếp" : "hôm nay"
   const monthTotals = getMonthTotals(data, month)
-  const monthToDateTotals = useMemo(
-    () => getMonthToDateTotals(data, selectedDate),
-    [data, selectedDate],
-  )
 
   useEffect(() => {
     if (!healthWarningsDate || healthWarningsDate === selectedDate) return
@@ -355,55 +345,16 @@ export default function ExpensesPage() {
     customSavingsGoalVnd: settingsForMonth.customSavingsGoalVnd,
   })
 
-  const needsSpentTodayVnd = expensesToday.reduce(
-    (sum, ex) => sum + (ex.bucket === "needs" ? ex.amountVnd : 0),
-    0,
-  )
-  const wantsSpentTodayVnd = expensesToday.reduce(
-    (sum, ex) => sum + (ex.bucket === "wants" ? ex.amountVnd : 0),
-    0,
-  )
-  const capNeedsSpentTodayVnd = selectedDateLocked ? 0 : needsSpentTodayVnd
-  const capWantsSpentTodayVnd = selectedDateLocked ? 0 : wantsSpentTodayVnd
-  const hasRemainingDayInMonth = remainingDaysInMonth > 0
-
-  const todayCaps = hasRemainingDayInMonth
-    ? computeTodayCaps({
-        daysInMonth: dim,
-        essentialBaselineMonthlyVnd: budgets.essentialVariableBaselineVnd,
-        wantsBudgetMonthlyVnd: budgets.wantsBudgetVnd,
-        needsSpentTodayVnd: capNeedsSpentTodayVnd,
-        wantsSpentTodayVnd: capWantsSpentTodayVnd,
-      })
-    : {
-        essentialDailyVnd: 0,
-        wantsDailyCapVnd: 0,
-        needsSpentTodayVnd: 0,
-        wantsSpentTodayVnd: 0,
-        needsRemainingTodayVnd: 0,
-        wantsRemainingTodayVnd: 0,
-      }
-
-  const recoveryCaps = computeRecoveryCaps({
-    dayOfMonth: capComputationDay,
-    daysInMonth: dim,
+  const caps = getEffectiveCapsForMonth(data, month)
+  const remainingDailyCap = computeRemainingDailySpendingCap({
+    incomeVnd: budgets.incomeVnd,
+    savingsTargetVnd: budgets.savingsTargetVnd,
+    totalSpentVnd: monthTotals.totalSpent,
     remainingDaysInMonth,
-    plannedMonthlyNeedsVariableVnd: budgets.essentialVariableBaselineVnd,
-    plannedMonthlyWantsVnd: budgets.wantsBudgetVnd,
-    actualNeedsToDateVnd: monthToDateTotals.variableNeedsToDateVnd,
-    actualWantsToDateVnd: monthToDateTotals.variableWantsToDateVnd,
-    needsSpentTodayVnd: capNeedsSpentTodayVnd,
-    wantsSpentTodayVnd: capWantsSpentTodayVnd,
   })
-
-  const paceSurplus = computePaceSurplus({
-    dayOfMonth: capComputationDay,
-    daysInMonth: dim,
-    plannedMonthlyNeedsVariableVnd: budgets.essentialVariableBaselineVnd,
-    plannedMonthlyWantsVnd: budgets.wantsBudgetVnd,
-    actualNeedsToDateVnd: monthToDateTotals.variableNeedsToDateVnd,
-    actualWantsToDateVnd: monthToDateTotals.variableWantsToDateVnd,
-  })
+  const shownDailyTotalCapVnd = caps?.dailyTotalCapVnd ?? remainingDailyCap.dailyTotalCapVnd
+  const essentialRemainingVnd = budgets.essentialVariableBaselineVnd - monthTotals.variableNeeds
+  const wantsRemainingVnd = budgets.wantsBudgetVnd - monthTotals.variableWants
 
   const formSchema = z.object({
     amountVnd: z.coerce.number().int().positive({ message: "Số tiền phải > 0." }),
@@ -1024,47 +975,44 @@ export default function ExpensesPage() {
                 />
                 <Separator />
                 <LabelValueRow
+                  label="Còn được chi để giữ tiết kiệm"
+                  value={formatVnd(remainingDailyCap.totalRemainingVnd)}
+                  valueClassName={cn(remainingDailyCap.totalRemainingVnd < 0 && "text-destructive")}
+                />
+                <LabelValueRow
                   label="Ngày còn lại trong tháng"
                   value={new Intl.NumberFormat("vi-VN").format(remainingDaysInMonth)}
                 />
-                <LabelValueRow
-                  label={`Thiết yếu ${capLabelSuffix} còn được chi`}
-                  value={formatVnd(todayCaps.needsRemainingTodayVnd)}
-                />
-                <LabelValueRow
-                  label={`Mong muốn ${capLabelSuffix} còn được chi`}
-                  value={formatVnd(todayCaps.wantsRemainingTodayVnd)}
-                />
-                <LabelValueRow
-                  label={`Thiết yếu cap hồi phục (${capLabelSuffix})`}
-                  labelTrailing={
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground">
-                          <Info className="h-4 w-4" />
-                          <span className="sr-only">Giải thích</span>
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="max-w-xs text-sm">
-                        Nếu vượt nhịp thì cap sẽ siết theo phần còn lại/ngày; nếu thấp hơn
-                        nhịp thì nới nhẹ (tối đa +20% baseline).
-                      </PopoverContent>
-                    </Popover>
-                  }
-                  value={formatVnd(recoveryCaps.needsRemainingTodayVnd)}
-                />
-                <LabelValueRow
-                  label={`Mong muốn cap hồi phục (${capLabelSuffix})`}
-                  value={formatVnd(recoveryCaps.wantsRemainingTodayVnd)}
-                />
+                <div className="rounded-md border border-primary/30 bg-primary/5 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-xs text-muted-foreground">
+                        Cap tổng {capLabelSuffix}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        Ngân sách chi còn lại / số ngày còn lại
+                      </div>
+                    </div>
+                    <div
+                      className={cn(
+                        "shrink-0 text-lg font-semibold tabular-nums",
+                        shownDailyTotalCapVnd <= 0 && "text-destructive",
+                      )}
+                    >
+                      {formatVnd(shownDailyTotalCapVnd)}
+                    </div>
+                  </div>
+                </div>
                 <Separator />
                 <LabelValueRow
-                  label={`Thiết yếu dư so với nhịp (${capLabelSuffix})`}
-                  value={formatVnd(paceSurplus.needsSurplusToPaceVnd)}
+                  label="Thiết yếu còn trong tháng"
+                  value={formatVnd(essentialRemainingVnd)}
+                  valueClassName={cn(essentialRemainingVnd < 0 && "text-destructive")}
                 />
                 <LabelValueRow
-                  label={`Mong muốn dư so với nhịp (${capLabelSuffix})`}
-                  value={formatVnd(paceSurplus.wantsSurplusToPaceVnd)}
+                  label="Mong muốn còn trong tháng"
+                  value={formatVnd(wantsRemainingVnd)}
+                  valueClassName={cn(wantsRemainingVnd < 0 && "text-destructive")}
                 />
               </div>
             </CollapsibleCard>

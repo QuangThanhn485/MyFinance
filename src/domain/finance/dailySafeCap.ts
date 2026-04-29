@@ -31,6 +31,39 @@ export type RecoveryCapsSnapshot = {
   remainingDays: number
 }
 
+export type RemainingDailySpendingCapSnapshot = {
+  spendingBudgetVnd: number
+  totalRemainingVnd: number
+  remainingDaysInMonth: number
+  dailyTotalCapVnd: number
+}
+
+export function computeRemainingDailySpendingCap(input: {
+  incomeVnd: number
+  savingsTargetVnd: number
+  totalSpentVnd: number
+  remainingDaysInMonth: number
+}): RemainingDailySpendingCapSnapshot {
+  const incomeVnd = clampMoneyVnd(input.incomeVnd)
+  const savingsTargetVnd = clampMoneyVnd(input.savingsTargetVnd)
+  const totalSpentVnd = clampMoneyVnd(input.totalSpentVnd)
+  const remainingDaysInMonth = Math.max(0, Math.trunc(input.remainingDaysInMonth))
+
+  const spendingBudgetVnd = Math.max(0, incomeVnd - savingsTargetVnd)
+  const totalRemainingVnd = spendingBudgetVnd - totalSpentVnd
+  const dailyTotalCapVnd =
+    remainingDaysInMonth > 0
+      ? Math.floor(Math.max(0, totalRemainingVnd) / remainingDaysInMonth)
+      : 0
+
+  return {
+    spendingBudgetVnd,
+    totalRemainingVnd,
+    remainingDaysInMonth,
+    dailyTotalCapVnd,
+  }
+}
+
 export function computePaceSurplus(input: {
   dayOfMonth: number
   daysInMonth: number

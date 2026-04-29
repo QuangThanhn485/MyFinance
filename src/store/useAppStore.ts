@@ -16,6 +16,7 @@ import type {
 } from "@/domain/types"
 import { suggestBucketByCategory } from "@/domain/constants"
 import { computeBudgets } from "@/domain/finance/finance"
+import { computeRemainingDailySpendingCap } from "@/domain/finance/dailySafeCap"
 import type { OverspendingResult, RecoveryOption } from "@/domain/finance/rescue"
 import { evaluateOverspending } from "@/domain/finance/rescue"
 import { computeEmergencyFund } from "@/domain/finance/finance"
@@ -903,24 +904,25 @@ export const useAppStore = create<AppStore>()(
               const totals = getMonthTotals(next, month)
               const adj = next.budgetAdjustmentsByMonth[month] ?? null
               const settingsForMonth = getEffectiveSettingsForMonth(next, month)
-               const b = computeBudgets({
-                 incomeVnd: getMonthlyIncomeTotalVnd(settingsForMonth),
-                 fixedCostsVnd: totals.fixedCostsTotal,
-                 essentialVariableBaselineVnd: settingsForMonth.essentialVariableBaselineVnd,
-                 rule: settingsForMonth.budgetRule,
-                 adjustment: adj,
-                 customSavingsGoalVnd: settingsForMonth.customSavingsGoalVnd,
-               })
-               const spendingBudgetVnd = Math.max(0, b.incomeVnd - b.savingsTargetVnd)
-               const remainingVnd = spendingBudgetVnd - totals.totalSpent
-               const wantsRemainingVnd = b.wantsBudgetVnd - totals.variableWants
-               const dayContext = getDayLockMonthContext(todayIso())
-               const daysRem = dayContext.remainingDaysInMonth
+              const b = computeBudgets({
+                incomeVnd: getMonthlyIncomeTotalVnd(settingsForMonth),
+                fixedCostsVnd: totals.fixedCostsTotal,
+                essentialVariableBaselineVnd: settingsForMonth.essentialVariableBaselineVnd,
+                rule: settingsForMonth.budgetRule,
+                adjustment: adj,
+                customSavingsGoalVnd: settingsForMonth.customSavingsGoalVnd,
+              })
+              const wantsRemainingVnd = b.wantsBudgetVnd - totals.variableWants
+              const dayContext = getDayLockMonthContext(todayIso())
+              const daysRem = dayContext.remainingDaysInMonth
+              const remainingDailyCap = computeRemainingDailySpendingCap({
+                incomeVnd: b.incomeVnd,
+                savingsTargetVnd: b.savingsTargetVnd,
+                totalSpentVnd: totals.totalSpent,
+                remainingDaysInMonth: daysRem,
+              })
 
-              autoDailyTotalCap =
-                daysRem > 0
-                  ? Math.floor(Math.max(0, remainingVnd) / daysRem)
-                  : 0
+              autoDailyTotalCap = remainingDailyCap.dailyTotalCapVnd
               autoDailyWantsCap =
                 daysRem > 0
                   ? Math.floor(Math.max(0, wantsRemainingVnd) / daysRem)
