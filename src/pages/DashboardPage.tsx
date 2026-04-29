@@ -6,7 +6,10 @@ import {
   computeEmergencyFund,
   computeMinimumSafetySavings,
 } from "@/domain/finance/finance"
-import { computeRemainingDailySpendingCap } from "@/domain/finance/dailySafeCap"
+import {
+  computeRemainingDailySpendingCap,
+  resolveEffectiveDailyTotalCapVnd,
+} from "@/domain/finance/dailySafeCap"
 import type { ExpenseCategory } from "@/domain/types"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -29,6 +32,7 @@ import {
 } from "@/lib/date"
 import { cn } from "@/lib/utils"
 import {
+  getEffectiveBudgetAdjustmentForMonth,
   getEffectiveCapsForMonth,
   getEffectiveSettingsForMonth,
   getMonthlyIncomeTotalVnd,
@@ -91,7 +95,7 @@ export default function DashboardPage() {
     0,
   )
 
-  const adjustment = data.budgetAdjustmentsByMonth[month] ?? null
+  const adjustment = getEffectiveBudgetAdjustmentForMonth(data, month)
   const budgets = computeBudgets({
     incomeVnd: getMonthlyIncomeTotalVnd(settingsForMonth),
     fixedCostsVnd: totals.fixedCostsTotal,
@@ -118,11 +122,14 @@ export default function DashboardPage() {
   const essentialRemaining = budgets.essentialVariableBaselineVnd - totals.variableNeeds
   const wantsRemaining = budgets.wantsBudgetVnd - totals.variableWants
   const caps = getEffectiveCapsForMonth(data, month)
-  const shownDailyCap = caps?.dailyTotalCapVnd ?? remainingDailyCap.dailyTotalCapVnd
+  const shownDailyCap = resolveEffectiveDailyTotalCapVnd({
+    computedDailyTotalCapVnd: remainingDailyCap.dailyTotalCapVnd,
+    appliedDailyTotalCapVnd: caps?.dailyTotalCapVnd,
+  })
 
   const emergency = computeEmergencyFund({
     fixedCostsVnd: totals.fixedCostsTotal,
-    essentialVariableBaselineVnd: settingsForMonth.essentialVariableBaselineVnd,
+    essentialVariableBaselineVnd: budgets.essentialVariableBaselineVnd,
     targetMonths: settingsForMonth.emergencyFundTargetMonths,
     currentBalanceVnd: getEffectiveEmergencyFundBalance(data, month),
   })
@@ -133,17 +140,17 @@ export default function DashboardPage() {
   const wantsFreezeActive =
     caps?.wantsFreezeUntil && today <= caps.wantsFreezeUntil ? true : false
 
-  const spendingProgress = clampPct(
-    spendingBudgetVnd > 0 ? (totals.totalSpent / spendingBudgetVnd) * 100 : 0,
-  )
-  const essentialProgress = clampPct(
+  const spendingProgressPct =
+    spendingBudgetVnd > 0 ? (totals.totalSpent / spendingBudgetVnd) * 100 : 0
+  const essentialProgressPct =
     budgets.essentialVariableBaselineVnd > 0
       ? (totals.variableNeeds / budgets.essentialVariableBaselineVnd) * 100
-      : 0,
-  )
-  const wantsProgress = clampPct(
-    budgets.wantsBudgetVnd > 0 ? (totals.variableWants / budgets.wantsBudgetVnd) * 100 : 0,
-  )
+      : 0
+  const wantsProgressPct =
+    budgets.wantsBudgetVnd > 0 ? (totals.variableWants / budgets.wantsBudgetVnd) * 100 : 0
+  const spendingProgress = clampPct(spendingProgressPct)
+  const essentialProgress = clampPct(essentialProgressPct)
+  const wantsProgress = clampPct(wantsProgressPct)
   const projectedSavingsNow = budgets.incomeVnd - totals.totalSpent
 
   const categoryRows = useMemo(() => {
@@ -221,24 +228,27 @@ export default function DashboardPage() {
               <div className="space-y-1.5 pt-1">
                 <LabelValueRow
                   label="Tổng chi / ngân sách"
-                  value={`${spendingProgress.toFixed(0)}%`}
+                  value={`${Math.max(0, spendingProgressPct).toFixed(0)}%`}
                   className="text-sm"
+                  valueClassName={cn(spendingProgressPct > 100 && "text-destructive")}
                 />
                 <Progress value={spendingProgress} />
               </div>
               <div className="space-y-1.5">
                 <LabelValueRow
                   label="Thiết yếu biến đổi (E)"
-                  value={`${essentialProgress.toFixed(0)}%`}
+                  value={`${Math.max(0, essentialProgressPct).toFixed(0)}%`}
                   className="text-sm"
+                  valueClassName={cn(essentialProgressPct > 100 && "text-destructive")}
                 />
                 <Progress value={essentialProgress} />
               </div>
               <div className="space-y-1.5">
                 <LabelValueRow
                   label="Mong muốn (W)"
-                  value={`${wantsProgress.toFixed(0)}%`}
+                  value={`${Math.max(0, wantsProgressPct).toFixed(0)}%`}
                   className="text-sm"
+                  valueClassName={cn(wantsProgressPct > 100 && "text-destructive")}
                 />
                 <Progress value={wantsProgress} />
               </div>

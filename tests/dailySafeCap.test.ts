@@ -4,6 +4,7 @@ import {
   computeRecoveryCaps,
   computeRemainingDailySpendingCap,
   computeTodayCaps,
+  resolveEffectiveDailyTotalCapVnd,
 } from "@/domain/finance/dailySafeCap"
 
 describe("computePaceSurplus", () => {
@@ -63,6 +64,26 @@ describe("computeRemainingDailySpendingCap", () => {
     expect(cap.spendingBudgetVnd).toBe(9_000_000)
     expect(cap.totalRemainingVnd).toBe(67_100)
     expect(cap.dailyTotalCapVnd).toBe(67_100)
+  })
+})
+
+describe("resolveEffectiveDailyTotalCapVnd", () => {
+  it("does not let a stale applied cap exceed the recomputed safe cap", () => {
+    expect(
+      resolveEffectiveDailyTotalCapVnd({
+        computedDailyTotalCapVnd: 67_100,
+        appliedDailyTotalCapVnd: 100_000,
+      }),
+    ).toBe(67_100)
+  })
+
+  it("keeps a stricter applied cap", () => {
+    expect(
+      resolveEffectiveDailyTotalCapVnd({
+        computedDailyTotalCapVnd: 67_100,
+        appliedDailyTotalCapVnd: 50_000,
+      }),
+    ).toBe(50_000)
   })
 })
 

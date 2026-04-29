@@ -34,7 +34,11 @@ import {
   getEffectiveEmergencyFundBalance,
   getNextMonthEmergencyOpeningBalance,
 } from "@/selectors/savings"
-import { getEffectiveSettingsForMonth, getMonthlyIncomeTotalVnd } from "@/domain/finance/monthLock"
+import {
+  getEffectiveBudgetAdjustmentForMonth,
+  getEffectiveSettingsForMonth,
+  getMonthlyIncomeTotalVnd,
+} from "@/domain/finance/monthLock"
 import {
   addExpenseToIndexes,
   rebuildExpenseIndexesFromEntities,
@@ -636,7 +640,7 @@ export const useAppStore = create<AppStore>()(
         const state = get().data
         const month = monthFromIsoDate(date)
         const totals = getMonthTotals(state, month)
-        const adjustment = state.budgetAdjustmentsByMonth[month] ?? null
+        const adjustment = getEffectiveBudgetAdjustmentForMonth(state, month)
         const settingsForMonth = getEffectiveSettingsForMonth(state, month)
         const budgets = computeBudgets({
           incomeVnd: getMonthlyIncomeTotalVnd(settingsForMonth),
@@ -648,7 +652,7 @@ export const useAppStore = create<AppStore>()(
         })
         const emergency = computeEmergencyFund({
           fixedCostsVnd: totals.fixedCostsTotal,
-          essentialVariableBaselineVnd: settingsForMonth.essentialVariableBaselineVnd,
+          essentialVariableBaselineVnd: budgets.essentialVariableBaselineVnd,
           targetMonths: settingsForMonth.emergencyFundTargetMonths,
           currentBalanceVnd: getEffectiveEmergencyFundBalance(state, month),
         })

@@ -64,6 +64,18 @@ export function computeRemainingDailySpendingCap(input: {
   }
 }
 
+export function resolveEffectiveDailyTotalCapVnd(input: {
+  computedDailyTotalCapVnd: number
+  appliedDailyTotalCapVnd?: number | null
+}) {
+  const computedDailyTotalCapVnd = clampMoneyVnd(input.computedDailyTotalCapVnd)
+  if (input.appliedDailyTotalCapVnd === undefined || input.appliedDailyTotalCapVnd === null) {
+    return computedDailyTotalCapVnd
+  }
+
+  return Math.min(computedDailyTotalCapVnd, clampMoneyVnd(input.appliedDailyTotalCapVnd))
+}
+
 export function computePaceSurplus(input: {
   dayOfMonth: number
   daysInMonth: number

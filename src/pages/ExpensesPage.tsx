@@ -51,7 +51,10 @@ import {
   type BudgetHealthWarning,
   type BudgetHealthWarningType,
 } from "@/domain/finance/budgetHealth"
-import { computeRemainingDailySpendingCap } from "@/domain/finance/dailySafeCap"
+import {
+  computeRemainingDailySpendingCap,
+  resolveEffectiveDailyTotalCapVnd,
+} from "@/domain/finance/dailySafeCap"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import LabelValueRow from "@/components/LabelValueRow"
@@ -352,7 +355,10 @@ export default function ExpensesPage() {
     totalSpentVnd: monthTotals.totalSpent,
     remainingDaysInMonth,
   })
-  const shownDailyTotalCapVnd = caps?.dailyTotalCapVnd ?? remainingDailyCap.dailyTotalCapVnd
+  const shownDailyTotalCapVnd = resolveEffectiveDailyTotalCapVnd({
+    computedDailyTotalCapVnd: remainingDailyCap.dailyTotalCapVnd,
+    appliedDailyTotalCapVnd: caps?.dailyTotalCapVnd,
+  })
   const essentialRemainingVnd = budgets.essentialVariableBaselineVnd - monthTotals.variableNeeds
   const wantsRemainingVnd = budgets.wantsBudgetVnd - monthTotals.variableWants
 
