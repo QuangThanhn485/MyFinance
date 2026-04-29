@@ -16,12 +16,7 @@ import { toast } from "sonner"
 import DatePicker from "@/components/DatePicker"
 import { CATEGORY_LABELS_VI, EXPENSE_CATEGORIES } from "@/domain/constants"
 import {
-  computeDebtToIncome,
-  computeEmergencyFund,
-} from "@/domain/finance/finance"
-import {
   getEffectiveSettingsForMonth,
-  getMonthlyIncomeTotalVnd,
   isMonthLocked,
 } from "@/domain/finance/monthLock"
 import type {
@@ -164,10 +159,7 @@ export default function SettingsPage() {
     return null
   }, [data.entities.fixedCosts, selectedMonth])
 
-  const fixedCostsTotal = fixedCosts.reduce((sum, fc) => sum + (fc.active ? fc.amountVnd : 0), 0)
   const debtPaymentMonthlyVnd = Math.max(0, Math.trunc(settingsForMonth.debtPaymentMonthlyVnd ?? 0))
-  const fixedCostsWithDebtTotal = fixedCostsTotal + debtPaymentMonthlyVnd
-  const incomeTotalVnd = getMonthlyIncomeTotalVnd(settingsForMonth)
   const emergencyFundSummary = useMemo(
     () => getEmergencyFundMonthSummary(data, selectedMonth),
     [data, selectedMonth],
@@ -176,18 +168,6 @@ export default function SettingsPage() {
     () => getActualMonthlySavingsVnd(data, selectedMonth),
     [data, selectedMonth],
   )
-
-  const emergency = computeEmergencyFund({
-    fixedCostsVnd: fixedCostsWithDebtTotal,
-    essentialVariableBaselineVnd: settingsForMonth.essentialVariableBaselineVnd,
-    targetMonths: settingsForMonth.emergencyFundTargetMonths,
-    currentBalanceVnd: emergencyFundSummary.effectiveBalanceVnd,
-  })
-
-  const debt = computeDebtToIncome({
-    incomeVnd: incomeTotalVnd,
-    debtPaymentMonthlyVnd,
-  })
 
   const schema = z
     .object({
@@ -680,23 +660,7 @@ export default function SettingsPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="rounded-md bg-muted p-3 text-sm">
-              <LabelValueRow label="Tổng chi cố định (F)" value={formatVnd(fixedCostsTotal)} />
-              <LabelValueRow label="Trả nợ tháng" value={formatVnd(debtPaymentMonthlyVnd)} />
-              <LabelValueRow label="F + nợ" value={formatVnd(fixedCostsWithDebtTotal)} />
-              <Separator className="my-2" />
-              <LabelValueRow label="Thu nhập tháng" value={formatVnd(incomeTotalVnd)} />
-              <LabelValueRow
-                label="Tỷ lệ nợ / thu nhập"
-                value={`${(debt.ratio * 100).toFixed(1)}%`}
-                valueClassName={cn(
-                  debt.level === "red" ? "text-destructive" : debt.level === "yellow" ? "text-amber-600" : "",
-                )}
-              />
-              <LabelValueRow label="Quỹ khẩn cấp mục tiêu" value={formatVnd(emergency.targetVnd)} />
-            </div>
-
-            <div className="grid max-h-[430px] gap-2 overflow-y-auto pr-1">
+            <div className="grid max-h-[calc(100vh-180px)] gap-2 overflow-y-auto pr-1">
               {fixedCosts.length === 0 ? (
                 <div className="space-y-3 rounded-md border border-dashed p-3 text-sm text-muted-foreground">
                   <div>Tháng này chưa có chi phí cố định.</div>

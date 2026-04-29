@@ -1072,40 +1072,33 @@ export default function ExpensesPage() {
                 </div>
               }
             >
-              <div className="h-full min-h-0 flex flex-col gap-3">
-                <div className="flex-1 min-h-0">
-                  <QuickTemplateList
-                    templates={sortedTemplates}
-                    selectedIds={selectedTemplateIds}
-                    onToggleSelect={(id, checked) => {
-                      setSelectedTemplateIds((prev) => {
-                        const next = new Set(prev)
-                        if (checked) next.add(id)
-                        else next.delete(id)
-                        return next
-                      })
-                    }}
-                    onToggleSelectAllVisible={(checked, visibleTemplates) => {
-                      setSelectedTemplateIds((prev) => {
-                        const next = new Set(prev)
-                        if (checked) visibleTemplates.forEach((template) => next.add(template.id))
-                        else visibleTemplates.forEach((template) => next.delete(template.id))
-                        return next
-                      })
-                    }}
-                    onClearSelection={() => setSelectedTemplateIds(new Set())}
-                    onBulkAddSelected={addSelectedTemplates}
-                    onBulkDelete={() => setBulkDeleteTemplatesOpen(true)}
-                    onQuickAdd={addExpenseFromTemplate}
-                    onEdit={(template) => setTemplateEditor({ mode: "edit", templateId: template.id })}
-                    showCreateButton={false}
-                  />
-                </div>
-                <div className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
-                  Form thêm chi tiêu đã chuyển vào popup để giữ bố cục gọn. Bấm nút
-                  <span className="font-medium text-foreground"> Thêm </span>
-                  ở tiêu đề thẻ để mở form.
-                </div>
+              <div className="h-full min-h-0">
+                <QuickTemplateList
+                  templates={sortedTemplates}
+                  selectedIds={selectedTemplateIds}
+                  onToggleSelect={(id, checked) => {
+                    setSelectedTemplateIds((prev) => {
+                      const next = new Set(prev)
+                      if (checked) next.add(id)
+                      else next.delete(id)
+                      return next
+                    })
+                  }}
+                  onToggleSelectAllVisible={(checked, visibleTemplates) => {
+                    setSelectedTemplateIds((prev) => {
+                      const next = new Set(prev)
+                      if (checked) visibleTemplates.forEach((template) => next.add(template.id))
+                      else visibleTemplates.forEach((template) => next.delete(template.id))
+                      return next
+                    })
+                  }}
+                  onClearSelection={() => setSelectedTemplateIds(new Set())}
+                  onBulkAddSelected={addSelectedTemplates}
+                  onBulkDelete={() => setBulkDeleteTemplatesOpen(true)}
+                  onQuickAdd={addExpenseFromTemplate}
+                  onEdit={(template) => setTemplateEditor({ mode: "edit", templateId: template.id })}
+                  showCreateButton={false}
+                />
               </div>
             </CollapsibleCard>
           </div>
