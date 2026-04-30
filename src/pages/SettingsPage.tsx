@@ -127,7 +127,7 @@ export default function SettingsPage() {
     if (selectedMonth >= currentMonth) {
       ensureSettingsForMonth(selectedMonth)
     }
-  }, [currentMonth, ensureSettingsForMonth, selectedMonth])
+  }, [currentMonth, data.updatedAt, ensureSettingsForMonth, selectedMonth])
 
   const selectedMonthLocked = isMonthLocked(data, selectedMonth)
   const hasOwnSettings = !!data.settingsByMonth[selectedMonth]

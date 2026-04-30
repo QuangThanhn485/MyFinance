@@ -194,6 +194,7 @@ function cloneSettings(settings: Settings): Settings {
 function ensureMonthConfigurationFromPrevious(
   state: CttmState,
   targetMonth: YearMonth,
+  options: { refreshEmergencyOpening?: boolean } = {},
 ): CttmState {
   const now = nowIso()
   const prevMonth = previousMonth(targetMonth)
@@ -203,7 +204,24 @@ function ensureMonthConfigurationFromPrevious(
     return !!fixedCost && fixedCost.month === targetMonth
   })
 
-  if (hasTargetSettings) return state
+  if (hasTargetSettings) {
+    if (!options.refreshEmergencyOpening || state.monthLocksByMonth[targetMonth]) return state
+
+    const currentSettings = state.settingsByMonth[targetMonth]
+    const expectedOpeningVnd = getNextMonthEmergencyOpeningBalance(state, prevMonth)
+    if (currentSettings.emergencyFundCurrentVnd === expectedOpeningVnd) return state
+
+    return touch({
+      ...state,
+      settingsByMonth: {
+        ...state.settingsByMonth,
+        [targetMonth]: {
+          ...currentSettings,
+          emergencyFundCurrentVnd: expectedOpeningVnd,
+        },
+      },
+    })
+  }
 
   // Tháng mới kế thừa cấu hình "hiệu lực" của tháng liền trước.
   const inheritedSettings = {
@@ -569,7 +587,12 @@ export const useAppStore = create<AppStore>()(
         })
       },
       ensureSettingsForMonth: (month) => {
-        set((s) => ({ data: ensureMonthConfigurationFromPrevious(s.data, month) }))
+        const currentMonth = monthFromIsoDate(todayIso())
+        set((s) => ({
+          data: ensureMonthConfigurationFromPrevious(s.data, month, {
+            refreshEmergencyOpening: month > currentMonth,
+          }),
+        }))
       },
 
       addExpenseCategory: ({ label, defaultBucket }) => {
