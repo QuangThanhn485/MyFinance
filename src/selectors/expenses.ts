@@ -1,6 +1,5 @@
 import type { Expense, ExpenseCategory, ISODate, YearMonth } from "@/domain/types"
 import type { CttmState } from "@/storage/schema"
-import { EXPENSE_CATEGORIES } from "@/domain/constants"
 import { getEffectiveSettingsForMonth } from "@/domain/finance/monthLock"
 
 const ESSENTIAL_CATEGORIES: ReadonlySet<ExpenseCategory> = new Set([
@@ -106,9 +105,9 @@ export function getCategoryTotals(state: CttmState, month: YearMonth) {
   const result: Record<string, number> = {}
   const settingsForMonth = getEffectiveSettingsForMonth(state, month)
 
-  for (const category of EXPENSE_CATEGORIES) {
-    const key = `${month}|${category}`
-    const ids = state.indexes.expensesByCategoryMonth[key] ?? []
+  for (const [key, ids] of Object.entries(state.indexes.expensesByCategoryMonth)) {
+    if (!key.startsWith(`${month}|`)) continue
+    const category = key.slice(month.length + 1)
     let sum = 0
     for (const id of ids) {
       const ex = state.entities.expenses.byId[id]

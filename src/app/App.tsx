@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom"
 import AppLayout from "@/app/layout/AppLayout"
 import AdvisorPage from "@/pages/AdvisorPage"
 import BudgetsPage from "@/pages/BudgetsPage"
+import CategoriesPage from "@/pages/CategoriesPage"
 import DashboardPage from "@/pages/DashboardPage"
 import ExpensesPage from "@/pages/ExpensesPage"
 import ImportExportPage from "@/pages/ImportExportPage"
@@ -19,10 +20,10 @@ export default function App() {
         <Route path="/advisor" element={<AdvisorPage />} />
         <Route path="/reports" element={<ReportsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/categories" element={<CategoriesPage />} />
         <Route path="/import-export" element={<ImportExportPage />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Route>
     </Routes>
   )
 }
-

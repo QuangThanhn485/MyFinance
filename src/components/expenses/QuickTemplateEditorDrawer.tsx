@@ -2,8 +2,8 @@ import { useEffect } from "react"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { Controller, useForm } from "react-hook-form"
-import { CATEGORY_LABELS_VI, BUCKET_LABELS_VI, EXPENSE_CATEGORIES } from "@/domain/constants"
-import type { ExpenseCategory } from "@/domain/types"
+import { BUCKET_LABELS_VI } from "@/domain/constants"
+import type { ExpenseCategory, ExpenseCategoryConfig } from "@/domain/types"
 import MoneyInput from "@/components/MoneyInput"
 import { Button } from "@/components/ui/button"
 import {
@@ -36,6 +36,7 @@ type QuickTemplateEditorDrawerProps = {
   open: boolean
   mode: "create" | "edit"
   template?: ExpenseTemplate | null
+  categories: ExpenseCategoryConfig[]
   onOpenChange: (open: boolean) => void
   onSave: (values: QuickTemplateFormValues) => void
 }
@@ -54,16 +55,20 @@ export default function QuickTemplateEditorDrawer({
   open,
   mode,
   template,
+  categories,
   onOpenChange,
   onSave,
 }: QuickTemplateEditorDrawerProps) {
+  const defaultCategory = categories[0]?.id ?? "Other"
+  const defaultBucket = categories[0]?.defaultBucket === "wants" ? "WANTS" : "NEEDS"
+
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: {
       name: "",
       amountVnd: 0,
-      category: "Food",
-      bucket: "NEEDS",
+      category: defaultCategory,
+      bucket: defaultBucket,
       note: "",
     },
   })
@@ -83,11 +88,11 @@ export default function QuickTemplateEditorDrawer({
     form.reset({
       name: "",
       amountVnd: 0,
-      category: "Food",
-      bucket: "NEEDS",
+      category: defaultCategory,
+      bucket: defaultBucket,
       note: "",
     })
-  }, [form, mode, open, template])
+  }, [defaultBucket, defaultCategory, form, mode, open, template])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -148,15 +153,22 @@ export default function QuickTemplateEditorDrawer({
                 <Label>Danh mục</Label>
                 <Select
                   value={form.watch("category")}
-                  onValueChange={(value) => form.setValue("category", value as ExpenseCategory)}
+                  onValueChange={(value) => {
+                    const category = value as ExpenseCategory
+                    form.setValue("category", category)
+                    const option = categories.find((item) => item.id === category)
+                    if (option) {
+                      form.setValue("bucket", option.defaultBucket === "wants" ? "WANTS" : "NEEDS")
+                    }
+                  }}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Chọn danh mục" />
                   </SelectTrigger>
                   <SelectContent>
-                    {EXPENSE_CATEGORIES.map((category) => (
-                      <SelectItem key={category} value={category}>
-                        {CATEGORY_LABELS_VI[category]}
+                    {categories.map((category) => (
+                      <SelectItem key={category.id} value={category.id}>
+                        {category.label}
                       </SelectItem>
                     ))}
                   </SelectContent>

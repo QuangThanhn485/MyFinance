@@ -4,16 +4,16 @@ export type YearMonth = `${number}${number}${number}${number}-${number}${number}
 export type BudgetBucket = "needs" | "wants"
 export type PurchasePriority = "low" | "med" | "high"
 
-export type ExpenseCategory =
-  | "Food"
-  | "Transport"
-  | "Bills"
-  | "Shopping"
-  | "Entertainment"
-  | "Health"
-  | "Education"
-  | "Family"
-  | "Other"
+export type ExpenseCategory = string
+
+export interface ExpenseCategoryConfig {
+  id: ExpenseCategory
+  label: string
+  defaultBucket: BudgetBucket
+  system?: boolean
+  createdAt: string
+  updatedAt: string
+}
 
 export interface Expense {
   id: string

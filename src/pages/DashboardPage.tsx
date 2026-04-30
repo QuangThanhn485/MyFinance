@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
-import { CATEGORY_LABELS_VI, EXPENSE_CATEGORIES } from "@/domain/constants"
+import { getExpenseCategoryLabel } from "@/domain/constants"
 import {
   computeBudgets,
   computeEmergencyFund,
@@ -79,6 +79,17 @@ function MetricCard({ title, value, subValue, danger = false }: MetricCardProps)
 export default function DashboardPage() {
   const data = useAppStore((s) => s.data)
   const addExpense = useAppStore((s) => s.actions.addExpense)
+  const categoryOptions = useMemo(() => data.expenseCategories, [data.expenseCategories])
+  const categoryLabels = useMemo(
+    () =>
+      Object.fromEntries(
+        categoryOptions.map((category) => [category.id, category.label]),
+      ) as Record<string, string>,
+    [categoryOptions],
+  )
+  const defaultCategory = categoryOptions[0]?.id ?? "Other"
+  const categoryLabel = (category: ExpenseCategory) =>
+    categoryLabels[category] ?? getExpenseCategoryLabel(category, categoryOptions)
 
   const today = todayIso()
   const month = monthFromIsoDate(today)
@@ -166,7 +177,12 @@ export default function DashboardPage() {
   const topCategoryMax = categoryRows[0]?.amountVnd ?? 0
 
   const [quickAmountVnd, setQuickAmountVnd] = useState(0)
-  const [quickCategory, setQuickCategory] = useState<ExpenseCategory>("Food")
+  const [quickCategory, setQuickCategory] = useState<ExpenseCategory>(defaultCategory)
+
+  useEffect(() => {
+    if (categoryOptions.some((category) => category.id === quickCategory)) return
+    setQuickCategory(defaultCategory)
+  }, [categoryOptions, defaultCategory, quickCategory])
 
   return (
     <div className="space-y-4">
@@ -286,8 +302,7 @@ export default function DashboardPage() {
                 categoryRows.map((row) => {
                   const width =
                     topCategoryMax > 0 ? Math.max(6, (row.amountVnd / topCategoryMax) * 100) : 0
-                  const label =
-                    CATEGORY_LABELS_VI[row.category as ExpenseCategory] ?? row.category
+                  const label = categoryLabel(row.category as ExpenseCategory)
                   return (
                     <div key={row.category} className="space-y-1.5">
                       <LabelValueRow label={label} value={formatVnd(row.amountVnd)} className="text-sm" />
@@ -329,9 +344,9 @@ export default function DashboardPage() {
                     <SelectValue placeholder="Chọn danh mục" />
                   </SelectTrigger>
                   <SelectContent>
-                    {EXPENSE_CATEGORIES.map((category) => (
-                      <SelectItem key={category} value={category}>
-                        {CATEGORY_LABELS_VI[category]}
+                    {categoryOptions.map((category) => (
+                      <SelectItem key={category.id} value={category.id}>
+                        {category.label}
                       </SelectItem>
                     ))}
                   </SelectContent>

@@ -52,6 +52,10 @@ import {
 } from "@/storage/localStorage"
 import { createInitialState, type CttmState } from "@/storage/schema"
 import {
+  ensureCategoriesForState,
+  makeExpenseCategoryId,
+} from "@/storage/categories"
+import {
   getStorageKeyForWorkspace,
   loadWorkspaceId,
   saveWorkspaceId,
@@ -73,6 +77,15 @@ type Actions = {
   setSettings: (patch: Partial<Settings>) => void
   setSettingsForMonth: (input: { month: YearMonth; patch: Partial<Settings> }) => void
   ensureSettingsForMonth: (month: YearMonth) => void
+  addExpenseCategory: (input: {
+    label: string
+    defaultBucket: BudgetBucket
+  }) => { ok: true; id: ExpenseCategory } | { ok: false; error: string }
+  updateExpenseCategory: (
+    id: ExpenseCategory,
+    patch: { label?: string; defaultBucket?: BudgetBucket },
+  ) => { ok: true } | { ok: false; error: string }
+  deleteExpenseCategory: (id: ExpenseCategory) => { ok: true } | { ok: false; error: string }
 
   addFixedCost: (input: {
     month: YearMonth
@@ -296,6 +309,17 @@ function isSeedableEmptyState(state: CttmState): boolean {
     Object.keys(state.capsByMonth).length === 0 &&
     isDefaultSettings(state.settings)
   )
+}
+
+function getCategoryDataUsageCount(state: CttmState, category: ExpenseCategory) {
+  let count = 0
+  for (const id of state.entities.expenses.allIds) {
+    if (state.entities.expenses.byId[id]?.category === category) count += 1
+  }
+  for (const id of state.entities.fixedCosts.allIds) {
+    if (state.entities.fixedCosts.byId[id]?.category === category) count += 1
+  }
+  return count
 }
 
 function buildDemoSeedState(now: string): CttmState {
@@ -548,6 +572,110 @@ export const useAppStore = create<AppStore>()(
         set((s) => ({ data: ensureMonthConfigurationFromPrevious(s.data, month) }))
       },
 
+      addExpenseCategory: ({ label, defaultBucket }) => {
+        const cleanLabel = label.trim().slice(0, 60)
+        if (!cleanLabel) {
+          return { ok: false as const, error: "Tên danh mục không được để trống." }
+        }
+
+        const existing = get().data.expenseCategories
+        const duplicated = existing.some(
+          (category) => category.label.trim().toLocaleLowerCase("vi") === cleanLabel.toLocaleLowerCase("vi"),
+        )
+        if (duplicated) {
+          return { ok: false as const, error: "Danh mục này đã tồn tại." }
+        }
+
+        const now = nowIso()
+        const newId = makeExpenseCategoryId(cleanLabel, existing.map((category) => category.id))
+        set((s) => ({
+          data: touch({
+            ...s.data,
+            expenseCategories: [
+              ...s.data.expenseCategories,
+              {
+                id: newId,
+                label: cleanLabel,
+                defaultBucket,
+                system: false,
+                createdAt: now,
+                updatedAt: now,
+              },
+            ],
+          }),
+        }))
+        return { ok: true as const, id: newId }
+      },
+
+      updateExpenseCategory: (categoryId, patch) => {
+        const cleanLabel = patch.label?.trim().slice(0, 60)
+        if (patch.label !== undefined && !cleanLabel) {
+          return { ok: false as const, error: "Tên danh mục không được để trống." }
+        }
+
+        const existing = get().data.expenseCategories
+        if (!existing.some((category) => category.id === categoryId)) {
+          return { ok: false as const, error: "Không tìm thấy danh mục." }
+        }
+        if (cleanLabel) {
+          const duplicated = existing.some(
+            (category) =>
+              category.id !== categoryId &&
+              category.label.trim().toLocaleLowerCase("vi") === cleanLabel.toLocaleLowerCase("vi"),
+          )
+          if (duplicated) {
+            return { ok: false as const, error: "Tên danh mục này đã tồn tại." }
+          }
+        }
+
+        set((s) => ({
+          data: touch({
+            ...s.data,
+            expenseCategories: s.data.expenseCategories.map((category) =>
+              category.id === categoryId
+                ? {
+                    ...category,
+                    label: cleanLabel ?? category.label,
+                    defaultBucket: patch.defaultBucket ?? category.defaultBucket,
+                    updatedAt: nowIso(),
+                  }
+                : category,
+            ),
+          }),
+        }))
+        return { ok: true as const }
+      },
+
+      deleteExpenseCategory: (categoryId) => {
+        if (get().data.expenseCategories.length <= 1) {
+          return {
+            ok: false as const,
+            error: "Cần giữ ít nhất một danh mục để ghi chi tiêu.",
+          }
+        }
+
+        const usageCount = getCategoryDataUsageCount(get().data, categoryId)
+        if (usageCount > 0) {
+          return {
+            ok: false as const,
+            error: `Danh mục này đang được dùng trong ${usageCount} dữ liệu nên không thể xoá.`,
+          }
+        }
+
+        set((s) => {
+          if (!s.data.expenseCategories.some((category) => category.id === categoryId)) return s
+          return {
+            data: touch({
+              ...s.data,
+              expenseCategories: s.data.expenseCategories.filter(
+                (category) => category.id !== categoryId,
+              ),
+            }),
+          }
+        })
+        return { ok: true as const }
+      },
+
       addFixedCost: ({ month, name, amountVnd, category }) => {
         const newId = id("fc_")
         const now = nowIso()
@@ -611,11 +739,12 @@ export const useAppStore = create<AppStore>()(
       addExpense: ({ amountVnd, category, bucket, note, date }) => {
         const newId = id("ex_")
         const now = nowIso()
+        const categoryOptions = get().data.expenseCategories
         const ex: Expense = {
           id: newId,
           amountVnd,
           category,
-          bucket: bucket ?? suggestBucketByCategory(category),
+          bucket: bucket ?? suggestBucketByCategory(category, categoryOptions),
           note: note ?? "",
           date,
           createdAt: now,
@@ -998,7 +1127,7 @@ export const useAppStore = create<AppStore>()(
         })
 
         const baseImportState = createInitialState(nowIso())
-        const nextData: CttmState = {
+        const nextData: CttmState = ensureCategoriesForState({
           ...baseImportState,
           ...(incoming as CttmState),
           settings: {
@@ -1019,7 +1148,7 @@ export const useAppStore = create<AppStore>()(
             (incoming as CttmState).entities.expenses,
           ),
           updatedAt: nowIso(),
-        }
+        })
 
         saveCttmState(getStorageKeyForWorkspace(get().workspace), nextData)
 

@@ -4,7 +4,7 @@ import { zodResolver } from "@hookform/resolvers/zod"
 import { Controller, useForm } from "react-hook-form"
 import { toast } from "sonner"
 import { ChartColumn, ListChecks, Lock, LockOpen, PlusSquare } from "lucide-react"
-import { CATEGORY_LABELS_VI, BUCKET_LABELS_VI, EXPENSE_CATEGORIES, suggestBucketByCategory } from "@/domain/constants"
+import { BUCKET_LABELS_VI, getExpenseCategoryLabel, suggestBucketByCategory } from "@/domain/constants"
 import type { BudgetBucket, ExpenseCategory, ISODate } from "@/domain/types"
 import DatePicker from "@/components/DatePicker"
 import MoneyInput from "@/components/MoneyInput"
@@ -228,6 +228,18 @@ export default function ExpensesPage() {
   const [deleteExpenseId, setDeleteExpenseId] = useState<string | null>(null)
   const [highlightExpenseId, setHighlightExpenseId] = useState<string | null>(null)
 
+  const categoryOptions = useMemo(() => data.expenseCategories, [data.expenseCategories])
+  const categoryLabels = useMemo(
+    () =>
+      Object.fromEntries(
+        categoryOptions.map((category) => [category.id, category.label]),
+      ) as Record<string, string>,
+    [categoryOptions],
+  )
+  const defaultCategory = categoryOptions[0]?.id ?? "Other"
+  const categoryLabel = (category: ExpenseCategory) =>
+    categoryLabels[category] ?? getExpenseCategoryLabel(category, categoryOptions)
+
   const [statsCollapsed, setStatsCollapsed] = usePersistentCollapsedState(
     STATS_COLLAPSED_KEY,
     false,
@@ -258,8 +270,8 @@ export default function ExpensesPage() {
   const [pageHeight, setPageHeight] = useState<number | null>(null)
 
   const sortedTemplates = useMemo(
-    () => getAllExpenseTemplatesSorted(templates),
-    [templates],
+    () => getAllExpenseTemplatesSorted(templates, categoryLabels),
+    [categoryLabels, templates],
   )
 
   useEffect(() => {
@@ -376,8 +388,8 @@ export default function ExpensesPage() {
     resolver: zodResolver(formSchema),
     defaultValues: {
       amountVnd: 0,
-      category: "Food",
-      bucket: "needs",
+      category: defaultCategory,
+      bucket: suggestBucketByCategory(defaultCategory, categoryOptions),
       note: "",
       date: selectedDate,
     },
@@ -386,6 +398,13 @@ export default function ExpensesPage() {
   useEffect(() => {
     form.setValue("date", selectedDate)
   }, [form, selectedDate])
+
+  useEffect(() => {
+    const current = form.getValues("category")
+    if (categoryOptions.some((category) => category.id === current)) return
+    form.setValue("category", defaultCategory)
+    form.setValue("bucket", suggestBucketByCategory(defaultCategory, categoryOptions))
+  }, [categoryOptions, defaultCategory, form])
 
   useEffect(() => {
     if (!addExpenseDialogOpen) return
@@ -682,9 +701,10 @@ export default function ExpensesPage() {
   }
 
   const saveTemplateFromFormValues = (values: FormValues) => {
+    const label = categoryLabel(values.category)
     const name = values.note?.trim()
-      ? `${CATEGORY_LABELS_VI[values.category]} • ${values.note.trim()}`
-      : CATEGORY_LABELS_VI[values.category]
+      ? `${label} • ${values.note.trim()}`
+      : label
 
     const nextTemplates = upsertExpenseTemplate({
       name,
@@ -1059,8 +1079,8 @@ export default function ExpensesPage() {
                     onClick={() => {
                       form.reset({
                         amountVnd: 0,
-                        category: "Food",
-                        bucket: "needs",
+                        category: defaultCategory,
+                        bucket: suggestBucketByCategory(defaultCategory, categoryOptions),
                         note: "",
                         date: selectedDate,
                       })
@@ -1075,6 +1095,8 @@ export default function ExpensesPage() {
               <div className="h-full min-h-0">
                 <QuickTemplateList
                   templates={sortedTemplates}
+                  categories={categoryOptions}
+                  categoryLabels={categoryLabels}
                   selectedIds={selectedTemplateIds}
                   onToggleSelect={(id, checked) => {
                     setSelectedTemplateIds((prev) => {
@@ -1159,7 +1181,7 @@ export default function ExpensesPage() {
                                 </span>
                               </div>
                               <div className="mt-1 text-xs text-muted-foreground">
-                                {CATEGORY_LABELS_VI[expense.category]} • {BUCKET_LABELS_VI[expense.bucket]}
+                                {categoryLabel(expense.category)} • {BUCKET_LABELS_VI[expense.bucket]}
                               </div>
                             </div>
                             <div className="flex gap-1">
@@ -1258,16 +1280,16 @@ export default function ExpensesPage() {
                   onValueChange={(v) => {
                     const category = v as ExpenseCategory
                     form.setValue("category", category)
-                    form.setValue("bucket", suggestBucketByCategory(category))
+                    form.setValue("bucket", suggestBucketByCategory(category, categoryOptions))
                   }}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Chọn danh mục" />
                   </SelectTrigger>
                   <SelectContent>
-                    {EXPENSE_CATEGORIES.map((category) => (
-                      <SelectItem key={category} value={category}>
-                        {CATEGORY_LABELS_VI[category]}
+                    {categoryOptions.map((category) => (
+                      <SelectItem key={category.id} value={category.id}>
+                        {category.label}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -1371,6 +1393,7 @@ export default function ExpensesPage() {
         open={templateEditor !== null}
         mode={templateEditor?.mode ?? "create"}
         template={editingTemplate}
+        categories={categoryOptions}
         onOpenChange={(open) => {
           if (!open) setTemplateEditor(null)
         }}
@@ -1436,15 +1459,19 @@ export default function ExpensesPage() {
                   <Label>Danh mục</Label>
                   <Select
                     value={editForm.watch("category")}
-                    onValueChange={(v) => editForm.setValue("category", v as ExpenseCategory)}
+                    onValueChange={(v) => {
+                      const category = v as ExpenseCategory
+                      editForm.setValue("category", category)
+                      editForm.setValue("bucket", suggestBucketByCategory(category, categoryOptions))
+                    }}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Chọn danh mục" />
                     </SelectTrigger>
                     <SelectContent>
-                      {EXPENSE_CATEGORIES.map((category) => (
-                        <SelectItem key={category} value={category}>
-                          {CATEGORY_LABELS_VI[category]}
+                      {categoryOptions.map((category) => (
+                        <SelectItem key={category.id} value={category.id}>
+                          {category.label}
                         </SelectItem>
                       ))}
                     </SelectContent>

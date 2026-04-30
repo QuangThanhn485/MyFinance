@@ -1,5 +1,4 @@
 import type { ExpenseCategory } from "@/domain/types"
-import { EXPENSE_CATEGORIES } from "@/domain/constants"
 
 export const REPORTS_CONFIG_STORAGE_KEY = "smartSpend.reports.v1"
 
@@ -166,9 +165,8 @@ function normalizePivotFieldList(value: unknown): PivotGroupKey[] {
 
 function normalizeExpenseCategory(value: unknown): ExpenseCategory | null {
   if (typeof value !== "string") return null
-  return (EXPENSE_CATEGORIES as string[]).includes(value)
-    ? (value as ExpenseCategory)
-    : null
+  const category = value.trim()
+  return category ? category : null
 }
 
 function unique<T>(items: T[]) {

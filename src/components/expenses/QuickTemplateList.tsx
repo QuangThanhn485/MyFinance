@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { CheckSquare, Pencil, Plus, Trash2 } from "lucide-react"
-import { CATEGORY_LABELS_VI, EXPENSE_CATEGORIES } from "@/domain/constants"
-import type { ExpenseCategory } from "@/domain/types"
+import type { ExpenseCategory, ExpenseCategoryConfig } from "@/domain/types"
 import { formatVnd } from "@/lib/currency"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -11,6 +10,8 @@ import type { ExpenseTemplate } from "@/storage/templates"
 
 type QuickTemplateListProps = {
   templates: ExpenseTemplate[]
+  categories: ExpenseCategoryConfig[]
+  categoryLabels: Record<string, string>
   selectedIds: Set<string>
   onToggleSelect: (id: string, checked: boolean) => void
   onToggleSelectAllVisible: (checked: boolean, visibleTemplates: ExpenseTemplate[]) => void
@@ -25,6 +26,8 @@ type QuickTemplateListProps = {
 
 export default function QuickTemplateList({
   templates,
+  categories,
+  categoryLabels,
   selectedIds,
   onToggleSelect,
   onToggleSelectAllVisible,
@@ -37,18 +40,23 @@ export default function QuickTemplateList({
   showCreateButton = true,
 }: QuickTemplateListProps) {
   const groups = useMemo(
-    () =>
-      EXPENSE_CATEGORIES.map((category) => ({
-        category,
-        templates: templates
-          .filter((template) => template.category === category)
-          .sort((a, b) => a.name.localeCompare(b.name, "vi")),
-      }))
+    () => {
+      const orderedCategories = categories.map((category) => category.id)
+      const known = new Set(orderedCategories)
+      const extraCategories = templates
+        .map((template) => template.category)
+        .filter((category, index, self) => !known.has(category) && self.indexOf(category) === index)
+
+      return [...orderedCategories, ...extraCategories]
+        .map((category) => ({
+          category,
+          templates: templates
+            .filter((template) => template.category === category)
+            .sort((a, b) => a.name.localeCompare(b.name, "vi")),
+        }))
         .filter((group) => group.templates.length > 0)
-        .sort((a, b) =>
-          CATEGORY_LABELS_VI[a.category].localeCompare(CATEGORY_LABELS_VI[b.category], "vi"),
-        ),
-    [templates],
+    },
+    [categories, templates],
   )
 
   const [activeCategory, setActiveCategory] = useState<ExpenseCategory | null>(
@@ -89,7 +97,7 @@ export default function QuickTemplateList({
                     value={group.category}
                     className="h-6 px-2 text-xs"
                   >
-                    {CATEGORY_LABELS_VI[group.category]} ({group.templates.length})
+                    {categoryLabels[group.category] ?? group.category} ({group.templates.length})
                   </TabsTrigger>
                 ))}
               </TabsList>
@@ -164,7 +172,7 @@ export default function QuickTemplateList({
           ) : (
             visibleTemplates.map((template) => {
               const checked = selectedIds.has(template.id)
-              const secondaryText = template.note || CATEGORY_LABELS_VI[template.category]
+              const secondaryText = template.note || categoryLabels[template.category] || template.category
 
               return (
                 <div

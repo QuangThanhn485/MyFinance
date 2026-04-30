@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid"
-import { CATEGORY_LABELS_VI, EXPENSE_CATEGORIES } from "@/domain/constants"
+import { getExpenseCategoryLabel } from "@/domain/constants"
 import { clampMoneyVnd } from "@/domain/finance/finance"
 import type { BudgetBucket, ExpenseCategory } from "@/domain/types"
 
@@ -59,7 +59,8 @@ function normalizeBucket(value: unknown): TemplateBucket | null {
 
 function normalizeCategory(value: unknown): ExpenseCategory | null {
   if (typeof value !== "string") return null
-  return (EXPENSE_CATEGORIES as string[]).includes(value) ? (value as ExpenseCategory) : null
+  const category = value.trim()
+  return category ? category : null
 }
 
 function signature(input: {
@@ -76,7 +77,7 @@ function deriveTemplateName(input: {
   category: ExpenseCategory
   note?: string
 }) {
-  const base = CATEGORY_LABELS_VI[input.category]
+  const base = getExpenseCategoryLabel(input.category)
   const note = normalizeNote(input.note)
   if (!note) return base
   const shortened = note.length > 40 ? `${note.slice(0, 37)}…` : note
@@ -158,16 +159,19 @@ export function getRecentExpenseTemplates(
     .slice(0, Math.max(0, Math.trunc(limit)))
 }
 
-export function getAllExpenseTemplatesSorted(templates: ExpenseTemplate[]) {
+export function getAllExpenseTemplatesSorted(
+  templates: ExpenseTemplate[],
+  categoryLabels: Record<string, string> = {},
+) {
+  const labelOf = (category: ExpenseCategory) =>
+    categoryLabels[category] ?? getExpenseCategoryLabel(category)
+
   return templates
     .slice()
     .sort((a, b) => {
       const nameDiff = a.name.localeCompare(b.name, "vi")
       if (nameDiff !== 0) return nameDiff
-      const categoryDiff = CATEGORY_LABELS_VI[a.category].localeCompare(
-        CATEGORY_LABELS_VI[b.category],
-        "vi",
-      )
+      const categoryDiff = labelOf(a.category).localeCompare(labelOf(b.category), "vi")
       if (categoryDiff !== 0) return categoryDiff
       return a.id.localeCompare(b.id)
     })

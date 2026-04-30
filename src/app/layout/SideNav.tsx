@@ -11,6 +11,7 @@ import {
   Receipt,
   Settings,
   ShoppingCart,
+  Tags,
   Wallet,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -101,6 +102,13 @@ const NAV_TREE: NavNode[] = [
         label: "Cài đặt",
         to: "/settings",
         icon: Settings,
+      },
+      {
+        id: "categories",
+        type: "leaf",
+        label: "Danh mục",
+        to: "/categories",
+        icon: Tags,
       },
       {
         id: "import-export",

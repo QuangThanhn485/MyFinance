@@ -69,7 +69,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import DndMultiSelect from "@/components/DndMultiSelect"
 import LabelValueRow from "@/components/LabelValueRow"
 import MonthPicker from "@/components/MonthPicker"
-import { BUCKET_LABELS_VI, CATEGORY_LABELS_VI, EXPENSE_CATEGORIES } from "@/domain/constants"
+import { BUCKET_LABELS_VI, getExpenseCategoryLabel } from "@/domain/constants"
 import { computeBudgets } from "@/domain/finance/finance"
 import { computeAdvancedInsights, type ClusterTier } from "@/domain/finance/insights"
 import {
@@ -248,6 +248,7 @@ type PivotContext = {
   savingsTargetVnd: number
   mssVnd: number
   dailyCapVnd: number
+  categoryLabel: (category: string) => string
 }
 
 const pivotCollisionDetection: CollisionDetection = (args) => {
@@ -488,7 +489,7 @@ function getPivotGroupValue(
     }
     case "category":
     default: {
-      const label = CATEGORY_LABELS_VI[expense.category]
+      const label = context.categoryLabel(expense.category)
       return {
         key: expense.category,
         label,
@@ -857,6 +858,20 @@ function buildPivotTable(
 
 export default function ReportsPage() {
   const data = useAppStore((s) => s.data)
+  const categoryOptions = useMemo(() => data.expenseCategories, [data.expenseCategories])
+  const categoryIds = useMemo(
+    () => categoryOptions.map((category) => category.id),
+    [categoryOptions],
+  )
+  const categoryLabels = useMemo(
+    () =>
+      Object.fromEntries(
+        categoryOptions.map((category) => [category.id, category.label]),
+      ) as Record<string, string>,
+    [categoryOptions],
+  )
+  const categoryLabel = (category: string) =>
+    categoryLabels[category] ?? getExpenseCategoryLabel(category, categoryOptions)
   const [month, setMonth] = useState<YearMonth>(monthFromIsoDate(todayIso()))
   const [config, setConfig] = useState(() => loadReportsConfig())
   const [controlsOpen, setControlsOpen] = useState(false)
@@ -907,7 +922,7 @@ export default function ReportsPage() {
   const savingsRate = budgets.incomeVnd > 0 ? saved / budgets.incomeVnd : 0
 
   const monthCategoryAutoIds = useMemo(() => {
-    return EXPENSE_CATEGORIES.map((c) => ({
+    return categoryIds.map((c) => ({
       id: c,
       value: categories[c] ?? 0,
     }))
@@ -915,7 +930,7 @@ export default function ReportsPage() {
       .sort((a, b) => b.value - a.value)
       .slice(0, 6)
       .map((x) => x.id)
-  }, [categories])
+  }, [categories, categoryIds])
 
   const selectedCategoryIds =
     config.month.visibleCategories.length > 0
@@ -925,7 +940,7 @@ export default function ReportsPage() {
   const monthCategoryRows = selectedCategoryIds
     .map((c) => ({
       id: c,
-      name: CATEGORY_LABELS_VI[c],
+      name: categoryLabel(c),
       value: categories[c] ?? 0,
     }))
     .filter((x) => x.value > 0)
@@ -1067,6 +1082,7 @@ export default function ReportsPage() {
           savingsTargetVnd: budgets.savingsTargetVnd,
           mssVnd: budgets.mssVnd,
           dailyCapVnd: baseDailyCapVnd,
+          categoryLabel,
         },
       ),
     [
@@ -1077,6 +1093,8 @@ export default function ReportsPage() {
       budgets.savingsTargetVnd,
       budgets.mssVnd,
       baseDailyCapVnd,
+      categoryLabels,
+      categoryOptions,
     ],
   )
   const pivotChartPrimary = config.pivot.rowFields[0]
@@ -1862,7 +1880,7 @@ export default function ReportsPage() {
                           <div className="mt-2 flex flex-wrap gap-2">
                             {advancedInsights.cluster.topCategories.slice(0, 3).map((item) => {
                               const label =
-                                CATEGORY_LABELS_VI[item.category] ?? item.category
+                                categoryLabel(item.category)
                               const pct = Math.round(item.share * 100)
                               return (
                                 <span
@@ -1923,7 +1941,7 @@ export default function ReportsPage() {
                         Cặp thường đi cùng
                       </div>
                       <div className="mt-1 text-base font-semibold">
-                        {`${CATEGORY_LABELS_VI[advancedInsights.association.base] ?? advancedInsights.association.base} + ${CATEGORY_LABELS_VI[advancedInsights.association.with] ?? advancedInsights.association.with}`}
+                        {`${categoryLabel(advancedInsights.association.base)} + ${categoryLabel(advancedInsights.association.with)}`}
                       </div>
                     </div>
                     <div className="mt-3 grid gap-2">
@@ -2099,7 +2117,7 @@ export default function ReportsPage() {
 
                 {config.month.dataset === "categories" ? (
                   <DndMultiSelect
-                    allIds={EXPENSE_CATEGORIES}
+                    allIds={categoryIds}
                     selectedIds={selectedCategoryIds}
                     onSelectedIdsChange={(next) =>
                       setConfig((s) => ({
@@ -2107,7 +2125,7 @@ export default function ReportsPage() {
                         month: { ...s.month, visibleCategories: next },
                       }))
                     }
-                    getLabel={(id) => CATEGORY_LABELS_VI[id]}
+                    getLabel={categoryLabel}
                     availableTitle="Danh mục"
                     selectedTitle={
                       config.month.visibleCategories.length > 0
@@ -2673,7 +2691,7 @@ export default function ReportsPage() {
               {/*
               {config.month.dataset === "categories" ? (
                 <DndMultiSelect
-                  allIds={EXPENSE_CATEGORIES}
+                  allIds={categoryIds}
                   selectedIds={selectedCategoryIds}
                   onSelectedIdsChange={(next) =>
                     setConfig((s) => ({
@@ -2681,7 +2699,7 @@ export default function ReportsPage() {
                       month: { ...s.month, visibleCategories: next },
                     }))
                   }
-                  getLabel={(id) => CATEGORY_LABELS_VI[id]}
+                  getLabel={categoryLabel}
                   availableTitle="Danh mục"
                   selectedTitle={
                     config.month.visibleCategories.length > 0
@@ -3948,9 +3966,7 @@ export default function ReportsPage() {
           ) : (
             <div className="grid gap-2">
               {top3.map(([category, value], idx) => {
-                const label =
-                  (CATEGORY_LABELS_VI as Record<string, string>)[category] ??
-                  category
+                const label = categoryLabel(category)
                 return (
                   <LabelValueRow
                     key={category}

@@ -11,6 +11,7 @@ import { Progress } from "@/components/ui/progress"
 import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { getExpenseCategoryLabel } from "@/domain/constants"
 import { computeBudgets } from "@/domain/finance/finance"
 import {
   getEffectiveBudgetAdjustmentForMonth,
@@ -625,7 +626,7 @@ function LeftDrawer({
   projectedNeedsEndMonthVnd: number
   projectedWantsEndMonthVnd: number
   expectedVariableRemainingVnd: number
-  topCategories: Array<{ category: string; totalVnd: number }>
+  topCategories: Array<{ category: string; label: string; totalVnd: number }>
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null)
 
@@ -751,7 +752,7 @@ function LeftDrawer({
                       {topCategories.map((c) => (
                         <LabelValueRow
                           key={c.category}
-                          label={c.category}
+                          label={c.label}
                           value={formatVnd(c.totalVnd)}
                         />
                       ))}
@@ -848,6 +849,16 @@ function LeftDrawer({
 
 export default function BudgetsPage() {
   const data = useAppStore((s) => s.data)
+  const categoryOptions = useMemo(() => data.expenseCategories, [data.expenseCategories])
+  const categoryLabels = useMemo(
+    () =>
+      Object.fromEntries(
+        categoryOptions.map((category) => [category.id, category.label]),
+      ) as Record<string, string>,
+    [categoryOptions],
+  )
+  const categoryLabel = (category: string) =>
+    categoryLabels[category] ?? getExpenseCategoryLabel(category, categoryOptions)
   const [month, setMonth] = useState<YearMonth>(monthFromIsoDate(todayIso()))
 
   const locked = isMonthLocked(data, month)
@@ -937,10 +948,10 @@ export default function BudgetsPage() {
   const topCategories = useMemo(() => {
     const totalsByCategory = getCategoryTotals(data, month)
     return Object.entries(totalsByCategory)
-      .map(([category, totalVnd]) => ({ category, totalVnd }))
+      .map(([category, totalVnd]) => ({ category, label: categoryLabel(category), totalVnd }))
       .sort((a, b) => b.totalVnd - a.totalVnd)
       .slice(0, 8)
-  }, [data, month])
+  }, [categoryLabels, categoryOptions, data, month])
 
   const rootGap = compactMode ? "space-y-4" : "space-y-5"
 

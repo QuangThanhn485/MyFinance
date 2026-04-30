@@ -1,12 +1,14 @@
 import type {
   BudgetAdjustment,
   Expense,
+  ExpenseCategoryConfig,
   FixedCost,
   PurchasePlan,
   SavingsTransaction,
   Settings,
   SpendingCaps,
 } from "@/domain/types"
+import { createDefaultExpenseCategories } from "@/storage/categories"
 
 export const STORAGE_KEY = "cttm_v1" as const
 export const SCHEMA_VERSION = 1 as const
@@ -45,6 +47,7 @@ export interface CttmState {
   migrations: MigrationRecord[]
   settings: Settings
   settingsByMonth: Record<string, Settings>
+  expenseCategories: ExpenseCategoryConfig[]
   entities: {
     expenses: EntityTable<Expense>
     fixedCosts: EntityTable<FixedCost>
@@ -92,6 +95,7 @@ export function createInitialState(nowIso: string): CttmState {
     migrations: [],
     settings: createDefaultSettings(),
     settingsByMonth: {},
+    expenseCategories: createDefaultExpenseCategories(nowIso),
     entities: {
       expenses: createEmptyEntityTable(),
       fixedCosts: createEmptyEntityTable(),

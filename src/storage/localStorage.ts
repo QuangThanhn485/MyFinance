@@ -7,6 +7,10 @@ import {
   type CttmState,
   type EntityTable,
 } from "@/storage/schema"
+import {
+  ensureCategoriesForState,
+  normalizeExpenseCategoryList,
+} from "@/storage/categories"
 
 function nowIso() {
   return new Date().toISOString()
@@ -118,6 +122,7 @@ export function loadCttmStateFromKey(storageKey: string): CttmState {
       ? { ...empty.settings, ...(state.settings as any) }
       : empty.settings,
     settingsByMonth: normalizedSettingsByMonth,
+    expenseCategories: normalizeExpenseCategoryList((state as any).expenseCategories, now),
     entities: {
       expenses: mergeEntityTable(empty.entities.expenses, state.entities?.expenses),
       fixedCosts: mergeEntityTable(
@@ -163,7 +168,7 @@ export function loadCttmStateFromKey(storageKey: string): CttmState {
     ? (idx as any)
     : rebuildExpenseIndexesFromEntities(next.entities.expenses)
 
-  return next
+  return ensureCategoriesForState(next)
 }
 
 export function saveCttmState(storageKey: string, state: CttmState) {

@@ -14,7 +14,7 @@ import { Controller, useForm } from "react-hook-form"
 import { z } from "zod"
 import { toast } from "sonner"
 import DatePicker from "@/components/DatePicker"
-import { CATEGORY_LABELS_VI, EXPENSE_CATEGORIES } from "@/domain/constants"
+import { getExpenseCategoryLabel } from "@/domain/constants"
 import {
   getEffectiveSettingsForMonth,
   isMonthLocked,
@@ -222,9 +222,21 @@ export default function SettingsPage() {
     form.reset(defaultFormValues)
   }, [defaultFormValues, form, selectedMonth])
 
+  const categoryOptions = useMemo(() => data.expenseCategories, [data.expenseCategories])
+  const categoryLabels = useMemo(
+    () =>
+      Object.fromEntries(
+        categoryOptions.map((category) => [category.id, category.label]),
+      ) as Record<string, string>,
+    [categoryOptions],
+  )
+  const defaultCategory = categoryOptions[0]?.id ?? "Other"
+  const categoryLabel = (category: ExpenseCategory) =>
+    categoryLabels[category] ?? getExpenseCategoryLabel(category, categoryOptions)
+
   const [newFcName, setNewFcName] = useState("")
   const [newFcAmountVnd, setNewFcAmountVnd] = useState(0)
-  const [newFcCategory, setNewFcCategory] = useState<ExpenseCategory>("Bills")
+  const [newFcCategory, setNewFcCategory] = useState<ExpenseCategory>(defaultCategory)
   const [createFixedCostOpen, setCreateFixedCostOpen] = useState(false)
 
   const [editingAmountId, setEditingAmountId] = useState<string | null>(null)
@@ -241,21 +253,26 @@ export default function SettingsPage() {
   const ruleType = form.watch("ruleType")
 
   useEffect(() => {
+    if (categoryOptions.some((category) => category.id === newFcCategory)) return
+    setNewFcCategory(defaultCategory)
+  }, [categoryOptions, defaultCategory, newFcCategory])
+
+  useEffect(() => {
     setCreateFixedCostOpen(false)
     setNewFcName("")
     setNewFcAmountVnd(0)
-    setNewFcCategory("Bills")
+    setNewFcCategory(defaultCategory)
     setFundDialogType(null)
     setFundAmountVnd(0)
     setFundDate(defaultDateForMonth(selectedMonth, currentMonth))
     setFundReason("Khẩn cấp khác")
     setFundNote("")
-  }, [selectedMonth])
+  }, [currentMonth, defaultCategory, selectedMonth])
 
   const resetFixedCostDraft = () => {
     setNewFcName("")
     setNewFcAmountVnd(0)
-    setNewFcCategory("Bills")
+    setNewFcCategory(defaultCategory)
   }
 
   const openFundDialog = (type: SavingsTransactionType) => {
@@ -352,6 +369,7 @@ export default function SettingsPage() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)_minmax(0,1fr)]">
+        <div className="space-y-4">
         <Card>
           <CardHeader className="pb-3">
             <CardTitle>Chọn tháng</CardTitle>
@@ -403,6 +421,8 @@ export default function SettingsPage() {
             </div>
           </CardContent>
         </Card>
+
+        </div>
 
         <Card>
             <CardHeader className="pb-3">
@@ -693,7 +713,7 @@ export default function SettingsPage() {
                       <div className="min-w-0">
                         <div className="truncate font-medium" title={fc.name}>{fc.name}</div>
                         <div className="text-sm text-muted-foreground">
-                          {formatVnd(fc.amountVnd)} • {CATEGORY_LABELS_VI[fc.category]}
+                          {formatVnd(fc.amountVnd)} • {categoryLabel(fc.category)}
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
@@ -732,8 +752,8 @@ export default function SettingsPage() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {EXPENSE_CATEGORIES.map((c) => (
-                            <SelectItem key={c} value={c}>{CATEGORY_LABELS_VI[c]}</SelectItem>
+                          {categoryOptions.map((c) => (
+                            <SelectItem key={c.id} value={c.id}>{c.label}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
@@ -854,8 +874,8 @@ export default function SettingsPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {EXPENSE_CATEGORIES.map((c) => (
-                    <SelectItem key={c} value={c}>{CATEGORY_LABELS_VI[c]}</SelectItem>
+                  {categoryOptions.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>{c.label}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
