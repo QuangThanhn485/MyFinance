@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest"
 import {
   computePaceSurplus,
+  computeDailyCapRaisePlanByCeiling,
+  computeDailyCapRaisePlanByDays,
   computeRecoveryCaps,
   computeRemainingDailySpendingCap,
   computeTodayCaps,
@@ -64,6 +66,53 @@ describe("computeRemainingDailySpendingCap", () => {
     expect(cap.spendingBudgetVnd).toBe(9_000_000)
     expect(cap.totalRemainingVnd).toBe(67_100)
     expect(cap.dailyTotalCapVnd).toBe(67_100)
+  })
+})
+
+describe("daily cap raise planner", () => {
+  it("computes the daily ceiling needed to raise a future cap", () => {
+    const plan = computeDailyCapRaisePlanByDays({
+      totalRemainingVnd: 2_000_000,
+      remainingDaysInMonth: 20,
+      currentDailyCapVnd: 100_000,
+      targetDailyCapVnd: 120_000,
+      planDays: 10,
+    })
+
+    expect(plan.feasible).toBe(true)
+    expect(plan.requiredDailyCeilingVnd).toBe(80_000)
+    expect(plan.dailyReductionFromCurrentCapVnd).toBe(20_000)
+    expect(plan.allowedSpendDuringPlanVnd).toBe(800_000)
+    expect(plan.projectedRemainingAfterPlanVnd).toBe(1_200_000)
+    expect(plan.projectedDailyCapAfterPlanVnd).toBe(120_000)
+  })
+
+  it("finds the minimum number of days for a chosen daily ceiling", () => {
+    const plan = computeDailyCapRaisePlanByCeiling({
+      totalRemainingVnd: 2_000_000,
+      remainingDaysInMonth: 20,
+      currentDailyCapVnd: 100_000,
+      targetDailyCapVnd: 120_000,
+      dailyCeilingVnd: 80_000,
+    })
+
+    expect(plan.feasible).toBe(true)
+    expect(plan.daysNeeded).toBe(10)
+    expect(plan.remainingDaysAfterPlan).toBe(10)
+    expect(plan.projectedDailyCapAfterPlanVnd).toBe(120_000)
+  })
+
+  it("marks a target impossible when zero spending for the selected days is not enough", () => {
+    const plan = computeDailyCapRaisePlanByDays({
+      totalRemainingVnd: 2_000_000,
+      remainingDaysInMonth: 20,
+      currentDailyCapVnd: 100_000,
+      targetDailyCapVnd: 300_000,
+      planDays: 10,
+    })
+
+    expect(plan.feasible).toBe(false)
+    expect(plan.maxAchievableDailyCapVnd).toBe(200_000)
   })
 })
 

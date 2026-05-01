@@ -38,6 +38,39 @@ export type RemainingDailySpendingCapSnapshot = {
   dailyTotalCapVnd: number
 }
 
+export type DailyCapRaiseByDaysPlan = {
+  feasible: boolean
+  alreadyAtTarget: boolean
+  totalRemainingVnd: number
+  remainingDaysInMonth: number
+  currentDailyCapVnd: number
+  targetDailyCapVnd: number
+  planDays: number
+  remainingDaysAfterPlan: number
+  requiredDailyCeilingVnd: number
+  dailyReductionFromCurrentCapVnd: number
+  allowedSpendDuringPlanVnd: number
+  requiredReserveForAfterPlanVnd: number
+  projectedRemainingAfterPlanVnd: number
+  projectedDailyCapAfterPlanVnd: number
+  maxAchievableDailyCapVnd: number
+}
+
+export type DailyCapRaiseByCeilingPlan = {
+  feasible: boolean
+  alreadyAtTarget: boolean
+  totalRemainingVnd: number
+  remainingDaysInMonth: number
+  currentDailyCapVnd: number
+  targetDailyCapVnd: number
+  dailyCeilingVnd: number
+  daysNeeded: number | null
+  remainingDaysAfterPlan: number
+  projectedRemainingAfterPlanVnd: number
+  projectedDailyCapAfterPlanVnd: number
+  maxAchievableDailyCapVnd: number
+}
+
 export function computeRemainingDailySpendingCap(input: {
   incomeVnd: number
   savingsTargetVnd: number
@@ -61,6 +94,169 @@ export function computeRemainingDailySpendingCap(input: {
     totalRemainingVnd,
     remainingDaysInMonth,
     dailyTotalCapVnd,
+  }
+}
+
+function normalizeRemainingBudgetVnd(value: number) {
+  if (!Number.isFinite(value)) return 0
+  return Math.trunc(value)
+}
+
+function computeDailyCapFromRemaining(totalRemainingVnd: number, remainingDaysInMonth: number) {
+  const days = Math.max(0, Math.trunc(remainingDaysInMonth))
+  if (days <= 0) return 0
+  return Math.floor(Math.max(0, normalizeRemainingBudgetVnd(totalRemainingVnd)) / days)
+}
+
+export function computeDailyCapRaisePlanByDays(input: {
+  totalRemainingVnd: number
+  remainingDaysInMonth: number
+  targetDailyCapVnd: number
+  planDays: number
+  currentDailyCapVnd?: number
+}): DailyCapRaiseByDaysPlan {
+  const totalRemainingVnd = normalizeRemainingBudgetVnd(input.totalRemainingVnd)
+  const remainingDaysInMonth = Math.max(0, Math.trunc(input.remainingDaysInMonth))
+  const targetDailyCapVnd = clampMoneyVnd(input.targetDailyCapVnd)
+  const planDays = Math.max(0, Math.trunc(input.planDays))
+  const currentDailyCapVnd =
+    input.currentDailyCapVnd === undefined
+      ? computeDailyCapFromRemaining(totalRemainingVnd, remainingDaysInMonth)
+      : clampMoneyVnd(input.currentDailyCapVnd)
+  const alreadyAtTarget = currentDailyCapVnd >= targetDailyCapVnd
+  const remainingDaysAfterPlan = Math.max(0, remainingDaysInMonth - planDays)
+  const maxAchievableDailyCapVnd =
+    planDays > 0 && planDays < remainingDaysInMonth
+      ? computeDailyCapFromRemaining(totalRemainingVnd, remainingDaysAfterPlan)
+      : currentDailyCapVnd
+
+  if (planDays <= 0 || planDays >= remainingDaysInMonth) {
+    return {
+      feasible: alreadyAtTarget,
+      alreadyAtTarget,
+      totalRemainingVnd,
+      remainingDaysInMonth,
+      currentDailyCapVnd,
+      targetDailyCapVnd,
+      planDays,
+      remainingDaysAfterPlan,
+      requiredDailyCeilingVnd: 0,
+      dailyReductionFromCurrentCapVnd: 0,
+      allowedSpendDuringPlanVnd: 0,
+      requiredReserveForAfterPlanVnd: targetDailyCapVnd * remainingDaysAfterPlan,
+      projectedRemainingAfterPlanVnd: Math.max(0, totalRemainingVnd),
+      projectedDailyCapAfterPlanVnd: currentDailyCapVnd,
+      maxAchievableDailyCapVnd,
+    }
+  }
+
+  const requiredReserveForAfterPlanVnd = targetDailyCapVnd * remainingDaysAfterPlan
+  const maxSpendDuringPlanVnd = totalRemainingVnd - requiredReserveForAfterPlanVnd
+  const feasible = maxSpendDuringPlanVnd >= 0
+  const requiredDailyCeilingVnd = feasible
+    ? Math.floor(maxSpendDuringPlanVnd / planDays)
+    : 0
+  const allowedSpendDuringPlanVnd = requiredDailyCeilingVnd * planDays
+  const projectedRemainingAfterPlanVnd =
+    totalRemainingVnd - allowedSpendDuringPlanVnd
+  const projectedDailyCapAfterPlanVnd = computeDailyCapFromRemaining(
+    projectedRemainingAfterPlanVnd,
+    remainingDaysAfterPlan,
+  )
+
+  return {
+    feasible,
+    alreadyAtTarget,
+    totalRemainingVnd,
+    remainingDaysInMonth,
+    currentDailyCapVnd,
+    targetDailyCapVnd,
+    planDays,
+    remainingDaysAfterPlan,
+    requiredDailyCeilingVnd,
+    dailyReductionFromCurrentCapVnd: Math.max(0, currentDailyCapVnd - requiredDailyCeilingVnd),
+    allowedSpendDuringPlanVnd,
+    requiredReserveForAfterPlanVnd,
+    projectedRemainingAfterPlanVnd,
+    projectedDailyCapAfterPlanVnd,
+    maxAchievableDailyCapVnd,
+  }
+}
+
+export function computeDailyCapRaisePlanByCeiling(input: {
+  totalRemainingVnd: number
+  remainingDaysInMonth: number
+  targetDailyCapVnd: number
+  dailyCeilingVnd: number
+  currentDailyCapVnd?: number
+}): DailyCapRaiseByCeilingPlan {
+  const totalRemainingVnd = normalizeRemainingBudgetVnd(input.totalRemainingVnd)
+  const remainingDaysInMonth = Math.max(0, Math.trunc(input.remainingDaysInMonth))
+  const targetDailyCapVnd = clampMoneyVnd(input.targetDailyCapVnd)
+  const dailyCeilingVnd = clampMoneyVnd(input.dailyCeilingVnd)
+  const currentDailyCapVnd =
+    input.currentDailyCapVnd === undefined
+      ? computeDailyCapFromRemaining(totalRemainingVnd, remainingDaysInMonth)
+      : clampMoneyVnd(input.currentDailyCapVnd)
+  const alreadyAtTarget = currentDailyCapVnd >= targetDailyCapVnd
+
+  if (alreadyAtTarget) {
+    return {
+      feasible: true,
+      alreadyAtTarget,
+      totalRemainingVnd,
+      remainingDaysInMonth,
+      currentDailyCapVnd,
+      targetDailyCapVnd,
+      dailyCeilingVnd,
+      daysNeeded: 0,
+      remainingDaysAfterPlan: remainingDaysInMonth,
+      projectedRemainingAfterPlanVnd: totalRemainingVnd,
+      projectedDailyCapAfterPlanVnd: currentDailyCapVnd,
+      maxAchievableDailyCapVnd: currentDailyCapVnd,
+    }
+  }
+
+  let bestCap = currentDailyCapVnd
+  for (let days = 1; days < remainingDaysInMonth; days += 1) {
+    const remainingDaysAfterPlan = remainingDaysInMonth - days
+    const projectedRemainingAfterPlanVnd = totalRemainingVnd - dailyCeilingVnd * days
+    const projectedDailyCapAfterPlanVnd = computeDailyCapFromRemaining(
+      projectedRemainingAfterPlanVnd,
+      remainingDaysAfterPlan,
+    )
+    bestCap = Math.max(bestCap, projectedDailyCapAfterPlanVnd)
+    if (projectedDailyCapAfterPlanVnd >= targetDailyCapVnd) {
+      return {
+        feasible: true,
+        alreadyAtTarget,
+        totalRemainingVnd,
+        remainingDaysInMonth,
+        currentDailyCapVnd,
+        targetDailyCapVnd,
+        dailyCeilingVnd,
+        daysNeeded: days,
+        remainingDaysAfterPlan,
+        projectedRemainingAfterPlanVnd,
+        projectedDailyCapAfterPlanVnd,
+        maxAchievableDailyCapVnd: bestCap,
+      }
+    }
+  }
+
+  return {
+    feasible: false,
+    alreadyAtTarget,
+    totalRemainingVnd,
+    remainingDaysInMonth,
+    currentDailyCapVnd,
+    targetDailyCapVnd,
+    dailyCeilingVnd,
+    daysNeeded: null,
+    remainingDaysAfterPlan: 0,
+    projectedRemainingAfterPlanVnd: 0,
+    projectedDailyCapAfterPlanVnd: 0,
+    maxAchievableDailyCapVnd: bestCap,
   }
 }
 

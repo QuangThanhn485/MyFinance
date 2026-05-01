@@ -3,6 +3,7 @@ import AppLayout from "@/app/layout/AppLayout"
 import AdvisorPage from "@/pages/AdvisorPage"
 import BudgetsPage from "@/pages/BudgetsPage"
 import CategoriesPage from "@/pages/CategoriesPage"
+import DailyCapPlannerPage from "@/pages/DailyCapPlannerPage"
 import DashboardPage from "@/pages/DashboardPage"
 import ExpensesPage from "@/pages/ExpensesPage"
 import ImportExportPage from "@/pages/ImportExportPage"
@@ -19,6 +20,7 @@ export default function App() {
         <Route path="/budgets" element={<BudgetsPage />} />
         <Route path="/advisor" element={<AdvisorPage />} />
         <Route path="/reports" element={<ReportsPage />} />
+        <Route path="/daily-cap-planner" element={<DailyCapPlannerPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/categories" element={<CategoriesPage />} />
         <Route path="/import-export" element={<ImportExportPage />} />

@@ -12,6 +12,7 @@ import {
   Settings,
   ShoppingCart,
   Tags,
+  TrendingUp,
   Wallet,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -87,6 +88,13 @@ const NAV_TREE: NavNode[] = [
         label: "Báo cáo",
         to: "/reports",
         icon: BarChart3,
+      },
+      {
+        id: "daily-cap-planner",
+        type: "leaf",
+        label: "Nâng cap ngày",
+        to: "/daily-cap-planner",
+        icon: TrendingUp,
       },
     ],
   },
