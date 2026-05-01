@@ -67,8 +67,17 @@ import {
 import { Separator } from "@/components/ui/separator"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import DndMultiSelect from "@/components/DndMultiSelect"
+import DateRangePicker, {
+  type DateRangePreset,
+  type DateRangeValue,
+} from "@/components/DateRangePicker"
 import LabelValueRow from "@/components/LabelValueRow"
-import MonthPicker from "@/components/MonthPicker"
+import {
+  ChartEmptyState,
+  ChartTooltipContent,
+  chartGridProps,
+  chartLegendProps,
+} from "@/components/charts/ChartTooltip"
 import { BUCKET_LABELS_VI, getExpenseCategoryLabel } from "@/domain/constants"
 import { computeBudgets } from "@/domain/finance/finance"
 import { computeAdvancedInsights, type ClusterTier } from "@/domain/finance/insights"
@@ -79,17 +88,19 @@ import {
 } from "@/domain/finance/monthLock"
 import { formatVnd } from "@/lib/currency"
 import {
+  addDaysIsoDate,
   dayOfMonthFromIsoDate,
   daysInMonth,
+  formatIsoDate,
   monthFromIsoDate,
   parseIsoDateLocal,
-  previousMonth,
   todayIso,
 } from "@/lib/date"
-import { getCategoryTotals, getExpensesByMonth, getMonthTotals } from "@/selectors/expenses"
+import { getMonthTotals } from "@/selectors/expenses"
 import { cn } from "@/lib/utils"
 import { useAppStore } from "@/store/useAppStore"
-import type { Expense, YearMonth } from "@/domain/types"
+import type { Expense, ISODate, YearMonth } from "@/domain/types"
+import type { CttmState } from "@/storage/schema"
 import {
   defaultReportsConfig,
   loadReportsConfig,
@@ -99,7 +110,6 @@ import {
   type PivotChartType,
   type PivotGroupKey,
   type PivotMetric,
-  type TrendRangeMonths,
   type TrendSeriesKey,
 } from "@/storage/reports"
 
@@ -265,6 +275,213 @@ function formatMonthLabel(month: YearMonth) {
   return `${m}/${y}`
 }
 
+function formatDateLabel(date: ISODate) {
+  return `${date.slice(8, 10)}/${date.slice(5, 7)}/${date.slice(0, 4)}`
+}
+
+function formatDateRangeLabel(range: DateRangeValue) {
+  if (range.start === range.end) return formatDateLabel(range.start)
+  return `${formatDateLabel(range.start)} - ${formatDateLabel(range.end)}`
+}
+
+function monthStart(month: YearMonth): ISODate {
+  return `${month}-01` as ISODate
+}
+
+function monthEnd(month: YearMonth): ISODate {
+  return `${month}-${String(daysInMonth(month)).padStart(2, "0")}` as ISODate
+}
+
+function currentMonthRange(today: ISODate): DateRangeValue {
+  const month = monthFromIsoDate(today)
+  return { start: monthStart(month), end: monthEnd(month) }
+}
+
+function previousMonthRange(today: ISODate): DateRangeValue {
+  const current = parseIsoDateLocal(today)
+  current.setDate(1)
+  current.setMonth(current.getMonth() - 1)
+  const prevMonth = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, "0")}` as YearMonth
+  return { start: monthStart(prevMonth), end: monthEnd(prevMonth) }
+}
+
+function currentYearRange(today: ISODate): DateRangeValue {
+  const year = today.slice(0, 4)
+  return {
+    start: `${year}-01-01` as ISODate,
+    end: `${year}-12-31` as ISODate,
+  }
+}
+
+function currentWeekRange(today: ISODate): DateRangeValue {
+  const dt = parseIsoDateLocal(today)
+  const day = dt.getDay()
+  const mondayOffset = day === 0 ? -6 : 1 - day
+  const monday = new Date(dt)
+  monday.setDate(dt.getDate() + mondayOffset)
+  const sunday = new Date(monday)
+  sunday.setDate(monday.getDate() + 6)
+  return {
+    start: formatIsoDate(monday),
+    end: formatIsoDate(sunday),
+  }
+}
+
+function createReportDateRangePresets(today: ISODate): DateRangePreset[] {
+  return [
+    {
+      id: "last-7-days",
+      label: "7 ngày gần đây",
+      range: { start: addDaysIsoDate(today, -6), end: today },
+    },
+    {
+      id: "this-week",
+      label: "Tuần này",
+      range: currentWeekRange(today),
+    },
+    {
+      id: "last-30-days",
+      label: "30 ngày gần đây",
+      range: { start: addDaysIsoDate(today, -29), end: today },
+    },
+    {
+      id: "this-month",
+      label: "Tháng này",
+      range: currentMonthRange(today),
+    },
+    {
+      id: "previous-month",
+      label: "Tháng trước",
+      range: previousMonthRange(today),
+    },
+    {
+      id: "this-year",
+      label: "Năm này",
+      range: currentYearRange(today),
+    },
+  ]
+}
+
+function getDateRangeDayCount(range: DateRangeValue) {
+  const start = parseIsoDateLocal(range.start).getTime()
+  const end = parseIsoDateLocal(range.end).getTime()
+  const msPerDay = 24 * 60 * 60 * 1000
+  return Math.max(1, Math.round((end - start) / msPerDay) + 1)
+}
+
+function isoDateSortValue(date: ISODate) {
+  return Number(date.replaceAll("-", ""))
+}
+
+function getMonthsInDateRange(range: DateRangeValue): YearMonth[] {
+  const out: YearMonth[] = []
+  const cursor = parseIsoDateLocal(monthStart(monthFromIsoDate(range.start)))
+  const endMonth = monthFromIsoDate(range.end)
+
+  while (true) {
+    const month = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}` as YearMonth
+    out.push(month)
+    if (month === endMonth) break
+    cursor.setMonth(cursor.getMonth() + 1)
+  }
+
+  return out
+}
+
+function isWholeMonthInDateRange(month: YearMonth, range: DateRangeValue) {
+  return monthStart(month) >= range.start && monthEnd(month) <= range.end
+}
+
+function isSingleWholeMonthRange(range: DateRangeValue) {
+  const month = monthFromIsoDate(range.start)
+  return (
+    month === monthFromIsoDate(range.end) &&
+    range.start === monthStart(month) &&
+    range.end === monthEnd(month)
+  )
+}
+
+function clampRangeToMonth(range: DateRangeValue, month: YearMonth): DateRangeValue {
+  const start = monthStart(month) > range.start ? monthStart(month) : range.start
+  const end = monthEnd(month) < range.end ? monthEnd(month) : range.end
+  return { start, end }
+}
+
+function getExpensesInDateRange(state: CttmState, range: DateRangeValue): Expense[] {
+  const out: Expense[] = []
+  for (const id of state.entities.expenses.allIds) {
+    const expense = state.entities.expenses.byId[id]
+    if (!expense) continue
+    if (expense.date < range.start || expense.date > range.end) continue
+    out.push(expense)
+  }
+  out.sort((a, b) => a.date.localeCompare(b.date))
+  return out
+}
+
+function getDateRangeTotals(state: CttmState, range: DateRangeValue) {
+  let variableNeeds = 0
+  let variableWants = 0
+  let variableTotal = 0
+
+  for (const expense of getExpensesInDateRange(state, range)) {
+    variableTotal += expense.amountVnd
+    if (expense.bucket === "needs") variableNeeds += expense.amountVnd
+    else variableWants += expense.amountVnd
+  }
+
+  let fixedCostsTotal = 0
+  for (const id of state.entities.fixedCosts.allIds) {
+    const fixedCost = state.entities.fixedCosts.byId[id]
+    if (!fixedCost || !fixedCost.active) continue
+    if (!isWholeMonthInDateRange(fixedCost.month, range)) continue
+    fixedCostsTotal += fixedCost.amountVnd
+  }
+
+  for (const month of getMonthsInDateRange(range)) {
+    if (!isWholeMonthInDateRange(month, range)) continue
+    const settingsForMonth = getEffectiveSettingsForMonth(state, month)
+    fixedCostsTotal += Math.max(0, Math.trunc(settingsForMonth.debtPaymentMonthlyVnd ?? 0))
+  }
+
+  return {
+    fixedCostsTotal,
+    variableTotal,
+    variableNeeds,
+    variableWants,
+    totalSpent: fixedCostsTotal + variableTotal,
+  }
+}
+
+function getDateRangeCategoryTotals(state: CttmState, range: DateRangeValue) {
+  const result: Record<string, number> = {}
+
+  for (const expense of getExpensesInDateRange(state, range)) {
+    result[expense.category] = (result[expense.category] ?? 0) + expense.amountVnd
+  }
+
+  for (const id of state.entities.fixedCosts.allIds) {
+    const fixedCost = state.entities.fixedCosts.byId[id]
+    if (!fixedCost || !fixedCost.active) continue
+    if (!isWholeMonthInDateRange(fixedCost.month, range)) continue
+    result[fixedCost.category] = (result[fixedCost.category] ?? 0) + fixedCost.amountVnd
+  }
+
+  for (const month of getMonthsInDateRange(range)) {
+    if (!isWholeMonthInDateRange(month, range)) continue
+    const settingsForMonth = getEffectiveSettingsForMonth(state, month)
+    const debtPaymentMonthlyVnd = Math.max(
+      0,
+      Math.trunc(settingsForMonth.debtPaymentMonthlyVnd ?? 0),
+    )
+    if (debtPaymentMonthlyVnd > 0) {
+      result.Bills = (result.Bills ?? 0) + debtPaymentMonthlyVnd
+    }
+  }
+
+  return result
+}
+
 function shortenLabel(label: string, max = 14) {
   const t = label.trim()
   if (t.length <= max) return t
@@ -426,13 +643,12 @@ function getPivotGroupValue(
       }
     }
     case "day": {
-      const day = dayOfMonthFromIsoDate(expense.date)
-      const label = `Ngày ${String(day).padStart(2, "0")}`
+      const label = formatDateLabel(expense.date)
       return {
-        key: `day-${day}`,
+        key: expense.date,
         label,
         parts: [label],
-        sortValue: day,
+        sortValue: isoDateSortValue(expense.date),
       }
     }
     case "week": {
@@ -872,11 +1088,17 @@ export default function ReportsPage() {
   )
   const categoryLabel = (category: string) =>
     categoryLabels[category] ?? getExpenseCategoryLabel(category, categoryOptions)
-  const [month, setMonth] = useState<YearMonth>(monthFromIsoDate(todayIso()))
+  const today = todayIso()
+  const dateRangePresets = useMemo(() => createReportDateRangePresets(today), [today])
+  const [dateRange, setDateRange] = useState<DateRangeValue>(() => currentMonthRange(today))
+  const month = monthFromIsoDate(dateRange.end)
+  const monthsInRange = useMemo(() => getMonthsInDateRange(dateRange), [dateRange])
+  const isSingleFullMonth = isSingleWholeMonthRange(dateRange)
   const [config, setConfig] = useState(() => loadReportsConfig())
   const [controlsOpen, setControlsOpen] = useState(false)
   const [insightsOpen, setInsightsOpen] = useState(false)
   const [summaryOpen, setSummaryOpen] = useState(false)
+  const [hiddenLegendKeys, setHiddenLegendKeys] = useState<Set<string>>(() => new Set())
   const [pivotSplitView, setPivotSplitView] = useState<"both" | "table" | "chart">("both")
   const pivotSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -890,9 +1112,6 @@ export default function ReportsPage() {
     saveReportsConfig(config)
   }, [config])
 
-  const totals = useMemo(() => getMonthTotals(data, month), [data, month])
-  const categories = useMemo(() => getCategoryTotals(data, month), [data, month])
-  const expenses = useMemo(() => getExpensesByMonth(data, month), [data, month])
   const allVariableExpenses = useMemo(
     () =>
       data.entities.expenses.allIds
@@ -900,6 +1119,13 @@ export default function ReportsPage() {
         .filter((expense): expense is NonNullable<typeof expense> => !!expense),
     [data.entities.expenses.allIds, data.entities.expenses.byId],
   )
+  const totals = useMemo(() => getDateRangeTotals(data, dateRange), [data, dateRange])
+  const categories = useMemo(
+    () => getDateRangeCategoryTotals(data, dateRange),
+    [data, dateRange],
+  )
+  const expenses = useMemo(() => getExpensesInDateRange(data, dateRange), [data, dateRange])
+  const referenceMonthTotals = useMemo(() => getMonthTotals(data, month), [data, month])
 
   const settingsForMonth = useMemo(
     () => getEffectiveSettingsForMonth(data, month),
@@ -911,15 +1137,16 @@ export default function ReportsPage() {
   )
   const budgets = computeBudgets({
     incomeVnd: getMonthlyIncomeTotalVnd(settingsForMonth),
-    fixedCostsVnd: totals.fixedCostsTotal,
+    fixedCostsVnd: referenceMonthTotals.fixedCostsTotal,
     essentialVariableBaselineVnd: settingsForMonth.essentialVariableBaselineVnd,
     rule: settingsForMonth.budgetRule,
     adjustment,
     customSavingsGoalVnd: settingsForMonth.customSavingsGoalVnd,
   })
   const savingsMin = budgets.savingsTargetVnd
-  const saved = budgets.incomeVnd - totals.totalSpent
-  const savingsRate = budgets.incomeVnd > 0 ? saved / budgets.incomeVnd : 0
+  const saved = isSingleFullMonth ? budgets.incomeVnd - totals.totalSpent : 0
+  const savingsRate =
+    isSingleFullMonth && budgets.incomeVnd > 0 ? saved / budgets.incomeVnd : 0
 
   const monthCategoryAutoIds = useMemo(() => {
     return categoryIds.map((c) => ({
@@ -959,21 +1186,11 @@ export default function ReportsPage() {
     }))
     .filter((x) => x.value > 0)
 
-  const trendMonths = useMemo(() => {
-    const count = config.trend.rangeMonths
-    const out: YearMonth[] = []
-    let cursor = month
-    for (let i = 0; i < count; i += 1) {
-      out.push(cursor)
-      cursor = previousMonth(cursor)
-    }
-    return out.reverse()
-  }, [config.trend.rangeMonths, month])
-
   const trendData = useMemo(() => {
-    return trendMonths.map((m) => {
+    return monthsInRange.map((m) => {
+      const monthRange = clampRangeToMonth(dateRange, m)
       const I = getMonthlyIncomeTotalVnd(getEffectiveSettingsForMonth(data, m))
-      const t = getMonthTotals(data, m)
+      const t = getDateRangeTotals(data, monthRange)
       const balance = I - t.totalSpent
       return {
         month: m,
@@ -985,51 +1202,66 @@ export default function ReportsPage() {
         balance,
       }
     })
-  }, [data, trendMonths])
-
-  const today = todayIso()
+  }, [data, dateRange, monthsInRange])
 
   const dailyData = useMemo(() => {
-    const monthLength = daysInMonth(month)
-    const maxExpenseDay = expenses.reduce((max, e) => {
-      return Math.max(max, dayOfMonthFromIsoDate(e.date))
-    }, 1)
-
-    const isCurrentMonth = month === monthFromIsoDate(today)
-    const lastDay = isCurrentMonth
-      ? Math.min(monthLength, Math.max(dayOfMonthFromIsoDate(today), maxExpenseDay))
-      : Math.min(monthLength, Math.max(1, maxExpenseDay))
-
-    const rows = Array.from({ length: lastDay }, (_, idx) => ({
-      day: idx + 1,
-      total: 0,
-      needs: 0,
-      wants: 0,
-    }))
+    const dayCount = getDateRangeDayCount(dateRange)
+    const rows = Array.from({ length: dayCount }, (_, idx) => {
+      const date = addDaysIsoDate(dateRange.start, idx)
+      return {
+        date,
+        day: idx + 1,
+        label: formatDateLabel(date),
+        total: 0,
+        needs: 0,
+        wants: 0,
+      }
+    })
+    const rowByDate = new Map(rows.map((row) => [row.date, row]))
 
     for (const e of expenses) {
-      const d = dayOfMonthFromIsoDate(e.date)
-      if (d < 1 || d > lastDay) continue
-      rows[d - 1].total += e.amountVnd
-      if (e.bucket === "needs") rows[d - 1].needs += e.amountVnd
-      else rows[d - 1].wants += e.amountVnd
+      const row = rowByDate.get(e.date)
+      if (!row) continue
+      row.total += e.amountVnd
+      if (e.bucket === "needs") row.needs += e.amountVnd
+      else row.wants += e.amountVnd
     }
 
     return rows
-  }, [expenses, month, today])
+  }, [dateRange, expenses])
 
-  const baseDailyCapVnd = useMemo(() => {
-    const dim = Math.max(1, daysInMonth(month))
-    const monthlyVariableBudgetVnd = Math.max(
-      0,
-      budgets.essentialVariableBaselineVnd + budgets.wantsBudgetVnd,
-    )
-    return Math.floor(monthlyVariableBudgetVnd / dim)
-  }, [month, budgets.essentialVariableBaselineVnd, budgets.wantsBudgetVnd])
+  const baseDailyCapByMonth = useMemo(() => {
+    const out: Record<string, number> = {}
+    for (const m of monthsInRange) {
+      const settings = getEffectiveSettingsForMonth(data, m)
+      const monthTotals = getMonthTotals(data, m)
+      const monthAdjustment = getEffectiveBudgetAdjustmentForMonth(data, m)
+      const monthBudgets = computeBudgets({
+        incomeVnd: getMonthlyIncomeTotalVnd(settings),
+        fixedCostsVnd: monthTotals.fixedCostsTotal,
+        essentialVariableBaselineVnd: settings.essentialVariableBaselineVnd,
+        rule: settings.budgetRule,
+        adjustment: monthAdjustment,
+        customSavingsGoalVnd: settings.customSavingsGoalVnd,
+      })
+      const monthlyVariableBudgetVnd = Math.max(
+        0,
+        monthBudgets.essentialVariableBaselineVnd + monthBudgets.wantsBudgetVnd,
+      )
+      out[m] = Math.floor(monthlyVariableBudgetVnd / Math.max(1, daysInMonth(m)))
+    }
+    return out
+  }, [data, monthsInRange])
+
+  const baseDailyCapVnd = baseDailyCapByMonth[month] ?? 0
 
   const dailyChartData = useMemo(
-    () => dailyData.map((row) => ({ ...row, baseDailyCapVnd })),
-    [dailyData, baseDailyCapVnd],
+    () =>
+      dailyData.map((row) => ({
+        ...row,
+        baseDailyCapVnd: baseDailyCapByMonth[monthFromIsoDate(row.date)] ?? baseDailyCapVnd,
+      })),
+    [dailyData, baseDailyCapByMonth, baseDailyCapVnd],
   )
   const dailyCapByDayMap = useMemo(() => {
     const dim = Math.max(1, daysInMonth(month))
@@ -1559,8 +1791,17 @@ export default function ReportsPage() {
   const minLeakageSum = Math.max(Math.round(budgets.wantsBudgetVnd * 0.1), 300_000)
   const leakageDetected = smallCount >= minLeakageCount && smallSum >= minLeakageSum
 
-  const prev = previousMonth(month)
-  const prevTotals = getMonthTotals(data, prev)
+  const previousRange = useMemo(() => {
+    const days = getDateRangeDayCount(dateRange)
+    return {
+      start: addDaysIsoDate(dateRange.start, -days),
+      end: addDaysIsoDate(dateRange.start, -1),
+    }
+  }, [dateRange])
+  const prevTotals = useMemo(
+    () => getDateRangeTotals(data, previousRange),
+    [data, previousRange],
+  )
   const hasPrev = prevTotals.totalSpent > 0
   const delta = totals.totalSpent - prevTotals.totalSpent
   const deltaPct =
@@ -1569,6 +1810,77 @@ export default function ReportsPage() {
   const showDailyTotal = config.daily.visibleSeries.includes("total")
   const showDailyNeeds = config.daily.visibleSeries.includes("needs")
   const showDailyWants = config.daily.visibleSeries.includes("wants")
+  const isLegendKeyHidden = (key: string) => hiddenLegendKeys.has(key)
+  const toggleLegendKey = (key: string) => {
+    setHiddenLegendKeys((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+  const renderLegendLabel = (label: string, key: string) => {
+    const hidden = isLegendKeyHidden(key)
+    return (
+      <span
+        className={cn(
+          "cursor-pointer select-none transition-colors",
+          hidden && "text-muted-foreground line-through opacity-60",
+        )}
+      >
+        {label}
+      </span>
+    )
+  }
+  const interactiveLegendProps = {
+    ...chartLegendProps,
+    onClick: (entry: { dataKey?: unknown; value?: unknown }) => {
+      const key = String(entry.dataKey ?? entry.value ?? "")
+      if (!key) return
+      toggleLegendKey(key)
+    },
+    formatter: (value: unknown, entry: { dataKey?: unknown }) => {
+      const key = String(entry.dataKey ?? value ?? "")
+      return renderLegendLabel(String(value), key)
+    },
+  }
+  const monthCategoryChartRows = monthCategoryRows
+    .map((row, index) => ({
+      ...row,
+      legendKey: `month-category:${row.id}`,
+      color: CHART_COLORS[index % CHART_COLORS.length],
+    }))
+    .filter((row) => !isLegendKeyHidden(row.legendKey))
+  const monthCategoryLegendPayload = monthCategoryRows.map((row, index) => ({
+    value: row.name,
+    type: "circle" as const,
+    color: CHART_COLORS[index % CHART_COLORS.length],
+    dataKey: `month-category:${row.id}`,
+  }))
+  const monthBucketChartRows = monthBucketRows
+    .map((row, index) => ({
+      ...row,
+      legendKey: `month-bucket:${row.id}`,
+      color: CHART_COLORS[index % CHART_COLORS.length],
+    }))
+    .filter((row) => !isLegendKeyHidden(row.legendKey))
+  const monthBucketLegendPayload = monthBucketRows.map((row, index) => ({
+    value: row.name,
+    type: "circle" as const,
+    color: CHART_COLORS[index % CHART_COLORS.length],
+    dataKey: `month-bucket:${row.id}`,
+  }))
+  const monthLegendProps = {
+    ...chartLegendProps,
+    onClick: (entry: { dataKey?: unknown; value?: unknown }) => {
+      const key = String(entry.dataKey ?? entry.value ?? "")
+      if (key) toggleLegendKey(key)
+    },
+    formatter: (value: unknown, entry: { dataKey?: unknown }) => {
+      const key = String(entry.dataKey ?? value ?? "")
+      return renderLegendLabel(String(value), key)
+    },
+  }
 
   const monthTableRows = config.month.dataset === "categories" ? monthCategoryRows : monthBucketRows
   const monthTableTotal = monthTableRows.reduce((sum, row) => sum + row.value, 0)
@@ -1600,7 +1912,7 @@ export default function ReportsPage() {
           <h1 className="shrink-0 text-xl font-semibold tracking-tight">Báo cáo</h1>
           <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto pb-1">
             <Badge variant="outline" className="whitespace-nowrap">
-              Thu nhập:{" "}
+              Thu nhập tham chiếu:{" "}
               <span className="ml-1 font-semibold tabular-nums">
                 {formatVnd(budgets.incomeVnd)}
               </span>
@@ -1616,7 +1928,7 @@ export default function ReportsPage() {
                 variant={delta > 0 ? "destructive" : "secondary"}
                 className="whitespace-nowrap"
               >
-                So với {prev}: {delta >= 0 ? "+" : ""}
+                So với kỳ trước: {delta >= 0 ? "+" : ""}
                 {formatVnd(delta)} ({(deltaPct * 100).toFixed(1)}%)
               </Badge>
             ) : null}
@@ -1629,8 +1941,12 @@ export default function ReportsPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2 sm:justify-end shrink-0">
-          <div className="text-sm text-muted-foreground">Tháng</div>
-          <MonthPicker value={month} onChange={setMonth} className="w-[140px]" />
+          <DateRangePicker
+            value={dateRange}
+            onChange={setDateRange}
+            presets={dateRangePresets}
+            className="w-full sm:w-[330px]"
+          />
           <Button
             type="button"
             size="sm"
@@ -1659,37 +1975,45 @@ export default function ReportsPage() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Info className="h-5 w-5" />
-              Tóm tắt tháng
+              Tóm tắt báo cáo
             </DialogTitle>
           </DialogHeader>
 
           <div className="grid gap-3">
             <div className="rounded-lg border bg-background p-4">
               <div className="flex items-start justify-between gap-3">
-                <div className="text-sm font-medium">Tổng chi</div>
+                <div className="text-sm font-medium">Tổng chi trong khoảng</div>
                 <div className="text-lg font-semibold whitespace-nowrap tabular-nums">
                   {formatVnd(totals.totalSpent)}
                 </div>
               </div>
               <div className="mt-2 grid gap-1 text-sm">
-                <LabelValueRow
-                  label="Dư/Thiếu (Thu - Chi)"
-                  value={formatVnd(saved)}
-                />
-                <LabelValueRow
-                  label="Tỉ lệ tiết kiệm (ước tính)"
-                  value={`${(savingsRate * 100).toFixed(1)}%`}
-                />
-                <LabelValueRow
-                  label="Mục tiêu tiết kiệm theo kế hoạch"
-                  value={formatVnd(savingsMin)}
-                />
+                {isSingleFullMonth ? (
+                  <>
+                    <LabelValueRow
+                      label="Dư/Thiếu (Thu - Chi)"
+                      value={formatVnd(saved)}
+                    />
+                    <LabelValueRow
+                      label="Tỉ lệ tiết kiệm"
+                      value={`${(savingsRate * 100).toFixed(1)}%`}
+                    />
+                    <LabelValueRow
+                      label="Mục tiêu tiết kiệm theo kế hoạch"
+                      value={formatVnd(savingsMin)}
+                    />
+                  </>
+                ) : (
+                  <div className="rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                    Dư/thiếu và tỉ lệ tiết kiệm chỉ hiển thị khi khoảng lọc là trọn một tháng.
+                  </div>
+                )}
               </div>
             </div>
 
             <div className="rounded-lg border bg-background p-4">
               <div className="flex items-start justify-between gap-3">
-                <div className="text-sm font-medium">Xu hướng so với tháng trước</div>
+                <div className="text-sm font-medium">So với kỳ trước</div>
                 {hasPrev ? (
                   <div
                     className={cn(
@@ -1709,7 +2033,7 @@ export default function ReportsPage() {
               {hasPrev ? (
                 <div className="mt-2 grid gap-1 text-sm">
                   <LabelValueRow
-                    label={`Tháng trước (${prev})`}
+                    label={`Kỳ trước (${formatDateRangeLabel(previousRange)})`}
                     value={formatVnd(prevTotals.totalSpent)}
                   />
                   <LabelValueRow
@@ -1719,7 +2043,7 @@ export default function ReportsPage() {
                 </div>
               ) : (
                 <div className="mt-2 text-sm text-muted-foreground">
-                  Chưa có dữ liệu tháng trước để so sánh.
+                  Chưa có dữ liệu kỳ trước để so sánh.
                 </div>
               )}
             </div>
@@ -2169,7 +2493,7 @@ export default function ReportsPage() {
                 </div>
 
                 <div className="text-xs text-muted-foreground">
-                  Theo tổng ngày (từ đầu tháng), chỉ tính chi biến đổi đã ghi.
+                  Theo từng ngày trong khoảng lọc, chỉ tính chi biến đổi đã ghi.
                 </div>
 
                 <DndMultiSelect
@@ -2188,31 +2512,8 @@ export default function ReportsPage() {
               </div>
             ) : config.mode === "trend" ? (
               <div className="space-y-3">
-                <div className="grid gap-2">
-                  <Select
-                    value={String(config.trend.rangeMonths)}
-                    onValueChange={(v) => {
-                      const n = Number(v)
-                      const next: TrendRangeMonths | null =
-                        n === 3 || n === 6 || n === 12 ? (n as TrendRangeMonths) : null
-                      setConfig((s) => ({
-                        ...s,
-                        trend: {
-                          ...s.trend,
-                          rangeMonths: next ?? s.trend.rangeMonths,
-                        },
-                      }))
-                    }}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Khoảng thời gian" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="3">3 tháng gần nhất</SelectItem>
-                      <SelectItem value="6">6 tháng gần nhất</SelectItem>
-                      <SelectItem value="12">12 tháng gần nhất</SelectItem>
-                    </SelectContent>
-                  </Select>
+                <div className="rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                  Xu hướng dùng các tháng nằm trong khoảng lọc: {formatDateRangeLabel(dateRange)}.
                 </div>
 
                 <div className="flex items-center justify-between gap-2">
@@ -2466,7 +2767,7 @@ export default function ReportsPage() {
             <div className="flex items-center gap-2">
               <div className="flex-1 overflow-x-auto pb-1">
                 <TabsList className="w-max justify-start">
-                  <TabsTrigger value="month">Phân bổ (tháng)</TabsTrigger>
+                  <TabsTrigger value="month">Phân bổ</TabsTrigger>
                   <TabsTrigger value="daily">Theo ngày</TabsTrigger>
                   <TabsTrigger value="trend">Xu hướng</TabsTrigger>
                   <TabsTrigger value="pivot">Pivot</TabsTrigger>
@@ -2728,17 +3029,18 @@ export default function ReportsPage() {
                 <div className="h-[320px]">
                 {config.month.dataset === "categories" ? (
                   monthCategoryRows.length === 0 ? (
-                    <div className="text-sm text-muted-foreground">
-                      Chưa có dữ liệu để vẽ biểu đồ.
-                    </div>
+                    <ChartEmptyState />
                   ) : (
                     <ResponsiveContainer width="100%" height="100%">
                       {config.month.chartType === "pie" ? (
                         <PieChart>
-                          <Tooltip cursor={false} formatter={(v) => formatVnd(Number(v))} />
-                          <Legend />
+                          <Tooltip
+                            cursor={false}
+                            content={<ChartTooltipContent hideLabel />}
+                          />
+                          <Legend {...monthLegendProps} payload={monthCategoryLegendPayload} />
                           <Pie
-                            data={monthCategoryRows}
+                            data={monthCategoryChartRows}
                             dataKey="value"
                             nameKey="name"
                             cx="50%"
@@ -2749,21 +3051,21 @@ export default function ReportsPage() {
                               `${shortenLabel(String(p.name), 12)} ${(p.percent * 100).toFixed(0)}%`
                             }
                           >
-                            {monthCategoryRows.map((_, idx) => (
+                            {monthCategoryChartRows.map((entry) => (
                               <Cell
-                                key={`cat-${idx}`}
-                                fill={CHART_COLORS[idx % CHART_COLORS.length]}
+                                key={entry.legendKey}
+                                fill={entry.color}
                               />
                             ))}
                           </Pie>
                         </PieChart>
                       ) : (
                         <BarChart
-                          data={monthCategoryRows}
+                          data={monthCategoryChartRows}
                           layout="vertical"
                           margin={{ left: 8, right: 16, top: 8, bottom: 8 }}
                         >
-                          <CartesianGrid strokeDasharray="3 3" />
+                          <CartesianGrid strokeDasharray="3 3" horizontal={false} />
                           <XAxis
                             type="number"
                             tickFormatter={(v) =>
@@ -2776,13 +3078,13 @@ export default function ReportsPage() {
                             width={130}
                             tickFormatter={(v) => shortenLabel(String(v), 18)}
                           />
-                          <Tooltip formatter={(v) => formatVnd(Number(v))} />
-                          <Legend />
+                          <Tooltip content={<ChartTooltipContent />} />
+                          <Legend {...monthLegendProps} payload={monthCategoryLegendPayload} />
                           <Bar dataKey="value" name="VND" radius={[0, 6, 6, 0]}>
-                            {monthCategoryRows.map((_, idx) => (
+                            {monthCategoryChartRows.map((entry) => (
                               <Cell
-                                key={`bar-${idx}`}
-                                fill={CHART_COLORS[idx % CHART_COLORS.length]}
+                                key={`bar-${entry.legendKey}`}
+                                fill={entry.color}
                               />
                             ))}
                           </Bar>
@@ -2791,17 +3093,18 @@ export default function ReportsPage() {
                     </ResponsiveContainer>
                   )
                 ) : monthBucketRows.length === 0 ? (
-                  <div className="text-sm text-muted-foreground">
-                    Chưa có dữ liệu để vẽ biểu đồ.
-                  </div>
+                  <ChartEmptyState />
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
                     {config.month.chartType === "pie" ? (
                       <PieChart>
-                        <Tooltip cursor={false} formatter={(v) => formatVnd(Number(v))} />
-                        <Legend />
+                        <Tooltip
+                          cursor={false}
+                          content={<ChartTooltipContent hideLabel />}
+                        />
+                        <Legend {...monthLegendProps} payload={monthBucketLegendPayload} />
                         <Pie
-                          data={monthBucketRows}
+                          data={monthBucketChartRows}
                           dataKey="value"
                           nameKey="name"
                           cx="50%"
@@ -2812,17 +3115,17 @@ export default function ReportsPage() {
                             `${shortenLabel(String(p.name), 12)} ${(p.percent * 100).toFixed(0)}%`
                           }
                         >
-                          {monthBucketRows.map((_, idx) => (
+                          {monthBucketChartRows.map((entry) => (
                             <Cell
-                              key={`bucket-${idx}`}
-                              fill={CHART_COLORS[idx % CHART_COLORS.length]}
+                              key={entry.legendKey}
+                              fill={entry.color}
                             />
                           ))}
                         </Pie>
                       </PieChart>
                     ) : (
-                      <BarChart data={monthBucketRows} margin={{ left: 8, right: 16 }}>
-                        <CartesianGrid strokeDasharray="3 3" />
+                      <BarChart data={monthBucketChartRows} margin={{ left: 8, right: 16 }}>
+                        <CartesianGrid {...chartGridProps} />
                         <XAxis
                           dataKey="name"
                           tickFormatter={(v) => shortenLabel(String(v), 14)}
@@ -2832,13 +3135,13 @@ export default function ReportsPage() {
                             new Intl.NumberFormat("vi-VN").format(Number(v))
                           }
                         />
-                        <Tooltip formatter={(v) => formatVnd(Number(v))} />
-                        <Legend />
+                        <Tooltip content={<ChartTooltipContent />} />
+                        <Legend {...monthLegendProps} payload={monthBucketLegendPayload} />
                         <Bar dataKey="value" name="VND" radius={[6, 6, 0, 0]}>
-                          {monthBucketRows.map((_, idx) => (
+                          {monthBucketChartRows.map((entry) => (
                             <Cell
-                              key={`bucket-bar-${idx}`}
-                              fill={CHART_COLORS[idx % CHART_COLORS.length]}
+                              key={`bucket-bar-${entry.legendKey}`}
+                              fill={entry.color}
                             />
                           ))}
                         </Bar>
@@ -2976,9 +3279,7 @@ export default function ReportsPage() {
               <div className="grid gap-4 lg:grid-cols-2">
                 <div className="h-[320px]">
                 {dailyData.every((r) => r.total === 0 && r.needs === 0 && r.wants === 0) ? (
-                  <div className="text-sm text-muted-foreground">
-                    Chưa có dữ liệu để vẽ biểu đồ.
-                  </div>
+                  <ChartEmptyState />
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
                     {config.daily.chartType === "bar" ? (
@@ -2986,8 +3287,8 @@ export default function ReportsPage() {
                         data={dailyChartData}
                         margin={{ left: 8, right: 16, top: 8, bottom: 8 }}
                       >
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="day" tickFormatter={(v) => String(v)} />
+                        <CartesianGrid {...chartGridProps} />
+                        <XAxis dataKey="label" tickFormatter={(v) => String(v)} />
                         <YAxis
                           tickFormatter={(v) =>
                             new Intl.NumberFormat("vi-VN").format(Number(v))
@@ -2995,15 +3296,19 @@ export default function ReportsPage() {
                         />
                         <Tooltip
                           cursor={false}
-                          formatter={(v, name) => [formatVnd(Number(v)), String(name)]}
-                          labelFormatter={(v) => `Ngày ${v}`}
+                          content={
+                            <ChartTooltipContent
+                              labelFormatter={(v) => String(v)}
+                            />
+                          }
                         />
-                        <Legend />
+                        <Legend {...interactiveLegendProps} />
                         {showDailyNeeds ? (
                           <Bar
                             dataKey="needs"
                             name={DAILY_SERIES_LABELS.needs}
                             fill={DAILY_SERIES_COLORS.needs}
+                            hide={isLegendKeyHidden("needs")}
                             stackId={showDailyWants ? "a" : undefined}
                             radius={[6, 6, 0, 0]}
                           />
@@ -3013,6 +3318,7 @@ export default function ReportsPage() {
                             dataKey="wants"
                             name={DAILY_SERIES_LABELS.wants}
                             fill={DAILY_SERIES_COLORS.wants}
+                            hide={isLegendKeyHidden("wants")}
                             stackId={showDailyNeeds ? "a" : undefined}
                             radius={[6, 6, 0, 0]}
                           />
@@ -3022,6 +3328,7 @@ export default function ReportsPage() {
                             dataKey="total"
                             name={DAILY_SERIES_LABELS.total}
                             fill={DAILY_SERIES_COLORS.total}
+                            hide={isLegendKeyHidden("total")}
                             radius={[6, 6, 0, 0]}
                           />
                         ) : null}
@@ -3032,6 +3339,7 @@ export default function ReportsPage() {
                             stroke={DAILY_SERIES_COLORS.total}
                             strokeWidth={2}
                             dot={false}
+                            hide={isLegendKeyHidden("total")}
                             type="monotone"
                           />
                         ) : null}
@@ -3043,6 +3351,7 @@ export default function ReportsPage() {
                             strokeWidth={1.75}
                             strokeDasharray="6 4"
                             dot={false}
+                            hide={isLegendKeyHidden("baseDailyCapVnd")}
                             type="linear"
                             isAnimationActive={false}
                           />
@@ -3053,8 +3362,8 @@ export default function ReportsPage() {
                         data={dailyChartData}
                         margin={{ left: 8, right: 16, top: 8, bottom: 8 }}
                       >
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="day" tickFormatter={(v) => String(v)} />
+                        <CartesianGrid {...chartGridProps} />
+                        <XAxis dataKey="label" tickFormatter={(v) => String(v)} />
                         <YAxis
                           tickFormatter={(v) =>
                             new Intl.NumberFormat("vi-VN").format(Number(v))
@@ -3062,10 +3371,13 @@ export default function ReportsPage() {
                         />
                         <Tooltip
                           cursor={false}
-                          formatter={(v, name) => [formatVnd(Number(v)), String(name)]}
-                          labelFormatter={(v) => `Ngày ${v}`}
+                          content={
+                            <ChartTooltipContent
+                              labelFormatter={(v) => String(v)}
+                            />
+                          }
                         />
-                        <Legend />
+                        <Legend {...interactiveLegendProps} />
                         {config.daily.visibleSeries.map((k) => (
                           <Area
                             key={k}
@@ -3074,6 +3386,7 @@ export default function ReportsPage() {
                             stroke={DAILY_SERIES_COLORS[k]}
                             fill={DAILY_SERIES_COLORS[k]}
                             fillOpacity={0.18}
+                            hide={isLegendKeyHidden(k)}
                             type="monotone"
                           />
                         ))}
@@ -3085,6 +3398,7 @@ export default function ReportsPage() {
                             strokeWidth={1.75}
                             strokeDasharray="6 4"
                             dot={false}
+                            hide={isLegendKeyHidden("baseDailyCapVnd")}
                             type="linear"
                             isAnimationActive={false}
                           />
@@ -3095,8 +3409,8 @@ export default function ReportsPage() {
                         data={dailyChartData}
                         margin={{ left: 8, right: 16, top: 8, bottom: 8 }}
                       >
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="day" tickFormatter={(v) => String(v)} />
+                        <CartesianGrid {...chartGridProps} />
+                        <XAxis dataKey="label" tickFormatter={(v) => String(v)} />
                         <YAxis
                           tickFormatter={(v) =>
                             new Intl.NumberFormat("vi-VN").format(Number(v))
@@ -3104,10 +3418,13 @@ export default function ReportsPage() {
                         />
                         <Tooltip
                           cursor={false}
-                          formatter={(v, name) => [formatVnd(Number(v)), String(name)]}
-                          labelFormatter={(v) => `Ngày ${v}`}
+                          content={
+                            <ChartTooltipContent
+                              labelFormatter={(v) => String(v)}
+                            />
+                          }
                         />
-                        <Legend />
+                        <Legend {...interactiveLegendProps} />
                         {config.daily.visibleSeries.map((k) => (
                           <Line
                             key={k}
@@ -3116,6 +3433,7 @@ export default function ReportsPage() {
                             stroke={DAILY_SERIES_COLORS[k]}
                             strokeWidth={2}
                             dot={false}
+                            hide={isLegendKeyHidden(k)}
                             type="monotone"
                           />
                         ))}
@@ -3127,6 +3445,7 @@ export default function ReportsPage() {
                             strokeWidth={1.75}
                             strokeDasharray="6 4"
                             dot={false}
+                            hide={isLegendKeyHidden("baseDailyCapVnd")}
                             type="linear"
                             isAnimationActive={false}
                           />
@@ -3168,9 +3487,9 @@ export default function ReportsPage() {
                         </thead>
                         <tbody>
                           {dailyData.map((row) => (
-                            <tr key={row.day} className="border-b last:border-b-0">
+                            <tr key={row.date} className="border-b last:border-b-0">
                               <td className="px-3 py-2 whitespace-nowrap tabular-nums">
-                                {row.day}
+                                {row.label}
                               </td>
                               {dailyTableSeries.map((k) => (
                                 <td
@@ -3274,14 +3593,12 @@ export default function ReportsPage() {
               <div className="grid gap-4 lg:grid-cols-2">
                 <div className="h-[320px]">
                 {trendData.every((r) => r.totalSpent === 0 && r.variableSpent === 0 && r.fixedCosts === 0) ? (
-                  <div className="text-sm text-muted-foreground">
-                    Chưa có dữ liệu để vẽ biểu đồ.
-                  </div>
+                  <ChartEmptyState />
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
                     {config.trend.chartType === "bar" ? (
                       <BarChart data={trendData} margin={{ left: 8, right: 16, top: 8, bottom: 8 }}>
-                        <CartesianGrid strokeDasharray="3 3" />
+                        <CartesianGrid {...chartGridProps} />
                         <XAxis
                           dataKey="month"
                           tickFormatter={(v) => formatMonthLabel(v as YearMonth)}
@@ -3292,12 +3609,19 @@ export default function ReportsPage() {
                           }
                         />
                         <Tooltip
-                          formatter={(v, name) => [formatVnd(Number(v)), String(name)]}
-                          labelFormatter={(v) => formatMonthLabel(v as YearMonth)}
+                          content={
+                            <ChartTooltipContent
+                              labelFormatter={(v) => formatMonthLabel(v as YearMonth)}
+                            />
+                          }
                         />
-                        <Legend />
-                        {config.trend.visibleSeries.includes("balance") ? (
-                          <ReferenceLine y={0} stroke="hsl(var(--border))" />
+                        <Legend {...interactiveLegendProps} />
+                        {config.trend.visibleSeries.includes("balance") && !isLegendKeyHidden("balance") ? (
+                          <ReferenceLine
+                            y={0}
+                            stroke="hsl(var(--border))"
+                            ifOverflow="extendDomain"
+                          />
                         ) : null}
                         {config.trend.visibleSeries.map((k) => (
                           <Bar
@@ -3305,13 +3629,14 @@ export default function ReportsPage() {
                             dataKey={k}
                             name={TREND_SERIES_LABELS[k]}
                             fill={TREND_SERIES_COLORS[k]}
+                            hide={isLegendKeyHidden(k)}
                             radius={[6, 6, 0, 0]}
                           />
                         ))}
                       </BarChart>
                     ) : config.trend.chartType === "area" ? (
                       <AreaChart data={trendData} margin={{ left: 8, right: 16, top: 8, bottom: 8 }}>
-                        <CartesianGrid strokeDasharray="3 3" />
+                        <CartesianGrid {...chartGridProps} />
                         <XAxis
                           dataKey="month"
                           tickFormatter={(v) => formatMonthLabel(v as YearMonth)}
@@ -3322,12 +3647,19 @@ export default function ReportsPage() {
                           }
                         />
                         <Tooltip
-                          formatter={(v, name) => [formatVnd(Number(v)), String(name)]}
-                          labelFormatter={(v) => formatMonthLabel(v as YearMonth)}
+                          content={
+                            <ChartTooltipContent
+                              labelFormatter={(v) => formatMonthLabel(v as YearMonth)}
+                            />
+                          }
                         />
-                        <Legend />
-                        {config.trend.visibleSeries.includes("balance") ? (
-                          <ReferenceLine y={0} stroke="hsl(var(--border))" />
+                        <Legend {...interactiveLegendProps} />
+                        {config.trend.visibleSeries.includes("balance") && !isLegendKeyHidden("balance") ? (
+                          <ReferenceLine
+                            y={0}
+                            stroke="hsl(var(--border))"
+                            ifOverflow="extendDomain"
+                          />
                         ) : null}
                         {config.trend.visibleSeries.map((k) => (
                           <Area
@@ -3337,13 +3669,14 @@ export default function ReportsPage() {
                             stroke={TREND_SERIES_COLORS[k]}
                             fill={TREND_SERIES_COLORS[k]}
                             fillOpacity={0.18}
+                            hide={isLegendKeyHidden(k)}
                             type="monotone"
                           />
                         ))}
                       </AreaChart>
                     ) : (
                       <LineChart data={trendData} margin={{ left: 8, right: 16, top: 8, bottom: 8 }}>
-                        <CartesianGrid strokeDasharray="3 3" />
+                        <CartesianGrid {...chartGridProps} />
                         <XAxis
                           dataKey="month"
                           tickFormatter={(v) => formatMonthLabel(v as YearMonth)}
@@ -3354,12 +3687,19 @@ export default function ReportsPage() {
                           }
                         />
                         <Tooltip
-                          formatter={(v, name) => [formatVnd(Number(v)), String(name)]}
-                          labelFormatter={(v) => formatMonthLabel(v as YearMonth)}
+                          content={
+                            <ChartTooltipContent
+                              labelFormatter={(v) => formatMonthLabel(v as YearMonth)}
+                            />
+                          }
                         />
-                        <Legend />
-                        {config.trend.visibleSeries.includes("balance") ? (
-                          <ReferenceLine y={0} stroke="hsl(var(--border))" />
+                        <Legend {...interactiveLegendProps} />
+                        {config.trend.visibleSeries.includes("balance") && !isLegendKeyHidden("balance") ? (
+                          <ReferenceLine
+                            y={0}
+                            stroke="hsl(var(--border))"
+                            ifOverflow="extendDomain"
+                          />
                         ) : null}
                         {config.trend.visibleSeries.map((k) => (
                           <Line
@@ -3369,6 +3709,7 @@ export default function ReportsPage() {
                             stroke={TREND_SERIES_COLORS[k]}
                             strokeWidth={2}
                             dot={false}
+                            hide={isLegendKeyHidden(k)}
                             type="monotone"
                           />
                         ))}
@@ -3694,9 +4035,7 @@ export default function ReportsPage() {
                       ) : null}
                     <div className="h-[460px]">
                       {pivotChartData.length === 0 ? (
-                        <div className="text-sm text-muted-foreground">
-                          Chưa có dữ liệu để vẽ biểu đồ.
-                        </div>
+                        <ChartEmptyState className="min-h-[320px]" />
                       ) : (
                         <ResponsiveContainer width="100%" height="100%">
                           {config.pivot.chartType === "bar" ? (
@@ -3704,7 +4043,7 @@ export default function ReportsPage() {
                               data={pivotChartData}
                               margin={{ left: 8, right: 16, top: 8, bottom: 8 }}
                             >
-                              <CartesianGrid strokeDasharray="3 3" />
+                              <CartesianGrid {...chartGridProps} />
                               <XAxis dataKey="name" />
                               <YAxis
                                 tickFormatter={(v) =>
@@ -3713,16 +4052,31 @@ export default function ReportsPage() {
                               />
                               <Tooltip
                                 cursor={false}
-                                formatter={(v, name) => [
-                                  formatPivotValue(Number(v), config.pivot.metric),
-                                  formatPivotSeriesDisplayName(String(name)),
-                                ]}
+                                content={
+                                  <ChartTooltipContent
+                                    valueFormatter={(v) =>
+                                      formatPivotValue(v, config.pivot.metric)
+                                    }
+                                    nameFormatter={(name) =>
+                                      formatPivotSeriesDisplayName(name)
+                                    }
+                                  />
+                                }
                               />
                               {pivotChartSeries.length > 1 || showPivotDynamicDailyCapLine ? (
                                 <Legend
-                                  formatter={(value) =>
-                                    formatPivotSeriesLegendName(String(value))
-                                  }
+                                  {...chartLegendProps}
+                                  onClick={(entry: { dataKey?: unknown; value?: unknown }) => {
+                                    const key = String(entry.dataKey ?? entry.value ?? "")
+                                    if (key) toggleLegendKey(key)
+                                  }}
+                                  formatter={(value, entry: { dataKey?: unknown }) => {
+                                    const key = String(entry.dataKey ?? value ?? "")
+                                    return renderLegendLabel(
+                                      formatPivotSeriesLegendName(String(value)),
+                                      key,
+                                    )
+                                  }}
                                 />
                               ) : null}
                               {pivotChartSeries.map((series) => (
@@ -3735,6 +4089,7 @@ export default function ReportsPage() {
                                       : undefined
                                   }
                                   fill={series.color}
+                                  hide={isLegendKeyHidden(series.key)}
                                   radius={
                                     pivotHasColumns && pivotChartSeries.length > 1
                                       ? 0
@@ -3749,6 +4104,7 @@ export default function ReportsPage() {
                                   stroke="hsl(var(--chart-3))"
                                   strokeWidth={2}
                                   dot={false}
+                                  hide={isLegendKeyHidden(PIVOT_DYNAMIC_DAILY_CAP_DATA_KEY)}
                                   type="monotone"
                                   isAnimationActive={false}
                                 />
@@ -3774,7 +4130,7 @@ export default function ReportsPage() {
                               data={pivotChartData}
                               margin={{ left: 8, right: 16, top: 8, bottom: 8 }}
                             >
-                              <CartesianGrid strokeDasharray="3 3" />
+                              <CartesianGrid {...chartGridProps} />
                               <XAxis dataKey="name" />
                               <YAxis
                                 tickFormatter={(v) =>
@@ -3783,16 +4139,31 @@ export default function ReportsPage() {
                               />
                               <Tooltip
                                 cursor={false}
-                                formatter={(v, name) => [
-                                  formatPivotValue(Number(v), config.pivot.metric),
-                                  formatPivotSeriesDisplayName(String(name)),
-                                ]}
+                                content={
+                                  <ChartTooltipContent
+                                    valueFormatter={(v) =>
+                                      formatPivotValue(v, config.pivot.metric)
+                                    }
+                                    nameFormatter={(name) =>
+                                      formatPivotSeriesDisplayName(name)
+                                    }
+                                  />
+                                }
                               />
                               {pivotChartSeries.length > 1 || showPivotDynamicDailyCapLine ? (
                                 <Legend
-                                  formatter={(value) =>
-                                    formatPivotSeriesLegendName(String(value))
-                                  }
+                                  {...chartLegendProps}
+                                  onClick={(entry: { dataKey?: unknown; value?: unknown }) => {
+                                    const key = String(entry.dataKey ?? entry.value ?? "")
+                                    if (key) toggleLegendKey(key)
+                                  }}
+                                  formatter={(value, entry: { dataKey?: unknown }) => {
+                                    const key = String(entry.dataKey ?? value ?? "")
+                                    return renderLegendLabel(
+                                      formatPivotSeriesLegendName(String(value)),
+                                      key,
+                                    )
+                                  }}
                                 />
                               ) : null}
                               {pivotChartSeries.map((series) => (
@@ -3802,6 +4173,7 @@ export default function ReportsPage() {
                                   stroke={series.color}
                                   fill={series.color}
                                   fillOpacity={0.2}
+                                  hide={isLegendKeyHidden(series.key)}
                                   type="monotone"
                                   stackId={
                                     pivotHasColumns && pivotChartSeries.length > 1
@@ -3817,6 +4189,7 @@ export default function ReportsPage() {
                                   stroke="hsl(var(--chart-3))"
                                   strokeWidth={2}
                                   dot={false}
+                                  hide={isLegendKeyHidden(PIVOT_DYNAMIC_DAILY_CAP_DATA_KEY)}
                                   type="monotone"
                                   isAnimationActive={false}
                                 />
@@ -3842,7 +4215,7 @@ export default function ReportsPage() {
                               data={pivotChartData}
                               margin={{ left: 8, right: 16, top: 8, bottom: 8 }}
                             >
-                              <CartesianGrid strokeDasharray="3 3" />
+                              <CartesianGrid {...chartGridProps} />
                               <XAxis dataKey="name" />
                               <YAxis
                                 tickFormatter={(v) =>
@@ -3851,16 +4224,31 @@ export default function ReportsPage() {
                               />
                               <Tooltip
                                 cursor={false}
-                                formatter={(v, name) => [
-                                  formatPivotValue(Number(v), config.pivot.metric),
-                                  formatPivotSeriesDisplayName(String(name)),
-                                ]}
+                                content={
+                                  <ChartTooltipContent
+                                    valueFormatter={(v) =>
+                                      formatPivotValue(v, config.pivot.metric)
+                                    }
+                                    nameFormatter={(name) =>
+                                      formatPivotSeriesDisplayName(name)
+                                    }
+                                  />
+                                }
                               />
                               {pivotChartSeries.length > 1 || showPivotDynamicDailyCapLine ? (
                                 <Legend
-                                  formatter={(value) =>
-                                    formatPivotSeriesLegendName(String(value))
-                                  }
+                                  {...chartLegendProps}
+                                  onClick={(entry: { dataKey?: unknown; value?: unknown }) => {
+                                    const key = String(entry.dataKey ?? entry.value ?? "")
+                                    if (key) toggleLegendKey(key)
+                                  }}
+                                  formatter={(value, entry: { dataKey?: unknown }) => {
+                                    const key = String(entry.dataKey ?? value ?? "")
+                                    return renderLegendLabel(
+                                      formatPivotSeriesLegendName(String(value)),
+                                      key,
+                                    )
+                                  }}
                                 />
                               ) : null}
                               {pivotChartSeries.map((series) => (
@@ -3870,6 +4258,7 @@ export default function ReportsPage() {
                                   stroke={series.color}
                                   strokeWidth={2}
                                   dot={false}
+                                  hide={isLegendKeyHidden(series.key)}
                                   type="monotone"
                                 />
                               ))}
@@ -3880,6 +4269,7 @@ export default function ReportsPage() {
                                   stroke="hsl(var(--chart-3))"
                                   strokeWidth={2}
                                   dot={false}
+                                  hide={isLegendKeyHidden(PIVOT_DYNAMIC_DAILY_CAP_DATA_KEY)}
                                   type="monotone"
                                   isAnimationActive={false}
                                 />

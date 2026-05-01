@@ -3,6 +3,7 @@ import { Link } from "react-router-dom"
 import { Info, SlidersHorizontal } from "lucide-react"
 import LabelValueRow from "@/components/LabelValueRow"
 import MonthPicker from "@/components/MonthPicker"
+import { ChartTooltipContent } from "@/components/charts/ChartTooltip"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
@@ -35,7 +36,7 @@ import {
   Pie,
   PieChart,
   ResponsiveContainer,
-  Tooltip as RechartsTooltip,
+  Tooltip,
 } from "recharts"
 
 const BUDGETS_COMPACT_KEY = "smartSpend.ui.budgetsCompact.v1"
@@ -462,12 +463,7 @@ function SpendingProgressCard({
                     <Cell key={entry.key} fill={entry.color} />
                   ))}
                 </Pie>
-                <RechartsTooltip
-                  formatter={(value: unknown, name: unknown) => {
-                    const v = typeof value === "number" ? value : 0
-                    return [formatVnd(v), String(name)]
-                  }}
-                />
+                <Tooltip cursor={false} content={<ChartTooltipContent hideLabel />} />
               </PieChart>
             </ResponsiveContainer>
           </div>
