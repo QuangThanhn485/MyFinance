@@ -1263,29 +1263,47 @@ export default function ReportsPage() {
       })),
     [dailyData, baseDailyCapByMonth, baseDailyCapVnd],
   )
-  const dailyCapByDayMap = useMemo(() => {
-    const dim = Math.max(1, daysInMonth(month))
-    const monthlyVariableBudgetVnd = Math.max(
-      0,
-      budgets.essentialVariableBaselineVnd + budgets.wantsBudgetVnd,
-    )
-    const spentByDay = Array.from({ length: dim + 1 }, () => 0)
-    for (const expense of expenses) {
-      const day = dayOfMonthFromIsoDate(expense.date)
-      if (day < 1 || day > dim) continue
-      spentByDay[day] += expense.amountVnd
+  const dailyCapByDateMap = useMemo(() => {
+    const map: Record<string, number> = {}
+
+    for (const m of monthsInRange) {
+      const dim = Math.max(1, daysInMonth(m))
+      const settings = getEffectiveSettingsForMonth(data, m)
+      const monthTotals = getMonthTotals(data, m)
+      const monthAdjustment = getEffectiveBudgetAdjustmentForMonth(data, m)
+      const monthBudgets = computeBudgets({
+        incomeVnd: getMonthlyIncomeTotalVnd(settings),
+        fixedCostsVnd: monthTotals.fixedCostsTotal,
+        essentialVariableBaselineVnd: settings.essentialVariableBaselineVnd,
+        rule: settings.budgetRule,
+        adjustment: monthAdjustment,
+        customSavingsGoalVnd: settings.customSavingsGoalVnd,
+      })
+      const monthlyVariableBudgetVnd = Math.max(
+        0,
+        monthBudgets.essentialVariableBaselineVnd + monthBudgets.wantsBudgetVnd,
+      )
+      const spentByDay = Array.from({ length: dim + 1 }, () => 0)
+
+      for (const expense of allVariableExpenses) {
+        if (monthFromIsoDate(expense.date) !== m) continue
+        const day = dayOfMonthFromIsoDate(expense.date)
+        if (day < 1 || day > dim) continue
+        spentByDay[day] += expense.amountVnd
+      }
+
+      let spentBeforeDay = 0
+      for (let day = 1; day <= dim; day += 1) {
+        const remainingBudgetVnd = Math.max(0, monthlyVariableBudgetVnd - spentBeforeDay)
+        const remainingDays = Math.max(1, dim - day + 1)
+        const date = `${m}-${String(day).padStart(2, "0")}`
+        map[date] = Math.floor(remainingBudgetVnd / remainingDays)
+        spentBeforeDay += spentByDay[day]
+      }
     }
 
-    const map: Record<number, number> = {}
-    let spentBeforeDay = 0
-    for (let day = 1; day <= dim; day += 1) {
-      const remainingBudgetVnd = Math.max(0, monthlyVariableBudgetVnd - spentBeforeDay)
-      const remainingDays = Math.max(1, dim - day + 1)
-      map[day] = Math.floor(remainingBudgetVnd / remainingDays)
-      spentBeforeDay += spentByDay[day]
-    }
     return map
-  }, [month, budgets.essentialVariableBaselineVnd, budgets.wantsBudgetVnd, expenses])
+  }, [allVariableExpenses, data, monthsInRange])
 
   const advancedInsights = useMemo(
     () => computeAdvancedInsights({ expenses, historyExpenses: allVariableExpenses, month, today }),
@@ -1413,6 +1431,8 @@ export default function ReportsPage() {
       shortenLabel(series.label, 18),
     ]),
   )
+  const PIVOT_BASE_DAILY_CAP_DATA_KEY = "pivotBaseDailyCapVnd"
+  const PIVOT_BASE_DAILY_CAP_LABEL = "Cap chi/ngày gốc"
   const PIVOT_DYNAMIC_DAILY_CAP_DATA_KEY = "pivotDynamicDailyCapVnd"
   const PIVOT_DYNAMIC_DAILY_CAP_LABEL = "Cap chi/ngày (động)"
   const pivotDailyCapColumnIndex = config.pivot.columnFields.indexOf("dailyCap")
@@ -1421,15 +1441,14 @@ export default function ReportsPage() {
     config.pivot.metric === "sum" &&
     pivotDayRowIndex >= 0 &&
     pivotDailyCapColumnIndex >= 0 &&
-    Object.keys(dailyCapByDayMap).length > 0
-  const pivotDayByRowKey = useMemo(() => {
-    const out = new Map<string, number>()
+    Object.keys(dailyCapByDateMap).length > 0
+  const pivotDateByRowKey = useMemo(() => {
+    const out = new Map<string, ISODate>()
     if (pivotDayRowIndex < 0) return out
     for (const row of pivotTable.rows) {
-      const dayRaw = row.sortValues?.[pivotDayRowIndex]
-      const day = typeof dayRaw === "number" ? dayRaw : Number(dayRaw)
-      if (Number.isFinite(day) && day >= 1) {
-        out.set(row.key, Math.trunc(day))
+      const date = row.key.split("||")[pivotDayRowIndex]
+      if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        out.set(row.key, date as ISODate)
       }
     }
     return out
@@ -1445,9 +1464,14 @@ export default function ReportsPage() {
     return out
   }, [pivotDailyCapByDayMode, pivotDailyCapColumnIndex, pivotTable.cols])
   const getPivotDailyCapForRowKey = (rowKey: string) => {
-    const day = pivotDayByRowKey.get(rowKey)
-    if (!day) return baseDailyCapVnd
-    return dailyCapByDayMap[day] ?? baseDailyCapVnd
+    const date = pivotDateByRowKey.get(rowKey)
+    if (!date) return baseDailyCapVnd
+    return dailyCapByDateMap[date] ?? baseDailyCapByMonth[monthFromIsoDate(date)] ?? baseDailyCapVnd
+  }
+  const getPivotBaseDailyCapForRowKey = (rowKey: string) => {
+    const date = pivotDateByRowKey.get(rowKey)
+    if (!date) return baseDailyCapVnd
+    return baseDailyCapByMonth[monthFromIsoDate(date)] ?? baseDailyCapVnd
   }
   const getPivotDisplayCellValue = (rowKey: string, colKey: string) => {
     if (pivotDailyCapByDayMode && pivotDailyCapColumnKeySet.has(colKey)) {
@@ -1474,8 +1498,8 @@ export default function ReportsPage() {
     pivotTable.colTotals,
     pivotDailyCapByDayMode,
     pivotDailyCapColumnKeySet,
-    dailyCapByDayMap,
-    pivotDayByRowKey,
+    dailyCapByDateMap,
+    pivotDateByRowKey,
     baseDailyCapVnd,
     config.pivot.metric,
   ])
@@ -1487,15 +1511,22 @@ export default function ReportsPage() {
           ? `W${row.sortValue}`
           : shortenLabel(row.label, 16)
     const dynamicCapForRow = getPivotDailyCapForRowKey(row.key)
+    const baseCapForRow = getPivotBaseDailyCapForRowKey(row.key)
     if (!pivotHasColumns) {
       const value = pivotMetricValue(
         pivotTable.rowTotals[row.key],
         config.pivot.metric,
       )
-      return { name: label, value, [PIVOT_DYNAMIC_DAILY_CAP_DATA_KEY]: dynamicCapForRow }
+      return {
+        name: label,
+        value,
+        [PIVOT_BASE_DAILY_CAP_DATA_KEY]: baseCapForRow,
+        [PIVOT_DYNAMIC_DAILY_CAP_DATA_KEY]: dynamicCapForRow,
+      }
     }
     const entry: Record<string, number | string> = {
       name: label,
+      [PIVOT_BASE_DAILY_CAP_DATA_KEY]: baseCapForRow,
       [PIVOT_DYNAMIC_DAILY_CAP_DATA_KEY]: dynamicCapForRow,
     }
     pivotChartSeries.forEach((series) => {
@@ -1504,25 +1535,21 @@ export default function ReportsPage() {
     return entry
   })
   const pivotChartLimited = pivotTable.rows.length > pivotChartLimit
-  const pivotChartHasDailyCapSeries =
-    pivotHasColumns &&
-    pivotChartSeries.some((series) => pivotDailyCapColumnKeySet.has(series.colKey))
-  const pivotChartShowsTotalByDay = !pivotHasColumns
   const showPivotDynamicDailyCapLine =
     pivotChartPrimary === "day" &&
     config.pivot.metric === "sum" &&
-    Object.keys(dailyCapByDayMap).length > 0 &&
-    pivotChartShowsTotalByDay
+    Object.keys(dailyCapByDateMap).length > 0
   const showPivotBaseDailyCap =
     pivotChartPrimary === "day" &&
     config.pivot.metric === "sum" &&
-    baseDailyCapVnd > 0 &&
-    (pivotChartShowsTotalByDay || pivotChartHasDailyCapSeries)
+    pivotChartData.some((row) => Number(row[PIVOT_BASE_DAILY_CAP_DATA_KEY]) > 0)
   const formatPivotSeriesDisplayName = (name: string) => {
+    if (name === PIVOT_BASE_DAILY_CAP_DATA_KEY) return PIVOT_BASE_DAILY_CAP_LABEL
     if (name === PIVOT_DYNAMIC_DAILY_CAP_DATA_KEY) return PIVOT_DYNAMIC_DAILY_CAP_LABEL
     return pivotChartSeriesLabelByKey.get(name) ?? name
   }
   const formatPivotSeriesLegendName = (name: string) => {
+    if (name === PIVOT_BASE_DAILY_CAP_DATA_KEY) return PIVOT_BASE_DAILY_CAP_LABEL
     if (name === PIVOT_DYNAMIC_DAILY_CAP_DATA_KEY) return PIVOT_DYNAMIC_DAILY_CAP_LABEL
     return pivotChartSeriesShortLabelByKey.get(name) ?? name
   }
@@ -4063,7 +4090,9 @@ export default function ReportsPage() {
                                   />
                                 }
                               />
-                              {pivotChartSeries.length > 1 || showPivotDynamicDailyCapLine ? (
+                              {pivotChartSeries.length > 1 ||
+                              showPivotDynamicDailyCapLine ||
+                              showPivotBaseDailyCap ? (
                                 <Legend
                                   {...chartLegendProps}
                                   onClick={(entry: { dataKey?: unknown; value?: unknown }) => {
@@ -4110,18 +4139,16 @@ export default function ReportsPage() {
                                 />
                               ) : null}
                               {showPivotBaseDailyCap ? (
-                                <ReferenceLine
-                                  y={baseDailyCapVnd}
+                                <Line
+                                  dataKey={PIVOT_BASE_DAILY_CAP_DATA_KEY}
+                                  name={PIVOT_BASE_DAILY_CAP_LABEL}
                                   stroke="hsl(var(--chart-4))"
                                   strokeDasharray="6 4"
                                   strokeWidth={2}
-                                  ifOverflow="extendDomain"
-                                  label={{
-                                    value: "Cap gốc/ngày",
-                                    position: "insideTopRight",
-                                    fill: "hsl(var(--muted-foreground))",
-                                    fontSize: 11,
-                                  }}
+                                  dot={false}
+                                  hide={isLegendKeyHidden(PIVOT_BASE_DAILY_CAP_DATA_KEY)}
+                                  type="linear"
+                                  isAnimationActive={false}
                                 />
                               ) : null}
                             </ComposedChart>
@@ -4150,7 +4177,9 @@ export default function ReportsPage() {
                                   />
                                 }
                               />
-                              {pivotChartSeries.length > 1 || showPivotDynamicDailyCapLine ? (
+                              {pivotChartSeries.length > 1 ||
+                              showPivotDynamicDailyCapLine ||
+                              showPivotBaseDailyCap ? (
                                 <Legend
                                   {...chartLegendProps}
                                   onClick={(entry: { dataKey?: unknown; value?: unknown }) => {
@@ -4195,18 +4224,16 @@ export default function ReportsPage() {
                                 />
                               ) : null}
                               {showPivotBaseDailyCap ? (
-                                <ReferenceLine
-                                  y={baseDailyCapVnd}
+                                <Line
+                                  dataKey={PIVOT_BASE_DAILY_CAP_DATA_KEY}
+                                  name={PIVOT_BASE_DAILY_CAP_LABEL}
                                   stroke="hsl(var(--chart-4))"
                                   strokeDasharray="6 4"
                                   strokeWidth={2}
-                                  ifOverflow="extendDomain"
-                                  label={{
-                                    value: "Cap gốc/ngày",
-                                    position: "insideTopRight",
-                                    fill: "hsl(var(--muted-foreground))",
-                                    fontSize: 11,
-                                  }}
+                                  dot={false}
+                                  hide={isLegendKeyHidden(PIVOT_BASE_DAILY_CAP_DATA_KEY)}
+                                  type="linear"
+                                  isAnimationActive={false}
                                 />
                               ) : null}
                             </AreaChart>
@@ -4235,7 +4262,9 @@ export default function ReportsPage() {
                                   />
                                 }
                               />
-                              {pivotChartSeries.length > 1 || showPivotDynamicDailyCapLine ? (
+                              {pivotChartSeries.length > 1 ||
+                              showPivotDynamicDailyCapLine ||
+                              showPivotBaseDailyCap ? (
                                 <Legend
                                   {...chartLegendProps}
                                   onClick={(entry: { dataKey?: unknown; value?: unknown }) => {
@@ -4275,18 +4304,16 @@ export default function ReportsPage() {
                                 />
                               ) : null}
                               {showPivotBaseDailyCap ? (
-                                <ReferenceLine
-                                  y={baseDailyCapVnd}
+                                <Line
+                                  dataKey={PIVOT_BASE_DAILY_CAP_DATA_KEY}
+                                  name={PIVOT_BASE_DAILY_CAP_LABEL}
                                   stroke="hsl(var(--chart-4))"
                                   strokeDasharray="6 4"
                                   strokeWidth={2}
-                                  ifOverflow="extendDomain"
-                                  label={{
-                                    value: "Cap gốc/ngày",
-                                    position: "insideTopRight",
-                                    fill: "hsl(var(--muted-foreground))",
-                                    fontSize: 11,
-                                  }}
+                                  dot={false}
+                                  hide={isLegendKeyHidden(PIVOT_BASE_DAILY_CAP_DATA_KEY)}
+                                  type="linear"
+                                  isAnimationActive={false}
                                 />
                               ) : null}
                             </LineChart>

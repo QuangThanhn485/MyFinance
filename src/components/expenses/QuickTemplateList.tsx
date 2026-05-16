@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { CheckSquare, Pencil, Plus, Trash2 } from "lucide-react"
+import { Pencil, Plus, Trash2 } from "lucide-react"
 import type { ExpenseCategory, ExpenseCategoryConfig } from "@/domain/types"
 import { formatVnd } from "@/lib/currency"
 import { cn } from "@/lib/utils"
@@ -15,7 +15,6 @@ type QuickTemplateListProps = {
   selectedIds: Set<string>
   onToggleSelect: (id: string, checked: boolean) => void
   onToggleSelectAllVisible: (checked: boolean, visibleTemplates: ExpenseTemplate[]) => void
-  onClearSelection: () => void
   onBulkAddSelected?: () => void
   onBulkDelete: () => void
   onQuickAdd: (template: ExpenseTemplate) => void
@@ -31,7 +30,6 @@ export default function QuickTemplateList({
   selectedIds,
   onToggleSelect,
   onToggleSelectAllVisible,
-  onClearSelection,
   onBulkAddSelected,
   onBulkDelete,
   onQuickAdd,
@@ -39,25 +37,22 @@ export default function QuickTemplateList({
   onCreate,
   showCreateButton = true,
 }: QuickTemplateListProps) {
-  const groups = useMemo(
-    () => {
-      const orderedCategories = categories.map((category) => category.id)
-      const known = new Set(orderedCategories)
-      const extraCategories = templates
-        .map((template) => template.category)
-        .filter((category, index, self) => !known.has(category) && self.indexOf(category) === index)
+  const groups = useMemo(() => {
+    const orderedCategories = categories.map((category) => category.id)
+    const known = new Set(orderedCategories)
+    const extraCategories = templates
+      .map((template) => template.category)
+      .filter((category, index, self) => !known.has(category) && self.indexOf(category) === index)
 
-      return [...orderedCategories, ...extraCategories]
-        .map((category) => ({
-          category,
-          templates: templates
-            .filter((template) => template.category === category)
-            .sort((a, b) => a.name.localeCompare(b.name, "vi")),
-        }))
-        .filter((group) => group.templates.length > 0)
-    },
-    [categories, templates],
-  )
+    return [...orderedCategories, ...extraCategories]
+      .map((category) => ({
+        category,
+        templates: templates
+          .filter((template) => template.category === category)
+          .sort((a, b) => a.name.localeCompare(b.name, "vi")),
+      }))
+      .filter((group) => group.templates.length > 0)
+  }, [categories, templates])
 
   const [activeCategory, setActiveCategory] = useState<ExpenseCategory | null>(
     () => groups[0]?.category ?? null,
@@ -76,6 +71,9 @@ export default function QuickTemplateList({
   const visibleTemplates =
     groups.find((group) => group.category === activeCategory)?.templates ?? []
   const selectedCount = selectedIds.size
+  const selectedVisibleCount = visibleTemplates.filter((template) =>
+    selectedIds.has(template.id),
+  ).length
   const allVisibleSelected =
     visibleTemplates.length > 0 &&
     visibleTemplates.every((template) => selectedIds.has(template.id))
@@ -107,18 +105,6 @@ export default function QuickTemplateList({
           <div className="flex-1 text-xs text-muted-foreground">Chưa có mẫu</div>
         )}
 
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="h-8 shrink-0 px-2 text-xs"
-          disabled={visibleTemplates.length === 0}
-          onClick={() => onToggleSelectAllVisible(!allVisibleSelected, visibleTemplates)}
-        >
-          <CheckSquare className="h-3.5 w-3.5" />
-          {allVisibleSelected ? "Bỏ chọn" : "Chọn tab"}
-        </Button>
-
         {showCreateButton && onCreate ? (
           <Button type="button" size="sm" className="h-8 shrink-0 px-2 text-xs" onClick={onCreate}>
             <Plus className="h-3.5 w-3.5" />
@@ -127,41 +113,55 @@ export default function QuickTemplateList({
         ) : null}
       </div>
 
-      {selectedCount > 0 ? (
-        <div className="flex min-h-8 items-center gap-2 overflow-x-auto rounded-md border bg-background px-2 py-1 whitespace-nowrap">
-          <span className="shrink-0 text-xs font-medium text-foreground">
-            {selectedCount} item đang chọn
+      <div className="flex min-h-8 items-center gap-2 overflow-x-auto rounded-md border bg-background px-2 py-1 whitespace-nowrap">
+        <label className="inline-flex shrink-0 items-center gap-2 text-xs">
+          <Checkbox
+            checked={allVisibleSelected}
+            disabled={visibleTemplates.length === 0}
+            onCheckedChange={(value) =>
+              onToggleSelectAllVisible(value === true, visibleTemplates)
+            }
+            aria-label={allVisibleSelected ? "Bỏ chọn tab hiện tại" : "Chọn tab hiện tại"}
+          />
+          <span className="text-muted-foreground">
+            {allVisibleSelected
+              ? "Bỏ chọn tab"
+              : selectedVisibleCount > 0
+                ? `${selectedVisibleCount}/${visibleTemplates.length} trong tab`
+                : "Chọn tab"}
           </span>
+        </label>
+
+        <span className="shrink-0 text-xs text-muted-foreground">
+          {selectedCount > 0
+            ? `${selectedCount} item đang chọn`
+            : `${visibleTemplates.length} item trong tab`}
+        </span>
+
+        <div className="ml-auto flex shrink-0 items-center gap-1">
           <Button
             type="button"
             size="sm"
-            className="h-7 shrink-0 px-2 text-xs"
+            className="h-7 px-2 text-xs"
             onClick={onBulkAddSelected}
-            disabled={!onBulkAddSelected}
+            disabled={!onBulkAddSelected || selectedCount === 0}
           >
-            Thêm ({selectedCount})
+            Thêm{selectedCount > 0 ? ` (${selectedCount})` : ""}
           </Button>
           <Button
             type="button"
-            size="sm"
-            variant="destructive"
-            className="h-7 shrink-0 px-2 text-xs"
+            size="icon"
+            variant="outline"
+            className="h-7 w-7 text-muted-foreground hover:text-destructive"
             onClick={onBulkDelete}
+            disabled={selectedCount === 0}
+            title="Xóa item đã chọn"
+            aria-label="Xóa item đã chọn"
           >
             <Trash2 className="h-3.5 w-3.5" />
-            Xoá ({selectedCount})
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="h-7 shrink-0 px-2 text-xs"
-            onClick={onClearSelection}
-          >
-            Bỏ chọn
           </Button>
         </div>
-      ) : null}
+      </div>
 
       <div className="flex-1 min-h-0 rounded-md border bg-muted/20">
         <div className="h-full overflow-y-auto p-2 space-y-1.5">
@@ -172,7 +172,8 @@ export default function QuickTemplateList({
           ) : (
             visibleTemplates.map((template) => {
               const checked = selectedIds.has(template.id)
-              const secondaryText = template.note || categoryLabels[template.category] || template.category
+              const secondaryText =
+                template.note || categoryLabels[template.category] || template.category
 
               return (
                 <div

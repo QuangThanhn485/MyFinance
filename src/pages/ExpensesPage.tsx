@@ -689,6 +689,7 @@ export default function ExpensesPage() {
       nextTemplates = touchExpenseTemplate(template.id)
     })
     setTemplates(nextTemplates)
+    setSelectedTemplateIds(new Set())
 
     const lastId = addedIds[addedIds.length - 1]
     if (lastId) {
@@ -1114,7 +1115,6 @@ export default function ExpensesPage() {
                       return next
                     })
                   }}
-                  onClearSelection={() => setSelectedTemplateIds(new Set())}
                   onBulkAddSelected={addSelectedTemplates}
                   onBulkDelete={() => setBulkDeleteTemplatesOpen(true)}
                   onQuickAdd={addExpenseFromTemplate}
