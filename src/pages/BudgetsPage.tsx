@@ -3,7 +3,6 @@ import { Link } from "react-router-dom"
 import { Info, SlidersHorizontal } from "lucide-react"
 import LabelValueRow from "@/components/LabelValueRow"
 import MonthPicker from "@/components/MonthPicker"
-import { ChartTooltipContent } from "@/components/charts/ChartTooltip"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
@@ -31,13 +30,6 @@ import { getCategoryTotals, getMonthTotals } from "@/selectors/expenses"
 import { cn } from "@/lib/utils"
 import { useAppStore } from "@/store/useAppStore"
 import { getMonthDayContext } from "@/storage/dayLock"
-import {
-  Cell,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip,
-} from "recharts"
 
 const BUDGETS_COMPACT_KEY = "smartSpend.ui.budgetsCompact.v1"
 
@@ -117,42 +109,90 @@ function KpiCard({
   )
 }
 
-function SegmentChip({
-  active,
+function LegendRow({
   color,
   label,
   value,
-  pctOfIncome,
-  onClick,
+  pctIncome,
+  valueClassName,
 }: {
-  active: boolean
   color: string
   label: string
   value: number
-  pctOfIncome: number
-  onClick: () => void
+  pctIncome?: number
+  valueClassName?: string
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs transition-colors",
-        active
-          ? "bg-muted text-foreground border-border"
-          : "bg-background hover:bg-muted/40 text-muted-foreground",
-      )}
-    >
+    <div className="flex items-center gap-2 text-sm">
       <span
-        className="h-2.5 w-2.5 rounded-full"
+        className="h-2.5 w-2.5 shrink-0 rounded-full"
         style={{ backgroundColor: color }}
         aria-hidden
       />
-      <span className="truncate">{label}</span>
-      <span className="text-foreground tabular-nums whitespace-nowrap">
-        {pctOfIncome.toFixed(0)}% • {formatVnd(value)}
+      <span className="min-w-0 flex-1 truncate text-muted-foreground">{label}</span>
+      {pctIncome !== undefined ? (
+        <span className="w-10 shrink-0 text-right tabular-nums text-muted-foreground">
+          {pctIncome.toFixed(0)}%
+        </span>
+      ) : null}
+      <span className={cn("w-28 shrink-0 text-right font-medium tabular-nums", valueClassName)}>
+        {formatVnd(value)}
       </span>
-    </button>
+    </div>
+  )
+}
+
+// Bảng màu + mã ngắn cho từng vùng ngân sách. Màu F/E/W/S là bảng categorical đã được kiểm tra
+// bằng validator dataviz (phân biệt tốt cho người mù màu, tương phản đạt chuẩn). Định nghĩa theo
+// theme trong index.css (--budget-*). Còn lại/Vượt/Chưa phân bổ dùng token trung tính/trạng thái.
+const SEG_STYLE: Record<string, { color: string; code: string; onColor: string }> = {
+  fixed: { color: "var(--budget-fixed)", code: "F", onColor: "text-white" },
+  essential: { color: "var(--budget-essential)", code: "E", onColor: "text-white" },
+  wants: { color: "var(--budget-wants)", code: "W", onColor: "text-white" },
+  savings: { color: "var(--budget-savings)", code: "S", onColor: "text-white" },
+  remaining: { color: "hsl(var(--muted-foreground) / 0.22)", code: "Còn lại", onColor: "text-foreground/80" },
+  unallocated: { color: "hsl(var(--muted-foreground) / 0.18)", code: "Dư", onColor: "text-foreground/80" },
+  over: { color: "hsl(var(--destructive))", code: "Vượt", onColor: "text-white" },
+}
+
+type BarSegment = {
+  key: string
+  pct: number
+  color: string
+  code: string
+  onColor: string
+  title: string
+}
+
+// Thanh chồng có nhãn: mỗi vùng có mã (F/E/W/S…) ngay trên thanh + khe 2px màu nền để tách bạch
+// ranh giới — nhìn là biết vùng nào thuộc trường nào, không cần dò legend.
+function SegmentedBar({ segments }: { segments: BarSegment[] }) {
+  // Hover một vùng -> các vùng khác mờ đi để làm nổi bật vùng đang hover.
+  const [hovered, setHovered] = useState<string | null>(null)
+  return (
+    <div className="flex h-7 w-full gap-[2px] overflow-hidden rounded-md">
+      {segments.map((s) =>
+        s.pct > 0 ? (
+          <div
+            key={s.key}
+            className={cn(
+              "flex h-full min-w-0 items-center justify-center transition-opacity duration-150",
+              hovered && hovered !== s.key ? "opacity-25" : "opacity-100",
+            )}
+            style={{ width: `${s.pct}%`, backgroundColor: s.color }}
+            title={s.title}
+            onMouseEnter={() => setHovered(s.key)}
+            onMouseLeave={() => setHovered(null)}
+          >
+            {s.pct >= 6 ? (
+              <span className={cn("truncate px-1 text-[11px] font-semibold leading-none", s.onColor)}>
+                {s.code}
+              </span>
+            ) : null}
+          </div>
+        ) : null,
+      )}
+    </div>
   )
 }
 
@@ -221,6 +261,7 @@ function AllocationCard({
   savingsVnd,
   onOpenDetails,
   compactMode,
+  note,
 }: {
   incomeVnd: number
   fixedVnd: number
@@ -229,75 +270,36 @@ function AllocationCard({
   savingsVnd: number
   onOpenDetails: () => void
   compactMode: boolean
+  note?: string
 }) {
-  const [highlight, setHighlight] = useState<string | null>(null)
-
   const segments = useMemo(() => {
     const income = Math.max(0, incomeVnd)
-    const fixed = Math.max(0, fixedVnd)
-    const essential = Math.max(0, essentialVnd)
-    const wants = Math.max(0, wantsVnd)
-    const savings = Math.max(0, savingsVnd)
-    const sum = fixed + essential + wants + savings
+    const base = [
+      { key: "fixed", label: "Cố định (F)", value: Math.max(0, fixedVnd) },
+      { key: "essential", label: "Thiết yếu (E)", value: Math.max(0, essentialVnd) },
+      { key: "wants", label: "Mong muốn (W)", value: Math.max(0, wantsVnd) },
+      { key: "savings", label: "Tiết kiệm (S)", value: Math.max(0, savingsVnd) },
+    ]
+    const sum = base.reduce((acc, item) => acc + item.value, 0)
     const unallocated = Math.max(0, income - sum)
     const overflow = Math.max(0, sum - income)
-    const barDenominator = Math.max(1, income + overflow)
-
-    const pctOfIncome = (value: number) => (income > 0 ? (value / income) * 100 : 0)
-    const pctOfBar = (value: number) => (value / barDenominator) * 100
-
-    const items = [
-      {
-        key: "fixed",
-        label: "Cố định (F)",
-        value: fixed,
-        pctIncome: pctOfIncome(fixed),
-        pctBar: pctOfBar(fixed),
-        color: "hsl(var(--chart-6))",
-      },
-      {
-        key: "essential",
-        label: "Thiết yếu (E)",
-        value: essential,
-        pctIncome: pctOfIncome(essential),
-        pctBar: pctOfBar(essential),
-        color: "hsl(var(--chart-1))",
-      },
-      {
-        key: "wants",
-        label: "Mong muốn (W)",
-        value: wants,
-        pctIncome: pctOfIncome(wants),
-        pctBar: pctOfBar(wants),
-        color: "hsl(var(--chart-5))",
-      },
-      {
-        key: "savings",
-        label: "Tiết kiệm (S)",
-        value: savings,
-        pctIncome: pctOfIncome(savings),
-        pctBar: pctOfBar(savings),
-        color: "hsl(var(--chart-2))",
-      },
-      {
-        key: "unallocated",
-        label: "Chưa phân bổ",
-        value: unallocated,
-        pctIncome: pctOfIncome(unallocated),
-        pctBar: pctOfBar(unallocated),
-        color: "hsl(var(--muted-foreground) / 0.25)",
-      },
-      {
-        key: "overflow",
-        label: "Vượt thu nhập",
-        value: overflow,
-        pctIncome: pctOfIncome(overflow),
-        pctBar: pctOfBar(overflow),
-        color: "hsl(var(--destructive))",
-      },
-    ].filter((x) => x.value > 0)
-
-    return { overflow, items }
+    const denom = Math.max(1, income, sum)
+    const items = [...base]
+    if (unallocated > 0) {
+      items.push({ key: "unallocated", label: "Chưa phân bổ", value: unallocated })
+    }
+    if (overflow > 0) {
+      items.push({ key: "over", label: "Vượt thu nhập", value: overflow })
+    }
+    return {
+      overflow,
+      items: items.map((item) => ({
+        ...item,
+        ...SEG_STYLE[item.key],
+        pctIncome: income > 0 ? (item.value / income) * 100 : 0,
+        pctBar: (item.value / denom) * 100,
+      })),
+    }
   }, [essentialVnd, fixedVnd, incomeVnd, savingsVnd, wantsVnd])
 
   return (
@@ -310,13 +312,13 @@ function AllocationCard({
       >
         <div className="min-w-0">
           <CardTitle className="text-base">Kế hoạch phân bổ</CardTitle>
-          <div className="text-xs text-muted-foreground truncate">Chạm chip để highlight</div>
+          <div className="text-xs text-muted-foreground truncate">Thu nhập chia cho F · E · W · S</div>
         </div>
         <div className="flex items-center gap-1">
           <InfoTip label="Giải thích kế hoạch phân bổ">
             <div className="font-medium">Kế hoạch phân bổ</div>
             <div className="text-muted-foreground">
-              Kế hoạch được tính theo I (thu nhập tháng). Sau khi trừ F và E, phần còn lại được chia cho W và S theo tỉ lệ đã cài đặt.
+              Từ thu nhập I: trừ Cố định (F) và Thiết yếu (E); phần còn lại chia cho Mong muốn (W) và Tiết kiệm (S). Tiết kiệm được ưu tiên tối thiểu bằng mục tiêu đã đặt (hoặc MSS), nên Mong muốn có thể nhỏ.
             </div>
           </InfoTip>
           <Button type="button" variant="outline" size="sm" onClick={onOpenDetails}>
@@ -324,46 +326,39 @@ function AllocationCard({
           </Button>
         </div>
       </CardHeader>
-      <CardContent className="pt-0">
-        <div className="space-y-3">
-          {segments.overflow > 0 ? (
-            <div className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive font-medium">
-              Kế hoạch đang vượt thu nhập: {formatVnd(segments.overflow)}
-            </div>
-          ) : null}
-
-          <div className="h-3 w-full overflow-hidden rounded-full bg-muted">
-            <div className="flex h-full w-full">
-              {segments.items.map((it) => {
-                const dimmed = highlight && highlight !== it.key
-                return (
-                  <div
-                    key={it.key}
-                    className={cn("h-full transition-opacity", dimmed && "opacity-30")}
-                    style={{ width: `${it.pctBar}%`, backgroundColor: it.color }}
-                    title={`${it.label}: ${formatVnd(it.value)}`}
-                  />
-                )
-              })}
-            </div>
+      <CardContent className={cn("pt-0", compactMode ? "space-y-3" : "space-y-4")}>
+        {segments.overflow > 0 ? (
+          <div className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive font-medium">
+            Kế hoạch đang vượt thu nhập: {formatVnd(segments.overflow)}
           </div>
+        ) : null}
 
-          <div className="flex flex-wrap gap-2">
-            {segments.items
-              .filter((x) => ["fixed", "essential", "wants", "savings"].includes(x.key))
-              .map((it) => (
-                <SegmentChip
-                  key={it.key}
-                  active={highlight === it.key}
-                  color={it.color}
-                  label={it.label}
-                  value={it.value}
-                  pctOfIncome={it.pctIncome}
-                  onClick={() => setHighlight((prev) => (prev === it.key ? null : it.key))}
-                />
-              ))}
-          </div>
+        <SegmentedBar
+          segments={segments.items.map((it) => ({
+            key: it.key,
+            pct: it.pctBar,
+            color: it.color,
+            code: it.code,
+            onColor: it.onColor,
+            title: `${it.label}: ${formatVnd(it.value)} (${it.pctIncome.toFixed(0)}%)`,
+          }))}
+        />
+
+        <div className="space-y-2">
+          {segments.items.map((it) => (
+            <LegendRow
+              key={it.key}
+              color={it.color}
+              label={it.label}
+              value={it.value}
+              pctIncome={it.pctIncome}
+            />
+          ))}
         </div>
+
+        {note ? (
+          <div className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">{note}</div>
+        ) : null}
       </CardContent>
     </Card>
   )
@@ -388,46 +383,29 @@ function SpendingProgressCard({
   onOpenDetails: () => void
   compactMode: boolean
 }) {
-  const overByVnd = remainingVnd < 0 ? Math.abs(remainingVnd) : 0
-  const usage = useMemo(() => {
+  const view = useMemo(() => {
     const total = Math.max(0, spendingBudgetVnd)
     const fixed = Math.max(0, fixedVnd)
     const essential = Math.max(0, essentialVnd)
     const wants = Math.max(0, wantsVnd)
     const spent = fixed + essential + wants
     const remaining = Math.max(0, total - spent)
-
-    const items = [
-      {
-        key: "fixed",
-        label: "Cố định (F)",
-        value: fixed,
-        color: "hsl(var(--chart-6))",
-      },
-      {
-        key: "essential",
-        label: "Thiết yếu (E)",
-        value: essential,
-        color: "hsl(var(--chart-1))",
-      },
-      {
-        key: "wants",
-        label: "Mong muốn (W)",
-        value: wants,
-        color: "hsl(var(--chart-5))",
-      },
-      {
-        key: "remaining",
-        label: "Còn lại",
-        value: remaining,
-        color: "hsl(var(--chart-2))",
-      },
-    ].filter((x) => x.value > 0)
-
-    return { items }
+    const over = Math.max(0, spent - total)
+    const denom = Math.max(1, total, spent)
+    const bars = [
+      { key: "fixed", label: "Cố định (F)", value: fixed },
+      { key: "essential", label: "Thiết yếu (E)", value: essential },
+      { key: "wants", label: "Mong muốn (W)", value: wants },
+      { key: "remaining", label: "Còn lại", value: remaining },
+      { key: "over", label: "Vượt ngân sách", value: over },
+    ]
+      .filter((b) => b.value > 0)
+      .map((b) => ({ ...b, ...SEG_STYLE[b.key], pct: (b.value / denom) * 100 }))
+    return { total, fixed, essential, wants, spent, remaining, over, bars }
   }, [essentialVnd, fixedVnd, spendingBudgetVnd, wantsVnd])
 
-  const progressPct = spendingBudgetVnd > 0 ? (spentVnd / spendingBudgetVnd) * 100 : 0
+  const overByVnd = view.over
+  const progressPct = view.total > 0 ? (view.spent / view.total) * 100 : 0
 
   return (
     <Card>
@@ -439,63 +417,58 @@ function SpendingProgressCard({
       >
         <div className="min-w-0">
           <CardTitle className="text-base">Tiến độ chi tiêu</CardTitle>
-          <div className="text-xs text-muted-foreground truncate">Ngân sách chi = I − S</div>
+          <div className="text-xs text-muted-foreground truncate">Đã chi trên ngân sách chi (I − S)</div>
         </div>
         <Button type="button" variant="outline" size="sm" onClick={onOpenDetails}>
           Chi tiết
         </Button>
       </CardHeader>
       <CardContent className={cn("pt-0", compactMode ? "space-y-3" : "space-y-4")}>
-        <div className="grid gap-4 sm:grid-cols-[120px_1fr]">
-          <div className="h-[120px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={usage.items}
-                  dataKey="value"
-                  nameKey="label"
-                  innerRadius={38}
-                  outerRadius={54}
-                  paddingAngle={1}
-                  stroke="transparent"
-                >
-                  {usage.items.map((entry) => (
-                    <Cell key={entry.key} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip cursor={false} content={<ChartTooltipContent hideLabel />} />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-
-          <div className="space-y-2 text-sm">
-            <LabelValueRow label="Ngân sách chi" value={formatVnd(spendingBudgetVnd)} />
-            <LabelValueRow label="Đã chi" value={formatVnd(spentVnd)} />
-            <Separator />
-            <LabelValueRow
-              label="Còn lại"
-              value={formatVnd(remainingVnd)}
-              valueClassName={cn(remainingVnd < 0 && "text-destructive")}
-            />
-
-            {overByVnd > 0 ? (
-              <div className="text-xs font-medium text-destructive">
-                Vượt ngân sách: {formatVnd(overByVnd)}
-              </div>
-            ) : (
-              <div className="text-xs text-muted-foreground">Đang trong giới hạn.</div>
-            )}
-          </div>
+        <div className="space-y-2 text-sm">
+          <LabelValueRow label="Ngân sách chi (I − S)" value={formatVnd(spendingBudgetVnd)} />
+          <LabelValueRow
+            label="Đã chi"
+            value={formatVnd(spentVnd)}
+            valueClassName={cn(overByVnd > 0 && "text-destructive")}
+          />
+          <LabelValueRow
+            label="Còn lại"
+            value={formatVnd(remainingVnd)}
+            valueClassName={cn(remainingVnd < 0 && "text-destructive")}
+          />
         </div>
 
         <div className="space-y-2">
-          <LabelValueRow
-            className="text-xs"
-            label="Mức sử dụng ngân sách"
-            value={`${Math.max(0, Math.min(999, progressPct)).toFixed(1)}%`}
-            valueClassName={cn(overByVnd > 0 && "text-destructive")}
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-muted-foreground">Mức dùng ngân sách</span>
+            <span className={cn("font-medium tabular-nums", overByVnd > 0 && "text-destructive")}>
+              {Math.max(0, progressPct).toFixed(0)}%
+            </span>
+          </div>
+          {/* Thanh chồng: từng khoản đã chi (F · E · W) tách bạch + phần còn lại là đoạn riêng,
+              có mã trên thanh và khe ngăn — không trộn kiểu biểu đồ bánh gây khó đọc. */}
+          <SegmentedBar
+            segments={view.bars.map((b) => ({
+              key: b.key,
+              pct: b.pct,
+              color: b.color,
+              code: b.code,
+              onColor: b.onColor,
+              title: `${b.label}: ${formatVnd(b.value)}`,
+            }))}
           />
-          <Progress value={Math.max(0, Math.min(100, progressPct))} />
+        </div>
+
+        <div className="space-y-1.5">
+          <LegendRow color={SEG_STYLE.fixed.color} label="Cố định (F)" value={view.fixed} />
+          <LegendRow color={SEG_STYLE.essential.color} label="Thiết yếu (E)" value={view.essential} />
+          <LegendRow color={SEG_STYLE.wants.color} label="Mong muốn (W)" value={view.wants} />
+          <LegendRow
+            color={overByVnd > 0 ? SEG_STYLE.over.color : SEG_STYLE.remaining.color}
+            label={overByVnd > 0 ? "Vượt ngân sách" : "Còn lại"}
+            value={overByVnd > 0 ? overByVnd : view.remaining}
+            valueClassName={overByVnd > 0 ? "text-destructive" : undefined}
+          />
         </div>
       </CardContent>
     </Card>
@@ -906,7 +879,7 @@ export default function BudgetsPage() {
   })
 
   const spendingBudgetVnd = Math.max(0, budgets.incomeVnd - budgets.savingsTargetVnd)
-  const needsActual = totals.fixedCostsTotal + totals.variableNeeds
+  const essentialActual = totals.variableNeeds
   const wantsActual = totals.variableWants
 
   const now = todayIso()
@@ -935,14 +908,31 @@ export default function BudgetsPage() {
     budgets.incomeVnd - totals.fixedCostsTotal - projectedVariableEndMonthVnd,
   )
 
-  const needsProgress =
-    budgets.needsBudgetVnd > 0 ? (needsActual / budgets.needsBudgetVnd) * 100 : 0
+  const essentialProgress =
+    budgets.essentialVariableBaselineVnd > 0
+      ? (essentialActual / budgets.essentialVariableBaselineVnd) * 100
+      : 0
   const wantsProgress =
     budgets.wantsBudgetVnd > 0 ? (wantsActual / budgets.wantsBudgetVnd) * 100 : 0
 
-  const needsRemaining = budgets.needsBudgetVnd - needsActual
+  const essentialRemaining = budgets.essentialVariableBaselineVnd - essentialActual
   const wantsRemaining = budgets.wantsBudgetVnd - wantsActual
   const totalRemaining = spendingBudgetVnd - totals.totalSpent
+
+  // Ghi chú giải thích khi Mong muốn bị thu hẹp: mục tiêu tiết kiệm (theo mục tiêu tự đặt / MSS)
+  // được ưu tiên và chiếm phần lớn ngân sách còn lại sau F + E — đây KHÔNG phải lỗi tính toán.
+  const splitSavingsVnd = Math.floor((budgets.remainderVnd * budgets.split.savingsPct) / 100)
+  const wantsPctIncome = budgets.incomeVnd > 0 ? (budgets.wantsBudgetVnd / budgets.incomeVnd) * 100 : 0
+  const allocationNote =
+    budgets.savingsTargetShortfallVnd > 0
+      ? `Ngân sách còn lại sau Cố định + Thiết yếu chưa đủ cho mục tiêu tiết kiệm (còn thiếu ${formatVnd(
+          budgets.savingsTargetShortfallVnd,
+        )}). Mong muốn đã về 0.`
+      : budgets.savingsTargetVnd > splitSavingsVnd && wantsPctIncome < 12
+        ? `Mong muốn nhỏ vì mục tiêu tiết kiệm (${formatVnd(
+            budgets.savingsTargetVnd,
+          )}) được ưu tiên, chiếm phần lớn ngân sách còn lại sau Cố định + Thiết yếu. Muốn Mong muốn nhiều hơn, hãy giảm mục tiêu tiết kiệm trong Cài đặt.`
+        : undefined
 
   // Card "Tiết kiệm" phản ánh DỰ BÁO tiết kiệm cuối tháng theo nhịp chi thực tế — giống
   // "Triển vọng tháng này" của Dashboard. projectedSavingsVnd đã tự xử lý theo tháng:
@@ -999,7 +989,7 @@ export default function BudgetsPage() {
         <KpiCard
           label="Thu nhập (I)"
           value={formatVnd(budgets.incomeVnd)}
-          hint={`W ${budgets.split.wantsPct}% • S ${budgets.split.savingsPct}%`}
+          hint={`Quy tắc W/S ${budgets.split.wantsPct}/${budgets.split.savingsPct}`}
           onClick={() => openDrawer("details", "budget-details-overview")}
         />
         <KpiCard
@@ -1041,6 +1031,7 @@ export default function BudgetsPage() {
           essentialVnd={budgets.essentialVariableBaselineVnd}
           wantsVnd={budgets.wantsBudgetVnd}
           savingsVnd={budgets.savingsTargetVnd}
+          note={allocationNote}
           onOpenDetails={() => openDrawer("details", "budget-details-overview")}
           compactMode={compactMode}
         />
@@ -1058,16 +1049,20 @@ export default function BudgetsPage() {
 
       <div className={cn("grid gap-4 lg:grid-cols-3", compactMode && "gap-3")}>
         <CategoryCard
-          title="Thiết yếu & cố định"
-          subtitle="F + E"
-          planLabel="Kế hoạch"
-          planVnd={budgets.needsBudgetVnd}
+          title="Thiết yếu (E)"
+          subtitle="Chi thiết yếu biến đổi (ăn uống, đi lại...)"
+          planLabel="Định mức"
+          planVnd={budgets.essentialVariableBaselineVnd}
           actualLabel="Đã chi"
-          actualVnd={needsActual}
-          remainingVnd={needsRemaining}
-          progressPct={needsProgress}
-          status={needsRemaining < 0 ? `Vượt ${formatVnd(Math.abs(needsRemaining))}` : undefined}
-          statusTone={needsRemaining < 0 ? "danger" : "muted"}
+          actualVnd={essentialActual}
+          remainingVnd={essentialRemaining}
+          progressPct={essentialProgress}
+          status={
+            essentialRemaining < 0
+              ? `Vượt ${formatVnd(Math.abs(essentialRemaining))}`
+              : undefined
+          }
+          statusTone={essentialRemaining < 0 ? "danger" : "muted"}
           onOpenDetails={() => openDrawer("details", "budget-details-overview")}
           compactMode={compactMode}
         />

@@ -74,6 +74,15 @@
     --chart-5: 262.1 83.3% 57.8%;
     --chart-6: 199.4 89.5% 48%;
 
+    /* Budget bucket colors — a colorblind-safe categorical set validated with the
+       dataviz palette validator (6 checks pass: lightness band, chroma, adjacent-pair
+       CVD separation ΔE >= 23, contrast >= 3:1). Kept as full color values (not HSL
+       triplets) so they are used directly via var(). Dark variants live in .dark. */
+    --budget-fixed: #ea580c;
+    --budget-essential: #2563eb;
+    --budget-wants: #db2777;
+    --budget-savings: #16a34a;
+
     --pivot-series-7: 41 96% 42%;
     --pivot-series-8: 171 77% 34%;
     --pivot-series-9: 332 79% 43%;
@@ -133,6 +142,12 @@
   --chart-4: 0 84.2% 65%;
   --chart-5: 262.1 83.3% 67.8%;
   --chart-6: 199.4 89.5% 60%;
+
+  /* Budget bucket colors (dark) — validated against the dark chart surface. */
+  --budget-fixed: #ea580c;
+  --budget-essential: #3b82f6;
+  --budget-wants: #ec4899;
+  --budget-savings: #16a34a;
 
   --pivot-series-7: 41 96% 56%;
   --pivot-series-8: 171 70% 52%;
