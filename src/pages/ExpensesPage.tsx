@@ -140,24 +140,13 @@ function warningSeverityRank(severity: BudgetHealthWarning["severity"]) {
 }
 
 function warningScore(warning: BudgetHealthWarning) {
-  if (warning.type === "PACE_VARIABLE" || warning.type === "PACE_WANTS") {
-    return Math.max(0, Math.round(warning.details.overspendVnd ?? 0))
-  }
-  if (warning.type === "ESSENTIAL_SAFETY_CAP") {
-    const dailyBaseline = Math.max(0, Math.round(warning.details.essentialDailyBaselineVnd ?? 0))
-    const dailyCap = Math.max(0, Math.round(warning.details.remainingEssentialDailyCapVnd ?? 0))
-    return Math.max(0, dailyBaseline - dailyCap)
-  }
-  return 0
+  return Math.max(0, Math.round(warning.details.overspendVnd ?? 0))
 }
 
 function warningDeltaThreshold(warning: BudgetHealthWarning) {
-  if (warning.type === "ESSENTIAL_SAFETY_CAP") {
-    const dailyBaseline = Math.max(0, Math.round(warning.details.essentialDailyBaselineVnd ?? 0))
-    return Math.max(20_000, Math.round(dailyBaseline * 0.2))
-  }
-  const tolerance = Math.max(0, Math.round(warning.details.toleranceVnd ?? 0))
-  return Math.max(30_000, tolerance)
+  // Chỉ coi là "xấu đi rõ rệt" khi phần vượt tăng thêm ít nhất bằng ngưỡng vật chất của nhóm
+  // (tối thiểu 100k), để tránh popup lặp lại mỗi lần thêm chi tiêu.
+  return Math.max(100_000, Math.round(warning.details.thresholdVnd ?? 0))
 }
 
 function readCollapsedState(key: string, fallback = false) {
@@ -449,10 +438,10 @@ export default function ExpensesPage() {
     const month = monthFromIsoDate(date)
     const popupMemory = warningPopupMemoryRef.current
 
-    setHealthWarnings(warnings)
     setHealthWarningsDate(date)
 
     if (warnings.length === 0) {
+      setHealthWarnings([])
       setHealthDialogOpen(false)
       setWarningPopupMemory((prev) => {
         const prefix = `${month}:`
@@ -520,7 +509,12 @@ export default function ExpensesPage() {
     })
 
     const hasNewWarning = triggeredTypes.size > 0
-    setHealthDialogOpen(hasNewWarning)
+    // Chỉ hiện banner + tự bật popup khi lần thêm này làm cảnh báo XẤU ĐI RÕ RỆT. Nếu không có
+    // gì mới/nặng hơn thì im lặng, tránh cảnh báo lặp lại mỗi lần nhập chi tiêu.
+    if (hasNewWarning) {
+      setHealthWarnings(warnings)
+      setHealthDialogOpen(true)
+    }
 
     setWarningPopupMemory((prev) => {
       const next: WarningPopupMemory = { ...prev }
@@ -869,7 +863,7 @@ export default function ExpensesPage() {
         >
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="space-y-0.5">
-              <div className="font-medium">Cảnh báo nhịp chi tiêu</div>
+              <div className="font-medium">Cảnh báo ngân sách</div>
               <div className="text-xs text-muted-foreground sm:text-sm">
                 {healthWarnings.map((w) => w.title).join(" • ")}
               </div>
@@ -1460,30 +1454,19 @@ export default function ExpensesPage() {
                 const badgeLabel = w.severity === "danger" ? "ĐỎ" : "Cảnh báo"
 
                 const rows: Array<{ label: string; key: string; kind: "vnd" | "number" }> =
-                  w.type === "PACE_VARIABLE"
+                  w.type === "PACE_WANTS"
                     ? [
-                        { label: "Kế hoạch/tháng (E + W)", key: "plannedMonthlyVariableVnd", kind: "vnd" },
-                        { label: "Kế hoạch đến hôm nay", key: "plannedToDateVariableVnd", kind: "vnd" },
-                        { label: "Thực chi đến hôm nay", key: "actualToDateVariableVnd", kind: "vnd" },
-                        { label: "Vượt (overspend)", key: "overspendVnd", kind: "vnd" },
-                        { label: "Tolerance", key: "toleranceVnd", kind: "vnd" },
+                        { label: "Ngân sách 'Mong muốn'/tháng", key: "wantsBudgetVnd", kind: "vnd" },
+                        { label: "Đã chi đến nay", key: "wantsSpentToDateVnd", kind: "vnd" },
+                        { label: "Dự báo cuối tháng", key: "projectedWantsVnd", kind: "vnd" },
+                        { label: "Vượt ngân sách", key: "overspendVnd", kind: "vnd" },
                       ]
-                    : w.type === "PACE_WANTS"
-                      ? [
-                          { label: "W/tháng", key: "plannedMonthlyWantsVnd", kind: "vnd" },
-                          { label: "W kế hoạch đến hôm nay", key: "plannedToDateWantsVnd", kind: "vnd" },
-                          { label: "W thực chi đến hôm nay", key: "actualToDateWantsVnd", kind: "vnd" },
-                          { label: "Vượt (overspend)", key: "overspendVnd", kind: "vnd" },
-                          { label: "Tolerance", key: "toleranceVnd", kind: "vnd" },
-                        ]
-                      : [
-                          { label: "E/tháng", key: "essentialMonthlyVnd", kind: "vnd" },
-                          { label: "Thiết yếu đã chi", key: "essentialSpentToDateVnd", kind: "vnd" },
-                          { label: "E còn lại", key: "remainingEssentialVnd", kind: "vnd" },
-                          { label: "Ngày còn lại", key: "remainingDays", kind: "number" },
-                          { label: "Cap thiết yếu/ngày (còn lại)", key: "remainingEssentialDailyCapVnd", kind: "vnd" },
-                          { label: "Baseline E/ngày", key: "essentialDailyBaselineVnd", kind: "vnd" },
-                        ]
+                    : [
+                        { label: "Định mức 'Thiết yếu'/tháng", key: "essentialBaselineVnd", kind: "vnd" },
+                        { label: "Đã chi đến nay", key: "essentialSpentToDateVnd", kind: "vnd" },
+                        { label: "Dự báo cuối tháng", key: "projectedEssentialVnd", kind: "vnd" },
+                        { label: "Vượt định mức", key: "overspendVnd", kind: "vnd" },
+                      ]
 
                 return (
                   <Card
