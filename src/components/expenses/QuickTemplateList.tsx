@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react"
-import { Pencil, Plus, Trash2 } from "lucide-react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { Minus, Pencil, Plus, Trash2 } from "lucide-react"
 import type { ExpenseCategory, ExpenseCategoryConfig } from "@/domain/types"
 import { formatVnd } from "@/lib/currency"
 import { cn } from "@/lib/utils"
@@ -12,8 +12,8 @@ type QuickTemplateListProps = {
   templates: ExpenseTemplate[]
   categories: ExpenseCategoryConfig[]
   categoryLabels: Record<string, string>
-  selectedIds: Set<string>
-  onToggleSelect: (id: string, checked: boolean) => void
+  quantities: Record<string, number>
+  onQuantityChange: (id: string, quantity: number) => void
   onToggleSelectAllVisible: (checked: boolean, visibleTemplates: ExpenseTemplate[]) => void
   onBulkAddSelected?: () => void
   onBulkDelete: () => void
@@ -23,12 +23,88 @@ type QuickTemplateListProps = {
   showCreateButton?: boolean
 }
 
+function QuantityStepper({
+  value,
+  onChange,
+  ariaLabel,
+  max = 99,
+}: {
+  value: number
+  onChange: (quantity: number) => void
+  ariaLabel: string
+  max?: number
+}) {
+  const clamp = (n: number) => Math.max(0, Math.min(max, Math.trunc(Number.isFinite(n) ? n : 0)))
+  // Text cục bộ để cho phép gõ tự do (kể cả rỗng) trong lúc đang focus; đồng bộ lại từ value
+  // khi không focus.
+  const [text, setText] = useState(String(value))
+  const focusedRef = useRef(false)
+
+  useEffect(() => {
+    if (!focusedRef.current) setText(String(value))
+  }, [value])
+
+  return (
+    <div className="inline-flex shrink-0 items-center rounded-md border bg-background">
+      <button
+        type="button"
+        className="flex h-7 w-7 items-center justify-center rounded-l-md text-muted-foreground transition-colors hover:bg-muted disabled:opacity-40"
+        disabled={value <= 0}
+        onClick={() => onChange(clamp(value - 1))}
+        aria-label={`Giảm ${ariaLabel}`}
+        title="Giảm số lượng"
+      >
+        <Minus className="h-3.5 w-3.5" />
+      </button>
+      <input
+        type="text"
+        inputMode="numeric"
+        pattern="[0-9]*"
+        aria-label={ariaLabel}
+        value={text}
+        onFocus={(event) => {
+          focusedRef.current = true
+          event.currentTarget.select()
+        }}
+        onChange={(event) => {
+          const digits = event.target.value.replace(/[^\d]/g, "").slice(0, 3)
+          setText(digits)
+          onChange(digits === "" ? 0 : clamp(parseInt(digits, 10)))
+        }}
+        onBlur={() => {
+          focusedRef.current = false
+          const digits = text.replace(/[^\d]/g, "")
+          const next = digits === "" ? 0 : clamp(parseInt(digits, 10))
+          onChange(next)
+          setText(String(next))
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") event.currentTarget.blur()
+        }}
+        className={cn(
+          "h-7 w-9 border-x bg-transparent text-center text-sm font-semibold tabular-nums outline-none focus:bg-muted/40",
+          value > 0 ? "text-foreground" : "text-muted-foreground",
+        )}
+      />
+      <button
+        type="button"
+        className="flex h-7 w-7 items-center justify-center rounded-r-md text-muted-foreground transition-colors hover:bg-muted"
+        onClick={() => onChange(clamp(value + 1))}
+        aria-label={`Tăng ${ariaLabel}`}
+        title="Tăng số lượng"
+      >
+        <Plus className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  )
+}
+
 export default function QuickTemplateList({
   templates,
   categories,
   categoryLabels,
-  selectedIds,
-  onToggleSelect,
+  quantities,
+  onQuantityChange,
   onToggleSelectAllVisible,
   onBulkAddSelected,
   onBulkDelete,
@@ -70,13 +146,18 @@ export default function QuickTemplateList({
 
   const visibleTemplates =
     groups.find((group) => group.category === activeCategory)?.templates ?? []
-  const selectedCount = selectedIds.size
-  const selectedVisibleCount = visibleTemplates.filter((template) =>
-    selectedIds.has(template.id),
-  ).length
+
+  const qtyOf = (id: string) => Math.max(0, Math.trunc(quantities[id] ?? 0))
+  // Số item được chọn (số lượng > 0) và tổng số lượt sẽ thêm.
+  const pickedCount = Object.values(quantities).filter((q) => q > 0).length
+  const totalQty = Object.values(quantities).reduce(
+    (sum, q) => sum + Math.max(0, Math.trunc(q)),
+    0,
+  )
+  const selectedVisibleCount = visibleTemplates.filter((template) => qtyOf(template.id) > 0).length
   const allVisibleSelected =
     visibleTemplates.length > 0 &&
-    visibleTemplates.every((template) => selectedIds.has(template.id))
+    visibleTemplates.every((template) => qtyOf(template.id) > 0)
 
   return (
     <div className="h-full min-h-0 flex flex-col gap-2">
@@ -133,8 +214,8 @@ export default function QuickTemplateList({
         </label>
 
         <span className="shrink-0 text-xs text-muted-foreground">
-          {selectedCount > 0
-            ? `${selectedCount} item đang chọn`
+          {totalQty > 0
+            ? `${pickedCount} item · ${totalQty} lượt`
             : `${visibleTemplates.length} item trong tab`}
         </span>
 
@@ -144,9 +225,9 @@ export default function QuickTemplateList({
             size="sm"
             className="h-7 px-2 text-xs"
             onClick={onBulkAddSelected}
-            disabled={!onBulkAddSelected || selectedCount === 0}
+            disabled={!onBulkAddSelected || totalQty === 0}
           >
-            Thêm{selectedCount > 0 ? ` (${selectedCount})` : ""}
+            Thêm{totalQty > 0 ? ` (${totalQty})` : ""}
           </Button>
           <Button
             type="button"
@@ -154,7 +235,7 @@ export default function QuickTemplateList({
             variant="outline"
             className="h-7 w-7 text-muted-foreground hover:text-destructive"
             onClick={onBulkDelete}
-            disabled={selectedCount === 0}
+            disabled={pickedCount === 0}
             title="Xóa item đã chọn"
             aria-label="Xóa item đã chọn"
           >
@@ -171,39 +252,27 @@ export default function QuickTemplateList({
             </div>
           ) : (
             visibleTemplates.map((template) => {
-              const checked = selectedIds.has(template.id)
+              const qty = qtyOf(template.id)
+              const picked = qty > 0
               const secondaryText =
                 template.note || categoryLabels[template.category] || template.category
 
               return (
                 <div
                   key={template.id}
-                  role="button"
-                  tabIndex={0}
-                  onClick={(event) => {
-                    const target = event.target as HTMLElement
-                    if (target.closest('[data-stop-select="true"]')) return
-                    onToggleSelect(template.id, !checked)
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key !== "Enter" && event.key !== " ") return
-                    const target = event.target as HTMLElement
-                    if (target.closest('[data-stop-select="true"]')) return
-                    event.preventDefault()
-                    onToggleSelect(template.id, !checked)
-                  }}
                   className={cn(
-                    "rounded-md border bg-background p-2 cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-                    !checked && "hover:border-muted-foreground/40",
-                    checked && "border-primary/50 ring-1 ring-primary/25",
+                    "rounded-md border bg-background p-2 transition-colors",
+                    picked
+                      ? "border-primary/50 ring-1 ring-primary/25"
+                      : "hover:border-muted-foreground/40",
                   )}
                 >
                   <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2">
-                    <Checkbox
-                      data-stop-select="true"
-                      checked={checked}
-                      onCheckedChange={(value) => onToggleSelect(template.id, value === true)}
-                      aria-label={`Chọn mẫu ${template.name}`}
+                    {/* Bộ đếm số lượng: nhập nhiều lượt cho mỗi mẫu trong một lần thêm */}
+                    <QuantityStepper
+                      value={qty}
+                      onChange={(quantity) => onQuantityChange(template.id, quantity)}
+                      ariaLabel={`số lượng ${template.name}`}
                     />
 
                     <div className="min-w-0 space-y-0.5">
@@ -227,7 +296,6 @@ export default function QuickTemplateList({
 
                     <div className="flex items-center gap-1">
                       <Button
-                        data-stop-select="true"
                         type="button"
                         size="icon"
                         variant="outline"
@@ -239,14 +307,13 @@ export default function QuickTemplateList({
                         <Pencil className="h-3.5 w-3.5" />
                       </Button>
                       <Button
-                        data-stop-select="true"
                         type="button"
                         size="icon"
                         variant="secondary"
                         className="h-7 w-7"
                         onClick={() => onQuickAdd(template)}
-                        aria-label={`Thêm nhanh từ mẫu ${template.name}`}
-                        title="Thêm nhanh vào danh sách chi tiêu"
+                        aria-label={`Thêm nhanh 1 khoản từ mẫu ${template.name}`}
+                        title="Thêm nhanh 1 khoản vào danh sách chi tiêu"
                       >
                         <Plus className="h-3.5 w-3.5" />
                       </Button>

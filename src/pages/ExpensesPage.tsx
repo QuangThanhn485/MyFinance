@@ -5,7 +5,7 @@ import { Controller, useForm } from "react-hook-form"
 import { toast } from "sonner"
 import { CalendarClock, ChartColumn, ListChecks, PlusSquare } from "lucide-react"
 import { BUCKET_LABELS_VI, getExpenseCategoryLabel, suggestBucketByCategory } from "@/domain/constants"
-import type { BudgetBucket, ExpenseCategory, ISODate } from "@/domain/types"
+import type { BudgetBucket, Expense, ExpenseCategory, ISODate } from "@/domain/types"
 import DatePicker from "@/components/DatePicker"
 import MoneyInput from "@/components/MoneyInput"
 import { Button } from "@/components/ui/button"
@@ -196,9 +196,8 @@ export default function ExpensesPage() {
   const [templates, setTemplates] = useState<ExpenseTemplate[]>(() =>
     loadExpenseTemplates(),
   )
-  const [selectedTemplateIds, setSelectedTemplateIds] = useState<Set<string>>(
-    () => new Set(),
-  )
+  // Số lượng mỗi mẫu muốn thêm trong lần này (id -> số lượng). > 0 nghĩa là đang chọn.
+  const [templateQuantities, setTemplateQuantities] = useState<Record<string, number>>({})
   const [templateEditor, setTemplateEditor] = useState<
     | { mode: "create" }
     | { mode: "edit"; templateId: string }
@@ -252,14 +251,17 @@ export default function ExpensesPage() {
   )
 
   useEffect(() => {
-    setSelectedTemplateIds((prev) => {
-      if (prev.size === 0) return prev
+    setTemplateQuantities((prev) => {
+      const ids = Object.keys(prev)
+      if (ids.length === 0) return prev
       const valid = new Set(sortedTemplates.map((template) => template.id))
-      const next = new Set<string>()
-      prev.forEach((id) => {
-        if (valid.has(id)) next.add(id)
-      })
-      return next
+      let changed = false
+      const next: Record<string, number> = {}
+      for (const id of ids) {
+        if (valid.has(id) && prev[id] > 0) next[id] = prev[id]
+        else changed = true
+      }
+      return changed ? next : prev
     })
   }, [sortedTemplates])
 
@@ -672,7 +674,16 @@ export default function ExpensesPage() {
   }
 
   const addSelectedTemplates = () => {
-    if (selectedTemplateIds.size === 0) return
+    const picked = Object.entries(templateQuantities)
+      .map(([id, qty]) => ({
+        template: sortedTemplates.find((template) => template.id === id),
+        qty: Math.max(0, Math.trunc(qty)),
+      }))
+      .filter(
+        (item): item is { template: ExpenseTemplate; qty: number } =>
+          !!item.template && item.qty > 0,
+      )
+    if (picked.length === 0) return
 
     const storeData = useAppStore.getState().data
     const targetMonth = monthFromIsoDate(selectedDate)
@@ -680,32 +691,30 @@ export default function ExpensesPage() {
       toast.error(`Tháng ${targetMonth} đã chốt báo cáo nên không thể thêm chi tiêu.`)
       return
     }
-    const selectedTemplates = sortedTemplates.filter((template) =>
-      selectedTemplateIds.has(template.id),
-    )
-    if (selectedTemplates.length === 0) return
 
     const baseline = computeBudgetHealthWarnings(storeData, selectedDate)
     const addedIds: string[] = []
 
-    selectedTemplates.forEach((template) => {
+    picked.forEach(({ template, qty }) => {
       const templateNote = template.note?.trim() ? template.note : template.name
-      const id = addExpense({
-        amountVnd: template.amount,
-        category: template.category,
-        bucket: template.bucket === "NEEDS" ? "needs" : "wants",
-        note: templateNote,
-        date: selectedDate,
-      })
-      addedIds.push(id)
+      for (let i = 0; i < qty; i += 1) {
+        const id = addExpense({
+          amountVnd: template.amount,
+          category: template.category,
+          bucket: template.bucket === "NEEDS" ? "needs" : "wants",
+          note: templateNote,
+          date: selectedDate,
+        })
+        addedIds.push(id)
+      }
     })
 
     let nextTemplates = templates
-    selectedTemplates.forEach((template) => {
+    picked.forEach(({ template }) => {
       nextTemplates = touchExpenseTemplate(template.id)
     })
     setTemplates(nextTemplates)
-    setSelectedTemplateIds(new Set())
+    setTemplateQuantities({})
 
     const lastId = addedIds[addedIds.length - 1]
     if (lastId) {
@@ -714,7 +723,7 @@ export default function ExpensesPage() {
     }
 
     runBudgetHealthChecks(selectedDate, baseline)
-    toast.success(`Đã thêm ${selectedTemplates.length} item vào danh sách chi tiêu.`)
+    toast.success(`Đã thêm ${addedIds.length} khoản chi vào danh sách.`)
   }
 
   const saveTemplateFromFormValues = (values: FormValues) => {
@@ -830,14 +839,36 @@ export default function ExpensesPage() {
   }
 
   const handleBulkDeleteTemplates = () => {
-    if (selectedTemplateIds.size === 0) return
-    const count = selectedTemplateIds.size
-    const nextTemplates = templates.filter((template) => !selectedTemplateIds.has(template.id))
+    const pickedIds = new Set(
+      Object.entries(templateQuantities)
+        .filter(([, qty]) => qty > 0)
+        .map(([id]) => id),
+    )
+    if (pickedIds.size === 0) return
+    const count = pickedIds.size
+    const nextTemplates = templates.filter((template) => !pickedIds.has(template.id))
     saveExpenseTemplates(nextTemplates)
     setTemplates(nextTemplates)
-    setSelectedTemplateIds(new Set())
+    setTemplateQuantities({})
     setBulkDeleteTemplatesOpen(false)
     toast.success(`Đã xóa ${count} item thêm nhanh.`)
+  }
+
+  // Xóa chi tiêu: ngày HÔM NAY xóa ngay không hỏi; ngày trong quá khứ vẫn hỏi xác nhận để tránh
+  // xóa nhầm dữ liệu cũ.
+  const requestDeleteExpense = (expense: Expense) => {
+    const storeData = useAppStore.getState().data
+    const expenseMonth = monthFromIsoDate(expense.date)
+    if (isMonthLocked(storeData, expenseMonth)) {
+      toast.error(`Tháng ${expenseMonth} đã chốt báo cáo nên không thể xóa.`)
+      return
+    }
+    if (expense.date === todayIso()) {
+      deleteExpense(expense.id)
+      toast.success("Đã xóa.")
+      return
+    }
+    setDeleteExpenseId(expense.id)
   }
 
   const handleDeleteExpenseConfirmed = () => {
@@ -1090,20 +1121,26 @@ export default function ExpensesPage() {
                   templates={sortedTemplates}
                   categories={categoryOptions}
                   categoryLabels={categoryLabels}
-                  selectedIds={selectedTemplateIds}
-                  onToggleSelect={(id, checked) => {
-                    setSelectedTemplateIds((prev) => {
-                      const next = new Set(prev)
-                      if (checked) next.add(id)
-                      else next.delete(id)
+                  quantities={templateQuantities}
+                  onQuantityChange={(id, quantity) => {
+                    setTemplateQuantities((prev) => {
+                      const next = { ...prev }
+                      const clamped = Math.max(0, Math.min(99, Math.trunc(quantity)))
+                      if (clamped > 0) next[id] = clamped
+                      else delete next[id]
                       return next
                     })
                   }}
                   onToggleSelectAllVisible={(checked, visibleTemplates) => {
-                    setSelectedTemplateIds((prev) => {
-                      const next = new Set(prev)
-                      if (checked) visibleTemplates.forEach((template) => next.add(template.id))
-                      else visibleTemplates.forEach((template) => next.delete(template.id))
+                    setTemplateQuantities((prev) => {
+                      const next = { ...prev }
+                      visibleTemplates.forEach((template) => {
+                        if (checked) {
+                          if (!(next[template.id] > 0)) next[template.id] = 1
+                        } else {
+                          delete next[template.id]
+                        }
+                      })
                       return next
                     })
                   }}
@@ -1198,7 +1235,7 @@ export default function ExpensesPage() {
                                     ? `Tháng ${expenseMonth} đã chốt báo cáo nên không thể xóa.`
                                     : undefined
                                 }
-                                onClick={() => setDeleteExpenseId(expense.id)}
+                                onClick={() => requestDeleteExpense(expense)}
                               >
                                 Xóa
                               </Button>
@@ -1612,7 +1649,7 @@ export default function ExpensesPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Xóa item thêm nhanh</AlertDialogTitle>
             <AlertDialogDescription>
-              Bạn sắp xóa {selectedTemplateIds.size} item đã chọn. Các khoản chi đã ghi sẽ không bị ảnh hưởng.
+              Bạn sắp xóa {Object.values(templateQuantities).filter((q) => q > 0).length} item đã chọn. Các khoản chi đã ghi sẽ không bị ảnh hưởng.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1621,7 +1658,7 @@ export default function ExpensesPage() {
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={handleBulkDeleteTemplates}
             >
-              Xóa ({selectedTemplateIds.size})
+              Xóa ({Object.values(templateQuantities).filter((q) => q > 0).length})
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
