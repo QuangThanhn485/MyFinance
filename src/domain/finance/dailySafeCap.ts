@@ -5,6 +5,56 @@ import {
   normalizeFinanceDaysInMonth,
 } from "@/domain/finance/pace"
 
+export type MonthEndProjection = {
+  projectedNeedsVnd: number
+  projectedWantsVnd: number
+  projectedVariableVnd: number
+  projectedTotalSpendVnd: number
+  projectedSavingsVnd: number
+}
+
+/**
+ * Dự báo chi tiêu & tiết kiệm cuối tháng dựa trên NHỊP CHI THỰC TẾ tới hiện tại, ngoại suy cho
+ * những ngày còn lại — không coi toàn bộ tiền chưa tiêu là tiết kiệm.
+ *
+ * - Biến đổi Thiết yếu/Mong muốn được ngoại suy theo nhịp: đã chi / ngày đã qua × số ngày trong tháng.
+ * - Thiết yếu được đặt sàn ở baseline E (bạn vẫn phải chi thiết yếu cho phần còn lại của tháng).
+ * - Chi phí cố định (F) không ngoại suy vì là khoản cố định của cả tháng.
+ */
+export function projectMonthEndFromPace(input: {
+  incomeVnd: number
+  fixedCostsVnd: number
+  essentialVariableBaselineVnd: number
+  variableNeedsToDateVnd: number
+  variableWantsToDateVnd: number
+  dayOfMonth: number
+  daysInMonth: number
+}): MonthEndProjection {
+  const dim = normalizeFinanceDaysInMonth(input.daysInMonth)
+  const dom = Math.min(dim, normalizeFinanceDay(input.dayOfMonth))
+  const income = clampMoneyVnd(input.incomeVnd)
+  const fixed = clampMoneyVnd(input.fixedCostsVnd)
+  const baseline = clampMoneyVnd(input.essentialVariableBaselineVnd)
+  const needs = clampMoneyVnd(input.variableNeedsToDateVnd)
+  const wants = clampMoneyVnd(input.variableWantsToDateVnd)
+
+  const needsPace = dom > 0 ? needs / dom : 0
+  const wantsPace = dom > 0 ? wants / dom : 0
+  const projectedNeedsVnd = Math.max(baseline, Math.round(needsPace * dim))
+  const projectedWantsVnd = Math.round(wantsPace * dim)
+  const projectedVariableVnd = projectedNeedsVnd + projectedWantsVnd
+  const projectedTotalSpendVnd = fixed + projectedVariableVnd
+  const projectedSavingsVnd = Math.trunc(income - projectedTotalSpendVnd)
+
+  return {
+    projectedNeedsVnd,
+    projectedWantsVnd,
+    projectedVariableVnd,
+    projectedTotalSpendVnd,
+    projectedSavingsVnd,
+  }
+}
+
 export type PaceSurplusSnapshot = {
   plannedNeedsToDateVnd: number
   plannedWantsToDateVnd: number

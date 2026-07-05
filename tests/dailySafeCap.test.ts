@@ -6,6 +6,7 @@ import {
   computeRecoveryCaps,
   computeRemainingDailySpendingCap,
   computeTodayCaps,
+  projectMonthEndFromPace,
   resolveEffectiveDailyTotalCapVnd,
 } from "@/domain/finance/dailySafeCap"
 
@@ -153,5 +154,63 @@ describe("computeRecoveryCaps", () => {
     expect(caps.remainingDays).toBe(0)
     expect(caps.needsRemainingTodayVnd).toBe(0)
     expect(caps.wantsRemainingTodayVnd).toBe(0)
+  })
+})
+
+describe("projectMonthEndFromPace", () => {
+  it("projects a realistic (low/negative) end-of-month savings when overspending early", () => {
+    // Ngày 4/31, mới qua 4 ngày đã chi 3tr biến đổi -> ngoại suy cho cả tháng sẽ vượt xa,
+    // KHÔNG coi toàn bộ tiền chưa tiêu là tiết kiệm.
+    const p = projectMonthEndFromPace({
+      incomeVnd: 20_000_000,
+      fixedCostsVnd: 5_000_000,
+      essentialVariableBaselineVnd: 6_000_000,
+      variableNeedsToDateVnd: 1_000_000,
+      variableWantsToDateVnd: 2_000_000,
+      dayOfMonth: 4,
+      daysInMonth: 31,
+    })
+
+    expect(p.projectedNeedsVnd).toBe(7_750_000) // (1tr/4)*31
+    expect(p.projectedWantsVnd).toBe(15_500_000) // (2tr/4)*31
+    expect(p.projectedVariableVnd).toBe(23_250_000)
+    expect(p.projectedTotalSpendVnd).toBe(28_250_000) // + F 5tr
+    expect(p.projectedSavingsVnd).toBe(-8_250_000)
+
+    // So với cách cũ (I - đã chi) = 20tr - 8tr = 12tr: sai lệch rất lớn.
+    const naiveSavings = 20_000_000 - (5_000_000 + 3_000_000)
+    expect(naiveSavings).toBe(12_000_000)
+    expect(p.projectedSavingsVnd).toBeLessThan(naiveSavings)
+  })
+
+  it("floors projected essentials at the monthly baseline", () => {
+    const p = projectMonthEndFromPace({
+      incomeVnd: 20_000_000,
+      fixedCostsVnd: 5_000_000,
+      essentialVariableBaselineVnd: 6_000_000,
+      variableNeedsToDateVnd: 1_000_000, // pace*dim = 3tr < baseline 6tr
+      variableWantsToDateVnd: 1_000_000,
+      dayOfMonth: 10,
+      daysInMonth: 30,
+    })
+
+    expect(p.projectedNeedsVnd).toBe(6_000_000) // floored at baseline
+    expect(p.projectedWantsVnd).toBe(3_000_000) // (1tr/10)*30
+    expect(p.projectedSavingsVnd).toBe(6_000_000) // 20tr - 5tr - 9tr
+  })
+
+  it("converges to actual spending at end of month", () => {
+    const p = projectMonthEndFromPace({
+      incomeVnd: 20_000_000,
+      fixedCostsVnd: 5_000_000,
+      essentialVariableBaselineVnd: 6_000_000,
+      variableNeedsToDateVnd: 6_000_000,
+      variableWantsToDateVnd: 4_000_000,
+      dayOfMonth: 30,
+      daysInMonth: 30,
+    })
+
+    expect(p.projectedVariableVnd).toBe(10_000_000)
+    expect(p.projectedSavingsVnd).toBe(5_000_000)
   })
 })
