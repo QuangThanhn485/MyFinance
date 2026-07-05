@@ -509,6 +509,7 @@ function CategoryCard({
   planVnd,
   actualLabel,
   actualVnd,
+  actualValueClassName,
   remainingLabel = "Còn lại",
   remainingVnd,
   progressPct,
@@ -523,20 +524,23 @@ function CategoryCard({
   planVnd: number
   actualLabel: string
   actualVnd: number
+  actualValueClassName?: string
   remainingLabel?: string
   remainingVnd: number
   progressPct: number
   status?: string
-  statusTone?: "muted" | "danger" | "ok"
+  statusTone?: "muted" | "danger" | "ok" | "warn"
   onOpenDetails: () => void
   compactMode: boolean
 }) {
   const statusClass =
     statusTone === "danger"
       ? "text-destructive"
-      : statusTone === "ok"
-        ? "text-emerald-700 dark:text-emerald-400"
-        : "text-muted-foreground"
+      : statusTone === "warn"
+        ? "text-amber-600 dark:text-amber-400"
+        : statusTone === "ok"
+          ? "text-emerald-700 dark:text-emerald-400"
+          : "text-muted-foreground"
 
   return (
     <Card>
@@ -559,7 +563,11 @@ function CategoryCard({
       <CardContent className="pt-0 space-y-3">
         <div className="space-y-2 text-sm">
           <LabelValueRow label={planLabel} value={formatVnd(planVnd)} />
-          <LabelValueRow label={actualLabel} value={formatVnd(actualVnd)} />
+          <LabelValueRow
+            label={actualLabel}
+            value={formatVnd(actualVnd)}
+            valueClassName={actualValueClassName}
+          />
           <LabelValueRow
             label={remainingLabel}
             value={formatVnd(remainingVnd)}
@@ -936,21 +944,36 @@ export default function BudgetsPage() {
   const wantsRemaining = budgets.wantsBudgetVnd - wantsActual
   const totalRemaining = spendingBudgetVnd - totals.totalSpent
 
-  // Tiết kiệm thực tế của tháng = I − tổng đã chi (F + E + W). Đây là định nghĩa chung của hệ
-  // thống, khớp với DashboardPage (projectedSavingsNow), ReportsPage (saved) và selector
-  // getActualMonthlySavingsVnd. KHÔNG dùng dự báo theo nhịp (projectedSavingsVnd) để phán
-  // "đạt/chưa đạt mục tiêu": dự báo đó ép E lên tối thiểu baseline và ngoại suy W theo pace nên
-  // luôn thấp hơn thực tế, gây báo sai "chưa đạt" ngay cả khi đang tiết kiệm tốt.
-  const realizedSavingsVnd = Math.trunc(budgets.incomeVnd - totals.totalSpent)
-  const savingsGoalMet = realizedSavingsVnd >= budgets.savingsTargetVnd
+  // Card "Tiết kiệm" phản ánh DỰ BÁO tiết kiệm cuối tháng theo nhịp chi thực tế — giống
+  // "Triển vọng tháng này" của Dashboard. projectedSavingsVnd đã tự xử lý theo tháng:
+  //   · Tháng hiện tại: ngoại suy phần còn lại của tháng theo nhịp chi (không coi toàn bộ tiền
+  //     chưa tiêu là tiết kiệm).
+  //   · Tháng đã qua: = I − đã chi thực tế (dùng chi thực, không ép sàn E) nên tháng đã đạt
+  //     mục tiêu vẫn hiển thị đúng là đạt.
+  // Verdict 3 mức theo mục tiêu S và ngưỡng an toàn MSS (khớp Dashboard).
+  const savingsForecastVnd = projectedSavingsVnd
+  const savingsMet = savingsForecastVnd >= budgets.savingsTargetVnd
+  const savingsAboveMss = savingsForecastVnd >= budgets.mssVnd
+  const savingsTone: "ok" | "warn" | "danger" = savingsMet
+    ? "ok"
+    : savingsAboveMss
+      ? "warn"
+      : "danger"
   const savingsGoalRate =
     budgets.savingsTargetVnd > 0
-      ? realizedSavingsVnd / budgets.savingsTargetVnd
-      : realizedSavingsVnd >= 0
+      ? savingsForecastVnd / budgets.savingsTargetVnd
+      : savingsForecastVnd >= 0
         ? 1
         : 0
   const savingsProgress = Math.max(0, Math.min(100, savingsGoalRate * 100))
-  const savingsRemainingToGoalVnd = Math.max(0, budgets.savingsTargetVnd - realizedSavingsVnd)
+  const savingsRemainingToGoalVnd = Math.max(0, budgets.savingsTargetVnd - savingsForecastVnd)
+  const savingsVerdict = savingsMet
+    ? isCurrentMonth
+      ? "Đang đúng hướng đạt mục tiêu"
+      : "Đạt mục tiêu tiết kiệm"
+    : savingsAboveMss
+      ? "Có nguy cơ hụt mục tiêu tiết kiệm"
+      : "Dưới mức an toàn tối thiểu (MSS)"
 
   const topCategories = useMemo(() => {
     const totalsByCategory = getCategoryTotals(data, month)
@@ -1064,22 +1087,20 @@ export default function BudgetsPage() {
         />
         <CategoryCard
           title="Tiết kiệm"
-          subtitle="S — thực tế so với mục tiêu"
+          subtitle={isCurrentMonth ? "S — dự báo cuối tháng theo nhịp chi" : "S — tiết kiệm thực tế"}
           planLabel="Mục tiêu S"
           planVnd={budgets.savingsTargetVnd}
-          actualLabel={isCurrentMonth ? "Đã tiết kiệm (tới nay)" : "Đã tiết kiệm"}
-          actualVnd={realizedSavingsVnd}
+          actualLabel={isCurrentMonth ? "Dự báo cuối tháng" : "Tiết kiệm thực tế"}
+          actualVnd={savingsForecastVnd}
+          actualValueClassName={cn(
+            savingsTone === "danger" && "text-destructive",
+            savingsTone === "warn" && "text-amber-600 dark:text-amber-400",
+          )}
           remainingVnd={savingsRemainingToGoalVnd}
           remainingLabel="Còn thiếu để đạt S"
           progressPct={savingsProgress}
-          status={
-            savingsGoalMet
-              ? isCurrentMonth
-                ? "Đang đạt mục tiêu"
-                : "Đạt mục tiêu"
-              : `Thiếu ${formatVnd(savingsRemainingToGoalVnd)}`
-          }
-          statusTone={savingsGoalMet ? "ok" : "danger"}
+          status={savingsVerdict}
+          statusTone={savingsTone}
           onOpenDetails={() => openDrawer("details", "budget-details-forecast")}
           compactMode={compactMode}
         />
