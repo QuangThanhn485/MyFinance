@@ -281,11 +281,25 @@ export default function ExpensesPage() {
   const currentMonth = monthFromIsoDate(todayIso())
   const selectedMonthPast = month < currentMonth
   const selectedMonthLocked = isMonthLocked(data, month)
-  // Ngày còn lại trong tháng tự động loại các ngày đã phát sinh chi tiêu (kể cả hôm nay khi đã
-  // ghi khoản đầu tiên). Đây là cách thay thế cho thao tác "khoá ngày" thủ công trước đây.
-  const selectedDateHasExpense = !selectedMonthPast && dayContext.dateHasExpense
   const selectedDateReadOnly = selectedMonthLocked
-  const remainingDaysInMonth = dayContext.remainingDaysInMonth
+
+  // Các chỉ số cấp-THÁNG (cap/ngày, ngân sách còn lại, ngày đã trôi qua, dự báo tiết kiệm) phản
+  // ánh VỊ TRÍ HIỆN TẠI trong tháng được chọn — KHÔNG phụ thuộc ngày đang xem/nhập:
+  //  - Tháng hiện tại: tính theo HÔM NAY.
+  //  - Tháng đã qua: coi như đã hết tháng (0 ngày còn lại, đã trôi qua hết tháng).
+  //  - Tháng tương lai: chưa bắt đầu (còn nguyên tháng).
+  // Ngày còn lại vẫn tự động loại các ngày đã phát sinh chi tiêu (thay cho "khoá ngày").
+  const isSelectedCurrentMonth = month === currentMonth
+  const todayContext = getMonthDayContext(data, todayIso())
+  const remainingDaysInMonth = isSelectedCurrentMonth
+    ? todayContext.remainingDaysInMonth
+    : selectedMonthPast
+      ? 0
+      : dayContext.daysInMonth
+  const monthRefDayOfMonth = isSelectedCurrentMonth
+    ? todayContext.dayOfMonth
+    : dayContext.daysInMonth
+  const monthRefHasExpenseToday = isSelectedCurrentMonth && todayContext.dateHasExpense
   const monthTotals = getMonthTotals(data, month)
 
   useEffect(() => {
@@ -368,7 +382,7 @@ export default function ExpensesPage() {
     Math.min(100, (daysElapsedInMonth / dayContext.daysInMonth) * 100),
   )
   // Cap đang tính cho ngày kế tiếp (không phải hôm nay) khi hôm nay đã phát sinh chi tiêu.
-  const capForNextDay = selectedDateHasExpense && remainingDaysInMonth > 0
+  const capForNextDay = monthRefHasExpenseToday && remainingDaysInMonth > 0
 
   // Dự báo tiết kiệm cuối tháng theo nhịp chi thực tế (nhất quán Dashboard/Ngân sách): tháng
   // hiện tại ngoại suy phần còn lại của tháng, tháng đã qua thì = I − đã chi thực tế.
@@ -378,13 +392,12 @@ export default function ExpensesPage() {
     essentialVariableBaselineVnd: budgets.essentialVariableBaselineVnd,
     variableNeedsToDateVnd: monthTotals.variableNeeds,
     variableWantsToDateVnd: monthTotals.variableWants,
-    dayOfMonth: dayContext.dayOfMonth,
+    dayOfMonth: monthRefDayOfMonth,
     daysInMonth: dayContext.daysInMonth,
   })
-  const projectedSavingsEndMonthVnd =
-    month === currentMonth
-      ? savingsProjection.projectedSavingsVnd
-      : Math.trunc(budgets.incomeVnd - monthTotals.totalSpent)
+  const projectedSavingsEndMonthVnd = isSelectedCurrentMonth
+    ? savingsProjection.projectedSavingsVnd
+    : Math.trunc(budgets.incomeVnd - monthTotals.totalSpent)
   const savingsMet = projectedSavingsEndMonthVnd >= budgets.savingsTargetVnd
   const savingsAboveMss = projectedSavingsEndMonthVnd >= budgets.mssVnd
   const savingsToneClass = savingsMet
@@ -1051,10 +1064,12 @@ export default function ExpensesPage() {
                   <Progress value={daysElapsedPct} />
                 </div>
 
-                {/* Tiết kiệm — dự báo cuối tháng theo nhịp chi */}
+                {/* Tiết kiệm — dự báo cuối tháng (tháng hiện tại) / thực tế (tháng đã qua) */}
                 <div className="rounded-md border bg-muted/30 p-3">
                   <div className="text-xs text-muted-foreground">
-                    Dự báo tiết kiệm cuối tháng
+                    {isSelectedCurrentMonth
+                      ? "Dự báo tiết kiệm cuối tháng"
+                      : "Tiết kiệm thực tế của tháng"}
                   </div>
                   <div
                     className={cn(
