@@ -62,7 +62,7 @@ import {
   type WorkspaceId,
 } from "@/storage/workspace"
 import { writeLastBackup } from "@/storage/backups"
-import { getDayLockMonthContext } from "@/storage/dayLock"
+import { getMonthDayContext } from "@/storage/dayLock"
 
 type UiState = {
   overspending: OverspendingResult | null
@@ -1069,7 +1069,7 @@ export const useAppStore = create<AppStore>()(
                 customSavingsGoalVnd: settingsForMonth.customSavingsGoalVnd,
               })
               const wantsRemainingVnd = b.wantsBudgetVnd - totals.variableWants
-              const dayContext = getDayLockMonthContext(todayIso())
+              const dayContext = getMonthDayContext(next, todayIso())
               const daysRem = dayContext.remainingDaysInMonth
               const remainingDailyCap = computeRemainingDailySpendingCap({
                 incomeVnd: b.incomeVnd,

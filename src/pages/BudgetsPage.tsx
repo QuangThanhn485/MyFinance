@@ -30,7 +30,7 @@ import {
 import { getCategoryTotals, getMonthTotals } from "@/selectors/expenses"
 import { cn } from "@/lib/utils"
 import { useAppStore } from "@/store/useAppStore"
-import { getDayLockMonthContext } from "@/storage/dayLock"
+import { getMonthDayContext } from "@/storage/dayLock"
 import {
   Cell,
   Pie,
@@ -903,7 +903,7 @@ export default function BudgetsPage() {
 
   const now = todayIso()
   const currentMonth = monthFromIsoDate(now)
-  const currentDayContext = getDayLockMonthContext(now)
+  const currentDayContext = getMonthDayContext(data, now)
   const dim = daysInMonth(month)
   const dom =
     month === currentMonth ? currentDayContext.dayOfMonth : month < currentMonth ? dim : 1

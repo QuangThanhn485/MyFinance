@@ -70,7 +70,7 @@ import { monthFromIsoDate, todayIso } from "@/lib/date"
 import { cn } from "@/lib/utils"
 import { getMonthToDateTotals, getMonthTotals } from "@/selectors/expenses"
 import { getEffectiveEmergencyFundBalance } from "@/selectors/savings"
-import { getDayLockMonthContext } from "@/storage/dayLock"
+import { getMonthDayContext } from "@/storage/dayLock"
 import { useAppStore } from "@/store/useAppStore"
 
 const formSchema = z.object({
@@ -316,7 +316,7 @@ export default function AdvisorPage() {
 
   const today = todayIso()
   const month = monthFromIsoDate(today)
-  const dayContext = getDayLockMonthContext(today)
+  const dayContext = getMonthDayContext(data, today)
 
   const currentMonth = useMemo(() => {
     const settings = getEffectiveSettingsForMonth(data, month)
@@ -445,10 +445,10 @@ export default function AdvisorPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {dayContext.locked ? (
+          {dayContext.dateHasExpense ? (
             <Badge variant="outline" className="gap-1 border-primary/40">
               <LockKeyhole className="h-3.5 w-3.5" />
-              Ngày đã khóa, còn lại tính từ {dayContext.remainingStartDate}
+              Hôm nay đã có chi tiêu, còn lại tính từ {dayContext.remainingStartDate}
             </Badge>
           ) : (
             <Badge variant="outline">Còn lại tính từ hôm nay</Badge>
@@ -765,9 +765,9 @@ export default function AdvisorPage() {
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
                   <Badge variant="outline">
-                    {result.snapshot.dayLocked
-                      ? `Khóa ngày: còn lại từ ${result.snapshot.remainingStartDate}`
-                      : "Ngày hiện tại chưa khóa"}
+                    {result.snapshot.dateHasExpense
+                      ? `Hôm nay đã có chi tiêu: còn lại từ ${result.snapshot.remainingStartDate}`
+                      : "Hôm nay chưa phát sinh chi tiêu"}
                   </Badge>
                   <Badge variant="outline">
                     {result.snapshot.budgetAdjustmentApplied

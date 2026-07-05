@@ -14,7 +14,7 @@ import { monthFromIsoDate, previousMonth, todayIso } from "@/lib/date"
 import { getMonthToDateTotals, getMonthTotals } from "@/selectors/expenses"
 import { getEffectiveEmergencyFundBalance } from "@/selectors/savings"
 import type { CttmState } from "@/storage/schema"
-import { getDayLockMonthContext } from "@/storage/dayLock"
+import { getMonthDayContext } from "@/storage/dayLock"
 
 export type PurchaseRiskDecision =
   | "MUA ĐƯỢC"
@@ -78,7 +78,7 @@ export type PurchaseRiskResult = {
     historicalAverageSpendVnd: number
     existingPlanExposureVnd: number
     debtToIncomeRatio: number
-    dayLocked: boolean
+    dateHasExpense: boolean
     remainingStartDate: ISODate
     budgetAdjustmentApplied: boolean
     spendingCapsApplied: boolean
@@ -146,7 +146,7 @@ export function analyzePurchaseRisk(input: PurchaseRiskInput): PurchaseRiskResul
   const state = input.state
   const today = input.today ?? todayIso()
   const month = monthFromIsoDate(today)
-  const dayContext = getDayLockMonthContext(today)
+  const dayContext = getMonthDayContext(state, today)
   const dim = dayContext.daysInMonth
   const day = Math.max(1, Math.min(dim, dayContext.dayOfMonth))
   const remainingDays = dayContext.remainingDaysInMonth
@@ -478,7 +478,7 @@ export function analyzePurchaseRisk(input: PurchaseRiskInput): PurchaseRiskResul
       historicalAverageSpendVnd,
       existingPlanExposureVnd,
       debtToIncomeRatio: debt.ratio,
-      dayLocked: dayContext.locked,
+      dateHasExpense: dayContext.dateHasExpense,
       remainingStartDate: dayContext.remainingStartDate,
       budgetAdjustmentApplied: !!adjustment,
       spendingCapsApplied: !!caps,

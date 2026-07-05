@@ -38,7 +38,7 @@ import {
   getMonthlyIncomeTotalVnd,
   isMonthLocked,
 } from "@/domain/finance/monthLock"
-import { getDayLockMonthContext } from "@/storage/dayLock"
+import { getMonthDayContext } from "@/storage/dayLock"
 import { getCategoryTotals, getExpensesByDate, getMonthTotals } from "@/selectors/expenses"
 import { getEffectiveEmergencyFundBalance } from "@/selectors/savings"
 import { useAppStore } from "@/store/useAppStore"
@@ -93,7 +93,7 @@ export default function DashboardPage() {
 
   const today = todayIso()
   const month = monthFromIsoDate(today)
-  const dayContext = getDayLockMonthContext(today)
+  const dayContext = getMonthDayContext(data, today)
   const totals = getMonthTotals(data, month)
   const settingsForMonth = getEffectiveSettingsForMonth(data, month)
   const todayExpenses = getExpensesByDate(data, today)
@@ -119,7 +119,6 @@ export default function DashboardPage() {
   const savingsMin = budgets.savingsTargetVnd
   const MSS = computeMinimumSafetySavings(budgets.incomeVnd)
 
-  const todayLocked = dayContext.locked
   const monthLocked = isMonthLocked(data, month)
   const daysRemaining = dayContext.remainingDaysInMonth
   const remainingDailyCap = computeRemainingDailySpendingCap({
@@ -209,7 +208,7 @@ export default function DashboardPage() {
         <MetricCard
           title="Cap chi mỗi ngày"
           value={formatVnd(shownDailyCap)}
-          subValue={`${daysRemaining} ngày còn lại${todayLocked ? " (đã khoá hôm nay)" : ""}`}
+          subValue={`${daysRemaining} ngày còn lại`}
         />
         <MetricCard
           title="Quỹ khẩn cấp phủ được"
@@ -357,10 +356,6 @@ export default function DashboardPage() {
                 onClick={() => {
                   if (monthLocked) {
                     toast.error(`Tháng ${month} đã chốt báo cáo nên không thể thêm chi tiêu.`)
-                    return
-                  }
-                  if (todayLocked) {
-                    toast.error("Hôm nay đã khoá. Mở khoá tại Ghi chi tiêu để thêm dữ liệu.")
                     return
                   }
                   if (quickAmountVnd <= 0) {

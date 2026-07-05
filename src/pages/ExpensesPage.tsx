@@ -3,7 +3,7 @@ import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { Controller, useForm } from "react-hook-form"
 import { toast } from "sonner"
-import { ChartColumn, ListChecks, Lock, LockOpen, PlusSquare } from "lucide-react"
+import { ChartColumn, ListChecks, PlusSquare } from "lucide-react"
 import { BUCKET_LABELS_VI, getExpenseCategoryLabel, suggestBucketByCategory } from "@/domain/constants"
 import type { BudgetBucket, ExpenseCategory, ISODate } from "@/domain/types"
 import DatePicker from "@/components/DatePicker"
@@ -67,14 +67,7 @@ import {
   upsertExpenseTemplate,
   type ExpenseTemplate,
 } from "@/storage/templates"
-import {
-  getDayLockMonthContext,
-  isDayLocked,
-  loadDayLockMemory,
-  saveDayLockMemory,
-  setDayLocked,
-  type DayLockMemory,
-} from "@/storage/dayLock"
+import { getMonthDayContext } from "@/storage/dayLock"
 import type { CttmState } from "@/storage/schema"
 import CollapsibleCard from "@/components/expenses/CollapsibleCard"
 import QuickTemplateList from "@/components/expenses/QuickTemplateList"
@@ -205,9 +198,6 @@ export default function ExpensesPage() {
   const [warningPopupMemory, setWarningPopupMemory] = useState<WarningPopupMemory>(
     () => loadWarningPopupMemory(),
   )
-  const [dayLockMemory, setDayLockMemory] = useState<DayLockMemory>(() =>
-    loadDayLockMemory(),
-  )
   const warningPopupMemoryRef = useRef<WarningPopupMemory>(warningPopupMemory)
   const [lastAppliedTemplateId, setLastAppliedTemplateId] = useState<string | null>(
     null,
@@ -258,10 +248,6 @@ export default function ExpensesPage() {
     saveWarningPopupMemory(warningPopupMemory)
   }, [warningPopupMemory])
 
-  useEffect(() => {
-    saveDayLockMemory(dayLockMemory)
-  }, [dayLockMemory])
-
   const rootRef = useRef<HTMLDivElement | null>(null)
   const listScrollRef = useRef<HTMLDivElement | null>(null)
   const [isDesktop, setIsDesktop] = useState<boolean>(
@@ -298,19 +284,16 @@ export default function ExpensesPage() {
     0,
   )
   const month = monthFromIsoDate(selectedDate)
-  const dayContext = getDayLockMonthContext(selectedDate, dayLockMemory)
-  const dom = dayContext.dayOfMonth
-  const dim = dayContext.daysInMonth
+  const dayContext = getMonthDayContext(data, selectedDate)
   const currentMonth = monthFromIsoDate(todayIso())
   const selectedMonthPast = month < currentMonth
   const selectedMonthLocked = isMonthLocked(data, month)
-  const selectedDateLocked = !selectedMonthPast && dayContext.locked
-  const showDayLockActions = !selectedMonthPast && !selectedMonthLocked
-  const selectedDateReadOnly = selectedMonthLocked || selectedDateLocked
-  const remainingDaysInMonth = selectedDateLocked
-    ? dayContext.remainingDaysInMonth
-    : Math.max(0, dim - dom + 1)
-  const capLabelSuffix = selectedDateLocked ? "ngày kế tiếp" : "hôm nay"
+  // Ngày còn lại trong tháng tự động loại các ngày đã phát sinh chi tiêu (kể cả hôm nay khi đã
+  // ghi khoản đầu tiên). Đây là cách thay thế cho thao tác "khoá ngày" thủ công trước đây.
+  const selectedDateHasExpense = !selectedMonthPast && dayContext.dateHasExpense
+  const selectedDateReadOnly = selectedMonthLocked
+  const remainingDaysInMonth = dayContext.remainingDaysInMonth
+  const capLabelSuffix = selectedDateHasExpense ? "ngày kế tiếp" : "hôm nay"
   const monthTotals = getMonthTotals(data, month)
 
   useEffect(() => {
@@ -415,15 +398,14 @@ export default function ExpensesPage() {
   const formDate = form.watch("date") as unknown as ISODate
   const formDateMonth = monthFromIsoDate(formDate)
   const formMonthLocked = isMonthLocked(data, formDateMonth)
-  const formDateLocked = isDayLocked(formDate, dayLockMemory)
-  const formDateReadOnly = formMonthLocked || formDateLocked
+  const formDateReadOnly = formMonthLocked
 
   const [editingId, setEditingId] = useState<string | null>(null)
 
   const editingExpense = editingId ? data.entities.expenses.byId[editingId] : null
 
   const computeBudgetHealthWarnings = (state: CttmState, date: ISODate) => {
-    const dayContext = getDayLockMonthContext(date, dayLockMemory)
+    const dayContext = getMonthDayContext(state, date)
     const month = dayContext.month
     const dom = dayContext.dayOfMonth
     const dim = dayContext.daysInMonth
@@ -628,11 +610,6 @@ export default function ExpensesPage() {
       toast.error(`Tháng ${targetMonth} đã chốt báo cáo nên không thể thêm chi tiêu.`)
       return
     }
-    if (isDayLocked(selectedDate, dayLockMemory)) {
-      toast.error(`Ngày ${selectedDate} đã khoá. Mở khoá để thêm hoặc sửa dữ liệu.`)
-      return
-    }
-
     const baseline = computeBudgetHealthWarnings(storeData, selectedDate)
     const templateNote = template.note?.trim() ? template.note : template.name
     const newId = addExpense({
@@ -659,11 +636,6 @@ export default function ExpensesPage() {
       toast.error(`Tháng ${targetMonth} đã chốt báo cáo nên không thể thêm chi tiêu.`)
       return
     }
-    if (isDayLocked(selectedDate, dayLockMemory)) {
-      toast.error(`Ngày ${selectedDate} đã khoá. Mở khoá để thêm hoặc sửa dữ liệu.`)
-      return
-    }
-
     const selectedTemplates = sortedTemplates.filter((template) =>
       selectedTemplateIds.has(template.id),
     )
@@ -729,11 +701,6 @@ export default function ExpensesPage() {
         toast.error(`Tháng ${targetMonth} đã chốt báo cáo nên không thể thêm chi tiêu.`)
         return
       }
-      if (isDayLocked(values.date, dayLockMemory)) {
-        toast.error(`Ngày ${values.date} đã khoá. Mở khoá để thêm hoặc sửa dữ liệu.`)
-        return
-      }
-
       const baseline = computeBudgetHealthWarnings(
         storeData,
         values.date,
@@ -844,12 +811,6 @@ export default function ExpensesPage() {
       setDeleteExpenseId(null)
       return
     }
-    if (isDayLocked(expense.date, dayLockMemory)) {
-      toast.error(`Ngày ${expense.date} đã khoá. Mở khoá để xóa dữ liệu.`)
-      setDeleteExpenseId(null)
-      return
-    }
-
     deleteExpense(deleteExpenseId)
     setDeleteExpenseId(null)
     toast.success("Đã xóa.")
@@ -894,38 +855,6 @@ export default function ExpensesPage() {
           <Button type="button" variant="secondary" size="sm" onClick={() => setSelectedDate(todayIso())}>
             Hôm nay
           </Button>
-          {showDayLockActions ? (
-            <>
-              <Button
-                type="button"
-                variant={selectedDateLocked ? "secondary" : "outline"}
-                size="sm"
-                disabled={selectedDateLocked}
-                onClick={() =>
-                  setDayLockMemory((prev) =>
-                    setDayLocked({ date: selectedDate, locked: true, memory: prev }),
-                  )
-                }
-              >
-                <Lock className="mr-1.5 h-4 w-4" />
-                Khoá
-              </Button>
-              <Button
-                type="button"
-                variant={selectedDateLocked ? "default" : "outline"}
-                size="sm"
-                disabled={!selectedDateLocked}
-                onClick={() =>
-                  setDayLockMemory((prev) =>
-                    setDayLocked({ date: selectedDate, locked: false, memory: prev }),
-                  )
-                }
-              >
-                <LockOpen className="mr-1.5 h-4 w-4" />
-                Mở khoá
-              </Button>
-            </>
-          ) : null}
         </div>
       </div>
 
@@ -980,16 +909,17 @@ export default function ExpensesPage() {
               contentClassName="h-full min-h-0"
             >
               <div className="h-full overflow-y-auto pr-1 text-sm space-y-2">
-                {selectedDateLocked ? (
+                {selectedDateHasExpense ? (
                   <div className="rounded-md border border-primary/30 bg-primary/5 px-2 py-1.5 text-xs text-muted-foreground">
                     {remainingDaysInMonth > 0 ? (
                       <>
-                        Ngày {selectedDate} đã khoá. Các cap bên dưới đang tính theo{" "}
+                        Ngày {selectedDate} đã có chi tiêu nên được loại khỏi số ngày còn lại. Các
+                        cap bên dưới đang tính theo{" "}
                         <span className="font-medium text-foreground">ngày kế tiếp</span>.
                       </>
                     ) : (
                       <>
-                        Ngày {selectedDate} đã khoá và không còn ngày nào trong tháng này.
+                        Ngày {selectedDate} đã có chi tiêu và không còn ngày trống nào trong tháng này.
                       </>
                     )}
                   </div>
@@ -1073,9 +1003,7 @@ export default function ExpensesPage() {
                     title={
                       selectedMonthLocked
                         ? `Tháng ${selectedDate.slice(0, 7)} đã chốt báo cáo nên không thể thêm chi tiêu.`
-                        : selectedDateLocked
-                          ? `Ngày ${selectedDate} đã khoá. Mở khoá để thêm hoặc sửa dữ liệu.`
-                          : undefined
+                        : undefined
                     }
                     onClick={() => {
                       form.reset({
@@ -1139,8 +1067,6 @@ export default function ExpensesPage() {
               headerActions={
                 selectedMonthLocked ? (
                   <Badge variant="outline">Đã chốt tháng</Badge>
-                ) : selectedDateLocked ? (
-                  <Badge variant="secondary">Đã khoá ngày</Badge>
                 ) : null
               }
             >
@@ -1158,8 +1084,7 @@ export default function ExpensesPage() {
                     expensesToday.map((expense) => {
                       const expenseMonth = monthFromIsoDate(expense.date)
                       const expenseMonthLocked = isMonthLocked(data, expenseMonth)
-                      const expenseDateLocked = isDayLocked(expense.date, dayLockMemory)
-                      const expenseReadOnly = expenseMonthLocked || expenseDateLocked
+                      const expenseReadOnly = expenseMonthLocked
 
                       return (
                         <div
@@ -1193,9 +1118,7 @@ export default function ExpensesPage() {
                                 title={
                                   expenseMonthLocked
                                     ? `Tháng ${expenseMonth} đã chốt báo cáo nên không thể sửa.`
-                                    : expenseDateLocked
-                                      ? `Ngày ${expense.date} đã khoá. Mở khoá để sửa dữ liệu.`
-                                      : undefined
+                                    : undefined
                                 }
                                 onClick={() => setEditingId(expense.id)}
                               >
@@ -1209,9 +1132,7 @@ export default function ExpensesPage() {
                                 title={
                                   expenseMonthLocked
                                     ? `Tháng ${expenseMonth} đã chốt báo cáo nên không thể xóa.`
-                                    : expenseDateLocked
-                                      ? `Ngày ${expense.date} đã khoá. Mở khoá để xóa dữ liệu.`
-                                      : undefined
+                                    : undefined
                                 }
                                 onClick={() => setDeleteExpenseId(expense.id)}
                               >
@@ -1359,9 +1280,7 @@ export default function ExpensesPage() {
                 title={
                   formMonthLocked
                     ? `Tháng ${formDateMonth} đã chốt báo cáo nên không thể thêm chi tiêu.`
-                    : formDateLocked
-                      ? `Ngày ${formDate} đã khoá. Mở khoá để thêm hoặc sửa dữ liệu.`
-                      : undefined
+                    : undefined
                 }
               >
                 Thêm
@@ -1372,9 +1291,7 @@ export default function ExpensesPage() {
                 title={
                   formMonthLocked
                     ? `Tháng ${formDateMonth} đã chốt báo cáo nên không thể thêm chi tiêu.`
-                    : formDateLocked
-                      ? `Ngày ${formDate} đã khoá. Mở khoá để thêm hoặc sửa dữ liệu.`
-                      : undefined
+                    : undefined
                 }
                 onClick={() =>
                   form.handleSubmit((values) =>
@@ -1412,18 +1329,9 @@ export default function ExpensesPage() {
                 const storeData = useAppStore.getState().data
                 const originalMonth = monthFromIsoDate(editingExpense.date)
                 const nextMonth = monthFromIsoDate(values.date)
-                const originalDateLocked = isDayLocked(editingExpense.date, dayLockMemory)
-                const nextDateLocked = isDayLocked(values.date, dayLockMemory)
-
                 if (isMonthLocked(storeData, originalMonth) || isMonthLocked(storeData, nextMonth)) {
                   toast.error(
                     `Tháng đã chốt báo cáo (${isMonthLocked(storeData, originalMonth) ? originalMonth : nextMonth}) nên không thể cập nhật.`,
-                  )
-                  return
-                }
-                if (originalDateLocked || nextDateLocked) {
-                  toast.error(
-                    `Ngày đã khoá (${originalDateLocked ? editingExpense.date : values.date}). Mở khoá để cập nhật dữ liệu.`,
                   )
                   return
                 }

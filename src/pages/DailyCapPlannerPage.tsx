@@ -24,7 +24,7 @@ import { formatVnd } from "@/lib/currency"
 import { monthFromIsoDate, todayIso } from "@/lib/date"
 import { cn } from "@/lib/utils"
 import { getMonthTotals } from "@/selectors/expenses"
-import { getDayLockMonthContext } from "@/storage/dayLock"
+import { getMonthDayContext } from "@/storage/dayLock"
 import { useAppStore } from "@/store/useAppStore"
 
 function clampPositiveInt(value: string, fallback: number) {
@@ -60,7 +60,7 @@ export default function DailyCapPlannerPage() {
 
   const today = todayIso()
   const month = monthFromIsoDate(today)
-  const dayContext = getDayLockMonthContext(today)
+  const dayContext = getMonthDayContext(data, today)
   const totals = useMemo(() => getMonthTotals(data, month), [data, month])
   const settings = useMemo(() => getEffectiveSettingsForMonth(data, month), [data, month])
   const adjustment = useMemo(() => getEffectiveBudgetAdjustmentForMonth(data, month), [data, month])
@@ -153,7 +153,6 @@ export default function DailyCapPlannerPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {dayContext.locked ? <Badge variant="secondary">Hôm nay đã khoá</Badge> : null}
           {appliedCapIsLimiting ? <Badge variant="outline">Cap áp dụng đang giới hạn</Badge> : null}
         </div>
       </div>
