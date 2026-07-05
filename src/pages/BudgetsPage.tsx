@@ -936,10 +936,21 @@ export default function BudgetsPage() {
   const wantsRemaining = budgets.wantsBudgetVnd - wantsActual
   const totalRemaining = spendingBudgetVnd - totals.totalSpent
 
-  const projectedSavingsGoalRate =
-    budgets.savingsTargetVnd > 0 ? projectedSavingsVnd / budgets.savingsTargetVnd : 0
-  const savingsProgress = Math.max(0, Math.min(100, projectedSavingsGoalRate * 100))
-  const savingsRemainingToGoalVnd = Math.max(0, budgets.savingsTargetVnd - projectedSavingsVnd)
+  // Tiết kiệm thực tế của tháng = I − tổng đã chi (F + E + W). Đây là định nghĩa chung của hệ
+  // thống, khớp với DashboardPage (projectedSavingsNow), ReportsPage (saved) và selector
+  // getActualMonthlySavingsVnd. KHÔNG dùng dự báo theo nhịp (projectedSavingsVnd) để phán
+  // "đạt/chưa đạt mục tiêu": dự báo đó ép E lên tối thiểu baseline và ngoại suy W theo pace nên
+  // luôn thấp hơn thực tế, gây báo sai "chưa đạt" ngay cả khi đang tiết kiệm tốt.
+  const realizedSavingsVnd = Math.trunc(budgets.incomeVnd - totals.totalSpent)
+  const savingsGoalMet = realizedSavingsVnd >= budgets.savingsTargetVnd
+  const savingsGoalRate =
+    budgets.savingsTargetVnd > 0
+      ? realizedSavingsVnd / budgets.savingsTargetVnd
+      : realizedSavingsVnd >= 0
+        ? 1
+        : 0
+  const savingsProgress = Math.max(0, Math.min(100, savingsGoalRate * 100))
+  const savingsRemainingToGoalVnd = Math.max(0, budgets.savingsTargetVnd - realizedSavingsVnd)
 
   const topCategories = useMemo(() => {
     const totalsByCategory = getCategoryTotals(data, month)
@@ -1053,20 +1064,22 @@ export default function BudgetsPage() {
         />
         <CategoryCard
           title="Tiết kiệm"
-          subtitle="S (ước tính theo nhịp)"
+          subtitle="S — thực tế so với mục tiêu"
           planLabel="Mục tiêu S"
           planVnd={budgets.savingsTargetVnd}
-          actualLabel="Dự báo cuối tháng"
-          actualVnd={projectedSavingsVnd}
+          actualLabel={isCurrentMonth ? "Đã tiết kiệm (tới nay)" : "Đã tiết kiệm"}
+          actualVnd={realizedSavingsVnd}
           remainingVnd={savingsRemainingToGoalVnd}
           remainingLabel="Còn thiếu để đạt S"
           progressPct={savingsProgress}
           status={
-            projectedSavingsVnd >= budgets.savingsTargetVnd
-              ? "Dự kiến đạt mục tiêu"
+            savingsGoalMet
+              ? isCurrentMonth
+                ? "Đang đạt mục tiêu"
+                : "Đạt mục tiêu"
               : `Thiếu ${formatVnd(savingsRemainingToGoalVnd)}`
           }
-          statusTone={projectedSavingsVnd >= budgets.savingsTargetVnd ? "ok" : "danger"}
+          statusTone={savingsGoalMet ? "ok" : "danger"}
           onOpenDetails={() => openDrawer("details", "budget-details-forecast")}
           compactMode={compactMode}
         />
