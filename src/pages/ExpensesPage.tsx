@@ -3,7 +3,7 @@ import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { Controller, useForm } from "react-hook-form"
 import { toast } from "sonner"
-import { ChartColumn, ListChecks, PlusSquare } from "lucide-react"
+import { CalendarClock, ChartColumn, ListChecks, PlusSquare } from "lucide-react"
 import { BUCKET_LABELS_VI, getExpenseCategoryLabel, suggestBucketByCategory } from "@/domain/constants"
 import type { BudgetBucket, ExpenseCategory, ISODate } from "@/domain/types"
 import DatePicker from "@/components/DatePicker"
@@ -53,10 +53,12 @@ import {
 } from "@/domain/finance/budgetHealth"
 import {
   computeRemainingDailySpendingCap,
+  projectMonthEndFromPace,
   resolveEffectiveDailyTotalCapVnd,
 } from "@/domain/finance/dailySafeCap"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
+import { Progress } from "@/components/ui/progress"
 import LabelValueRow from "@/components/LabelValueRow"
 import {
   getAllExpenseTemplatesSorted,
@@ -282,7 +284,6 @@ export default function ExpensesPage() {
   const selectedDateHasExpense = !selectedMonthPast && dayContext.dateHasExpense
   const selectedDateReadOnly = selectedMonthLocked
   const remainingDaysInMonth = dayContext.remainingDaysInMonth
-  const capLabelSuffix = selectedDateHasExpense ? "ngày kế tiếp" : "hôm nay"
   const monthTotals = getMonthTotals(data, month)
 
   useEffect(() => {
@@ -343,8 +344,57 @@ export default function ExpensesPage() {
     computedDailyTotalCapVnd: remainingDailyCap.dailyTotalCapVnd,
     appliedDailyTotalCapVnd: caps?.dailyTotalCapVnd,
   })
-  const essentialRemainingVnd = budgets.essentialVariableBaselineVnd - monthTotals.variableNeeds
-  const wantsRemainingVnd = budgets.wantsBudgetVnd - monthTotals.variableWants
+  // Thanh "Còn lại ngân sách tháng" = tổng tiền còn được chi (I − S − đã chi). Đầu tháng chưa
+  // tiêu gì => còn 100% ngân sách chi (I − S); chi càng nhiều thanh càng vơi. Giữ trong mức này
+  // đồng nghĩa vẫn đạt mục tiêu tiết kiệm. Vượt => 0% + số đỏ.
+  const budgetRemainingPct =
+    remainingDailyCap.spendingBudgetVnd > 0
+      ? Math.max(
+          0,
+          Math.min(
+            100,
+            (remainingDailyCap.totalRemainingVnd / remainingDailyCap.spendingBudgetVnd) * 100,
+          ),
+        )
+      : 0
+  // Thanh "Ngày đã trôi qua trong tháng" = tổng ngày − số ngày còn lại (theo nghiệp vụ). Vì ngày
+  // đã có chi tiêu bị loại khỏi "ngày còn lại", nên khi hôm nay phát sinh chi tiêu thì ngày còn
+  // lại giảm 1 và ngày đã trôi qua tăng 1 tương ứng.
+  const daysElapsedInMonth = Math.max(0, dayContext.daysInMonth - remainingDaysInMonth)
+  const daysElapsedPct = Math.max(
+    0,
+    Math.min(100, (daysElapsedInMonth / dayContext.daysInMonth) * 100),
+  )
+  // Cap đang tính cho ngày kế tiếp (không phải hôm nay) khi hôm nay đã phát sinh chi tiêu.
+  const capForNextDay = selectedDateHasExpense && remainingDaysInMonth > 0
+
+  // Dự báo tiết kiệm cuối tháng theo nhịp chi thực tế (nhất quán Dashboard/Ngân sách): tháng
+  // hiện tại ngoại suy phần còn lại của tháng, tháng đã qua thì = I − đã chi thực tế.
+  const savingsProjection = projectMonthEndFromPace({
+    incomeVnd: budgets.incomeVnd,
+    fixedCostsVnd: monthTotals.fixedCostsTotal,
+    essentialVariableBaselineVnd: budgets.essentialVariableBaselineVnd,
+    variableNeedsToDateVnd: monthTotals.variableNeeds,
+    variableWantsToDateVnd: monthTotals.variableWants,
+    dayOfMonth: dayContext.dayOfMonth,
+    daysInMonth: dayContext.daysInMonth,
+  })
+  const projectedSavingsEndMonthVnd =
+    month === currentMonth
+      ? savingsProjection.projectedSavingsVnd
+      : Math.trunc(budgets.incomeVnd - monthTotals.totalSpent)
+  const savingsMet = projectedSavingsEndMonthVnd >= budgets.savingsTargetVnd
+  const savingsAboveMss = projectedSavingsEndMonthVnd >= budgets.mssVnd
+  const savingsToneClass = savingsMet
+    ? "text-emerald-700 dark:text-emerald-400"
+    : savingsAboveMss
+      ? "text-amber-600 dark:text-amber-400"
+      : "text-destructive"
+  const savingsVerdict = savingsMet
+    ? "Đang đúng hướng đạt mục tiêu"
+    : savingsAboveMss
+      ? "Có nguy cơ hụt mục tiêu tiết kiệm"
+      : "Dưới mức an toàn tối thiểu (MSS)"
 
   const formSchema = z.object({
     amountVnd: z.coerce.number().int().positive({ message: "Số tiền phải > 0." }),
@@ -902,69 +952,89 @@ export default function ExpensesPage() {
               summary={`Hôm nay: ${formatVnd(dailyTotal)}`}
               contentClassName="h-full min-h-0"
             >
-              <div className="h-full overflow-y-auto pr-1 text-sm space-y-2">
-                {selectedDateHasExpense ? (
-                  <div className="rounded-md border border-primary/30 bg-primary/5 px-2 py-1.5 text-xs text-muted-foreground">
-                    {remainingDaysInMonth > 0 ? (
-                      <>
-                        Ngày {selectedDate} đã có chi tiêu nên được loại khỏi số ngày còn lại. Các
-                        cap bên dưới đang tính theo{" "}
-                        <span className="font-medium text-foreground">ngày kế tiếp</span>.
-                      </>
+              <div className="h-full overflow-y-auto pr-1 text-sm space-y-3">
+                {/* Nhịp chi gần đây */}
+                <div className="space-y-1.5">
+                  <LabelValueRow label="Chi ngày này" value={formatVnd(dailyTotal)} />
+                  <LabelValueRow label="7 ngày gần nhất" value={formatVnd(weekTotal)} />
+                  <LabelValueRow
+                    label="Tháng đến nay (gồm cố định)"
+                    value={formatVnd(monthTotals.totalSpent)}
+                  />
+                </div>
+
+                {/* Cap chi mỗi ngày. Khi hôm nay đã ghi chi tiêu, cap chuyển sang áp dụng cho NGÀY
+                    KẾ TIẾP — cả khung đổi sang màu hổ phách + badge có icon để người dùng nhận ra
+                    ngay đây là giới hạn của ngày kế tiếp, không phải hôm nay. */}
+                <div
+                  className={cn(
+                    "rounded-lg border p-3 space-y-2",
+                    capForNextDay
+                      ? "border-amber-500/50 bg-amber-500/10"
+                      : "border-primary/30 bg-primary/5",
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-medium text-muted-foreground">
+                      Cap chi mỗi ngày
+                    </span>
+                    {capForNextDay ? (
+                      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500 px-2 py-0.5 text-[11px] font-semibold text-white shadow-sm">
+                        <CalendarClock className="h-3.5 w-3.5" />
+                        Cho ngày kế tiếp
+                      </span>
                     ) : (
-                      <>
-                        Ngày {selectedDate} đã có chi tiêu và không còn ngày trống nào trong tháng này.
-                      </>
+                      <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                        Cho hôm nay
+                      </span>
                     )}
                   </div>
-                ) : null}
-                <LabelValueRow label="Tổng ngày" value={formatVnd(dailyTotal)} />
-                <LabelValueRow label="7 ngày gần nhất" value={formatVnd(weekTotal)} />
-                <LabelValueRow
-                  label="Tháng đến nay (gồm cố định)"
-                  value={formatVnd(monthTotals.totalSpent)}
-                />
-                <Separator />
-                <LabelValueRow
-                  label="Còn được chi để giữ tiết kiệm"
-                  value={formatVnd(remainingDailyCap.totalRemainingVnd)}
-                  valueClassName={cn(remainingDailyCap.totalRemainingVnd < 0 && "text-destructive")}
-                />
-                <LabelValueRow
-                  label="Ngày còn lại trong tháng"
-                  value={new Intl.NumberFormat("vi-VN").format(remainingDaysInMonth)}
-                />
-                <div className="rounded-md border border-primary/30 bg-primary/5 p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-xs text-muted-foreground">
-                        Cap tổng {capLabelSuffix}
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        Ngân sách chi còn lại / số ngày còn lại
-                      </div>
-                    </div>
-                    <div
-                      className={cn(
-                        "shrink-0 text-lg font-semibold tabular-nums",
-                        shownDailyTotalCapVnd <= 0 && "text-destructive",
-                      )}
-                    >
-                      {formatVnd(shownDailyTotalCapVnd)}
-                    </div>
+                  <div
+                    className={cn(
+                      "text-2xl font-semibold tabular-nums",
+                      capForNextDay && "text-amber-700 dark:text-amber-400",
+                      shownDailyTotalCapVnd <= 0 && "text-destructive",
+                    )}
+                  >
+                    {formatVnd(shownDailyTotalCapVnd)}
                   </div>
                 </div>
-                <Separator />
-                <LabelValueRow
-                  label="Thiết yếu còn trong tháng"
-                  value={formatVnd(essentialRemainingVnd)}
-                  valueClassName={cn(essentialRemainingVnd < 0 && "text-destructive")}
-                />
-                <LabelValueRow
-                  label="Mong muốn còn trong tháng"
-                  value={formatVnd(wantsRemainingVnd)}
-                  valueClassName={cn(wantsRemainingVnd < 0 && "text-destructive")}
-                />
+
+                {/* Còn lại ngân sách tháng = tổng tiền còn được chi (I − S − đã chi). Giữ trong
+                    mức này thì vẫn đạt mục tiêu tiết kiệm. Đầu tháng chưa tiêu gì = 100%. */}
+                <div className="space-y-1.5">
+                  <LabelValueRow
+                    label="Còn lại ngân sách tháng"
+                    value={formatVnd(remainingDailyCap.totalRemainingVnd)}
+                    valueClassName={cn(remainingDailyCap.totalRemainingVnd < 0 && "text-destructive")}
+                  />
+                  <Progress value={budgetRemainingPct} />
+                </div>
+
+                {/* Ngày đã trôi qua trong tháng — đối chiếu với ngân sách còn lại ở trên. */}
+                <div className="space-y-1.5">
+                  <LabelValueRow
+                    label="Ngày đã trôi qua trong tháng"
+                    value={`${daysElapsedInMonth}/${dayContext.daysInMonth} ngày`}
+                  />
+                  <Progress value={daysElapsedPct} />
+                </div>
+
+                {/* Tiết kiệm — dự báo cuối tháng theo nhịp chi */}
+                <div className="rounded-md border bg-muted/30 p-3">
+                  <div className="text-xs text-muted-foreground">
+                    Dự báo tiết kiệm cuối tháng
+                  </div>
+                  <div
+                    className={cn(
+                      "mt-0.5 text-lg font-semibold tabular-nums",
+                      savingsToneClass,
+                    )}
+                  >
+                    {formatVnd(projectedSavingsEndMonthVnd)}
+                  </div>
+                  <div className="text-[11px] text-muted-foreground">{savingsVerdict}</div>
+                </div>
               </div>
             </CollapsibleCard>
           </div>
