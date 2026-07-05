@@ -3,6 +3,47 @@
 @tailwind utilities;
 
 @layer base {
+  /*
+   * App-shell height lock. The layout is a fixed-height shell: the DOCUMENT itself must
+   * never scroll — only <main> scrolls internally. If the document is allowed to scroll we
+   * get TWO scrollbars (document + main) and the left sidebar ends up shorter than the page
+   * (the reported gap).
+   *
+   * Height is chained with percentages (html -> body -> #root), NOT viewport units, so it is
+   * completely independent of whether the browser supports `dvh`/`vh` — `html { height: 100% }`
+   * resolves against the viewport on every browser. `body { overflow: hidden }` guarantees the
+   * document can never produce a second scrollbar regardless of any sub-pixel rounding.
+   */
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    overflow: hidden;
+  }
+}
+
+@layer utilities {
+  /*
+   * Full-viewport height with a safe fallback. Tailwind's `h-dvh` compiles to a single
+   * `height: 100dvh` declaration with NO fallback — on a browser/webview whose rendering
+   * engine doesn't understand the `dvh` unit (older embedded Chromium builds, some
+   * corporate/VPN browsers), that whole declaration is invalid and simply doesn't apply,
+   * silently collapsing the element to its content height (`auto`). That reproduces the
+   * exact "sidebar shorter than the page" bug even though the layout markup is correct.
+   * Declaring `height` twice in one rule is the standard CSS progressive-enhancement
+   * pattern: unsupported browsers keep the earlier `100vh`, supporting ones use the later
+   * `100dvh` (which additionally adapts to mobile browser chrome show/hide).
+   */
+  .h-viewport {
+    height: 100vh;
+    height: 100dvh;
+  }
+}
+
+@layer base {
   :root {
     --background: 0 0% 100%;
     --foreground: 222.2 84% 4.9%;

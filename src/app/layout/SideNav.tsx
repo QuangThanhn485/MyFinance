@@ -253,7 +253,7 @@ export default function SideNav({
   return (
     <aside
       className={cn(
-        "h-dvh sticky top-0 border-r bg-muted/20 backdrop-blur supports-[backdrop-filter]:bg-background/70",
+        "h-full border-r bg-muted/20 backdrop-blur supports-[backdrop-filter]:bg-background/70",
         "flex flex-col shrink-0 transition-[width] duration-200",
         widthClass,
         className,

@@ -37,19 +37,25 @@ export default function AppLayout() {
     return () => window.clearInterval(timer)
   }, [autoClose])
 
-  const mainContainerClassName = "flex-1 w-full px-3 sm:px-4 lg:px-6 py-4 sm:py-6"
+  // Khung ứng dụng cao đúng bằng viewport và tự khóa cuộn: document KHÔNG cuộn, chỉ <main> cuộn
+  // nội bộ. Chiều cao dùng `h-full` (= 100%) dựa trên chuỗi % html→body→#root đã khóa ở
+  // index.css, nên hoàn toàn không phụ thuộc việc trình duyệt có hỗ trợ đơn vị dvh/vh hay không.
+  // Cùng với `body { overflow: hidden }`, điều này loại bỏ hẳn thanh cuộn thứ hai và khoảng hở
+  // dưới sidebar ở các trang dài như /settings.
+  const mainContainerClassName =
+    "flex-1 min-h-0 overflow-y-auto w-full px-3 sm:px-4 lg:px-6 py-4 sm:py-6"
 
   return (
-    <div className="min-h-dvh bg-background">
-      <div className="flex min-h-dvh">
+    <div className="h-full overflow-hidden bg-background">
+      <div className="flex h-full">
         <SideNav
           className="hidden md:flex"
           collapsed={sidebarCollapsed}
           onCollapsedChange={setSidebarCollapsed}
         />
 
-        <div className="min-w-0 flex-1 flex flex-col">
-          <header className="md:hidden sticky top-0 z-50 border-b bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <div className="min-w-0 min-h-0 flex-1 flex flex-col">
+          <header className="md:hidden shrink-0 border-b bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
             <div className="h-14 px-4 flex items-center gap-3">
               <Button
                 type="button"
@@ -69,7 +75,7 @@ export default function AppLayout() {
 
           <Dialog open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
             <DialogContent
-              className="left-0 top-0 h-dvh w-[280px] max-w-[85vw] translate-x-0 translate-y-0 rounded-none border-0 p-0 sm:max-w-[85vw]"
+              className="left-0 top-0 h-viewport w-[280px] max-w-[85vw] translate-x-0 translate-y-0 rounded-none border-0 p-0 sm:max-w-[85vw]"
               aria-label="Menu"
             >
               <SideNav

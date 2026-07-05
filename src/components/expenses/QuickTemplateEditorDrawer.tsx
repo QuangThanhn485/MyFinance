@@ -96,7 +96,7 @@ export default function QuickTemplateEditorDrawer({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="left-auto right-0 top-0 h-dvh w-full max-w-lg translate-x-0 translate-y-0 rounded-none border-l p-0">
+      <DialogContent className="left-auto right-0 top-0 h-viewport w-full max-w-lg translate-x-0 translate-y-0 rounded-none border-l p-0">
         <div className="flex h-full min-h-0 flex-col">
           <DialogHeader className="border-b px-6 py-4">
             <DialogTitle>

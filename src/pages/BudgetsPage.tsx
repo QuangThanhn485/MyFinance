@@ -639,13 +639,13 @@ function LeftDrawer({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="left-0 top-0 h-dvh w-[100vw] sm:w-[460px] max-w-[100vw] translate-x-0 translate-y-0 rounded-none border-0 border-r p-0 gap-0"
+        className="left-0 top-0 h-viewport w-[100vw] sm:w-[460px] max-w-[100vw] translate-x-0 translate-y-0 rounded-none border-0 border-r p-0 gap-0"
         aria-label="Chi tiết & cài đặt ngân sách"
       >
         <Tabs
           value={tab}
           onValueChange={(v) => onTabChange(v as DrawerTab)}
-          className="flex h-dvh flex-col"
+          className="flex h-viewport flex-col"
         >
           <div className="border-b bg-background p-4">
             <div className="min-w-0">
