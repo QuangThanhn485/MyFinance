@@ -1,11 +1,18 @@
 import { useMemo, useState } from "react"
 import { toast } from "sonner"
-import { Pencil, Plus, Search, Tags, Trash2, X } from "lucide-react"
+import { Pencil, Plus, Search, Trash2, X } from "lucide-react"
 import { BUCKET_LABELS_VI } from "@/domain/constants"
 import type { BudgetBucket, ExpenseCategory } from "@/domain/types"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -15,7 +22,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Separator } from "@/components/ui/separator"
 import { cn } from "@/lib/utils"
 import { getExpenseCategoryUsageCounts } from "@/storage/categories"
 import { loadExpenseTemplates } from "@/storage/templates"
@@ -29,6 +35,7 @@ export default function CategoriesPage() {
   const updateExpenseCategory = useAppStore((s) => s.actions.updateExpenseCategory)
   const deleteExpenseCategory = useAppStore((s) => s.actions.deleteExpenseCategory)
 
+  const [addDialogOpen, setAddDialogOpen] = useState(false)
   const [newCategoryLabel, setNewCategoryLabel] = useState("")
   const [newCategoryBucket, setNewCategoryBucket] = useState<BudgetBucket>("needs")
   const [editingCategoryId, setEditingCategoryId] = useState<ExpenseCategory | null>(null)
@@ -86,6 +93,7 @@ export default function CategoriesPage() {
     }
     setNewCategoryLabel("")
     setNewCategoryBucket("needs")
+    setAddDialogOpen(false)
     toast.success("Đã thêm danh mục.")
   }
 
@@ -127,76 +135,37 @@ export default function CategoriesPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Danh mục chi tiêu</h1>
           <p className="text-sm text-muted-foreground">
             Quản lý danh mục dùng trong chi tiêu, chi phí cố định và mẫu thêm nhanh.
           </p>
         </div>
-        <div className="grid grid-cols-3 gap-2 text-sm">
-          <div className="rounded-md border bg-muted/30 px-3 py-2">
-            <div className="text-xs text-muted-foreground">Tổng</div>
-            <div className="font-semibold tabular-nums">{categoryOptions.length}</div>
+        <div className="flex items-center gap-2">
+          <div className="hidden items-center gap-1.5 rounded-md border bg-muted/30 px-3 py-1.5 text-xs sm:flex">
+            <span className="tabular-nums font-semibold">{categoryOptions.length}</span>
+            <span className="text-muted-foreground">tổng</span>
+            <span className="text-border">•</span>
+            <span className="tabular-nums font-semibold text-amber-700 dark:text-amber-300">
+              {usedCount}
+            </span>
+            <span className="text-muted-foreground">đang dùng</span>
+            <span className="text-border">•</span>
+            <span className="tabular-nums font-semibold">{freeCount}</span>
+            <span className="text-muted-foreground">có thể xoá</span>
           </div>
-          <div className="rounded-md border border-amber-200 bg-amber-50/70 px-3 py-2 dark:border-amber-900/60 dark:bg-amber-950/20">
-            <div className="text-xs text-amber-700 dark:text-amber-300">Đang dùng</div>
-            <div className="font-semibold tabular-nums">{usedCount}</div>
-          </div>
-          <div className="rounded-md border bg-background px-3 py-2">
-            <div className="text-xs text-muted-foreground">Có thể xoá</div>
-            <div className="font-semibold tabular-nums">{freeCount}</div>
-          </div>
+          <Button type="button" onClick={() => setAddDialogOpen(true)}>
+            <Plus className="h-4 w-4" />
+            Thêm danh mục
+          </Button>
         </div>
       </div>
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2">
-            <Tags className="h-4 w-4 text-muted-foreground" />
-            <span>Thêm danh mục</span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-2 lg:grid-cols-[minmax(240px,1fr)_220px_auto]">
-            <div className="grid gap-1.5">
-              <Label className="text-xs">Tên danh mục</Label>
-              <Input
-                value={newCategoryLabel}
-                onChange={(event) => setNewCategoryLabel(event.target.value)}
-                maxLength={60}
-                placeholder="Ví dụ: Thú cưng, Du lịch, Quà tặng..."
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label className="text-xs">Bucket mặc định</Label>
-              <Select
-                value={newCategoryBucket}
-                onValueChange={(value) => setNewCategoryBucket(value as BudgetBucket)}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="needs">{BUCKET_LABELS_VI.needs}</SelectItem>
-                  <SelectItem value="wants">{BUCKET_LABELS_VI.wants}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex items-end">
-              <Button type="button" className="w-full lg:w-auto" onClick={handleCreateCategory}>
-                <Plus className="h-4 w-4" />
-                Thêm
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="pb-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <CardTitle>Danh sách</CardTitle>
+            <CardTitle className="text-base">Danh sách ({rows.length})</CardTitle>
             <div className="flex flex-1 flex-wrap justify-end gap-2">
               <div className="relative min-w-[220px] flex-1 sm:max-w-xs">
                 <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -221,20 +190,20 @@ export default function CategoriesPage() {
           </div>
         </CardHeader>
         <CardContent className="space-y-2">
-          <div className="hidden rounded-md bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground md:grid md:grid-cols-[minmax(180px,1fr)_130px_240px_110px] md:gap-3">
+          <div className="hidden rounded-md bg-muted/50 px-3 py-1.5 text-xs font-medium text-muted-foreground md:grid md:grid-cols-[minmax(160px,1.2fr)_100px_minmax(180px,1fr)_88px] md:gap-3">
             <div>Danh mục</div>
             <div>Bucket</div>
             <div>Mức sử dụng</div>
             <div className="text-right">Thao tác</div>
           </div>
 
-          <div className="max-h-[calc(100vh-330px)] min-h-[260px] space-y-2 overflow-y-auto pr-1">
-            {rows.length === 0 ? (
-              <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-                Không có danh mục phù hợp với bộ lọc hiện tại.
-              </div>
-            ) : (
-              rows.map(({ category, usage, used }) => {
+          {rows.length === 0 ? (
+            <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+              Không có danh mục phù hợp với bộ lọc hiện tại.
+            </div>
+          ) : (
+            <div className="max-h-[calc(100vh-360px)] space-y-1.5 overflow-y-auto pr-1">
+              {rows.map(({ category, usage, used }) => {
                 const isLastCategory = categoryOptions.length <= 1
                 const isEditing = editingCategoryId === category.id
 
@@ -242,7 +211,7 @@ export default function CategoriesPage() {
                   <div
                     key={category.id}
                     className={cn(
-                      "rounded-md border p-3 text-sm",
+                      "rounded-md border px-3 py-2 text-sm",
                       used
                         ? "border-amber-200 bg-amber-50/60 dark:border-amber-900/60 dark:bg-amber-950/20"
                         : "bg-background",
@@ -290,7 +259,7 @@ export default function CategoriesPage() {
                         </div>
                       </div>
                     ) : (
-                      <div className="grid gap-3 md:grid-cols-[minmax(180px,1fr)_130px_240px_110px] md:items-center">
+                      <div className="grid gap-3 md:grid-cols-[minmax(160px,1.2fr)_100px_minmax(180px,1fr)_88px] md:items-center">
                         <div className="min-w-0">
                           <div className="truncate font-medium" title={category.label}>
                             {category.label}
@@ -302,20 +271,16 @@ export default function CategoriesPage() {
                         <Badge variant="outline" className="w-fit">
                           {BUCKET_LABELS_VI[category.defaultBucket]}
                         </Badge>
-                        <div className="space-y-1">
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <Badge variant={used ? "secondary" : "outline"}>
-                              {used ? `Đang dùng ${usage.total}` : "Chưa dùng"}
-                            </Badge>
-                            {used ? (
-                              <span className="text-xs text-amber-700 dark:text-amber-300">
-                                Không thể xoá
-                              </span>
-                            ) : null}
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            {usage.expenses} chi tiêu · {usage.fixedCosts} cố định · {usage.templates} mẫu
-                          </div>
+                        <div className="min-w-0 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                          <Badge variant={used ? "secondary" : "outline"} className="shrink-0">
+                            {used ? `Đang dùng ${usage.total}` : "Chưa dùng"}
+                          </Badge>
+                          {used ? (
+                            <span className="truncate">
+                              {usage.expenses} chi tiêu · {usage.fixedCosts} cố định ·{" "}
+                              {usage.templates} mẫu
+                            </span>
+                          ) : null}
                         </div>
                         <div className="flex justify-end gap-2">
                           <Button
@@ -348,16 +313,59 @@ export default function CategoriesPage() {
                     )}
                   </div>
                 )
-              })
-            )}
-          </div>
+              })}
+            </div>
+          )}
 
-          <Separator />
           <div className="text-xs text-muted-foreground">
             Danh mục đã phát sinh dữ liệu được đánh dấu màu vàng và không cho xoá để tránh làm hỏng lịch sử chi tiêu.
           </div>
         </CardContent>
       </Card>
+
+      <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Thêm danh mục</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <div className="grid gap-1.5">
+              <Label className="text-xs">Tên danh mục</Label>
+              <Input
+                value={newCategoryLabel}
+                onChange={(event) => setNewCategoryLabel(event.target.value)}
+                maxLength={60}
+                placeholder="Ví dụ: Thú cưng, Du lịch, Quà tặng..."
+                autoFocus
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <Label className="text-xs">Bucket mặc định</Label>
+              <Select
+                value={newCategoryBucket}
+                onValueChange={(value) => setNewCategoryBucket(value as BudgetBucket)}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="needs">{BUCKET_LABELS_VI.needs}</SelectItem>
+                  <SelectItem value="wants">{BUCKET_LABELS_VI.wants}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setAddDialogOpen(false)}>
+              Huỷ
+            </Button>
+            <Button type="button" onClick={handleCreateCategory}>
+              <Plus className="h-4 w-4" />
+              Thêm
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
