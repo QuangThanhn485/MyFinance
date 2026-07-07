@@ -197,7 +197,7 @@ export default function QuickTemplateEditorDrawer({
               <Textarea rows={3} placeholder="Ghi chú mẫu (tuỳ chọn)" {...form.register("note")} />
             </div>
 
-            <div className="flex flex-wrap justify-end gap-2 pt-2">
+            <div className="flex flex-wrap justify-end gap-2 pt-2 [&>button]:w-full sm:[&>button]:w-auto">
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
                 Hủy
               </Button>

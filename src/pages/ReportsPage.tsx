@@ -730,6 +730,16 @@ function formatPivotValue(value: number, metric: PivotMetric) {
   return formatVnd(Math.round(value))
 }
 
+function formatCompactVndTick(value: unknown) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return String(value ?? "")
+  const abs = Math.abs(n)
+  if (abs >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(abs >= 10_000_000_000 ? 0 : 1)} tỷ`
+  if (abs >= 1_000_000) return `${(n / 1_000_000).toFixed(abs >= 10_000_000 ? 0 : 1)}tr`
+  if (abs >= 1_000) return `${Math.round(n / 1_000)}k`
+  return new Intl.NumberFormat("vi-VN").format(Math.round(n))
+}
+
 function formatImpactRangeVndHint(input: {
   label: string
   baseVnd: number
@@ -1100,6 +1110,10 @@ export default function ReportsPage() {
   const [summaryOpen, setSummaryOpen] = useState(false)
   const [hiddenLegendKeys, setHiddenLegendKeys] = useState<Set<string>>(() => new Set())
   const [pivotSplitView, setPivotSplitView] = useState<"both" | "table" | "chart">("both")
+  const [isNarrowViewport, setIsNarrowViewport] = useState(() => {
+    if (typeof window === "undefined") return false
+    return window.matchMedia("(max-width: 639px)").matches
+  })
   const pivotSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
   )
@@ -1111,6 +1125,15 @@ export default function ReportsPage() {
   useEffect(() => {
     saveReportsConfig(config)
   }, [config])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const query = window.matchMedia("(max-width: 639px)")
+    const syncViewport = () => setIsNarrowViewport(query.matches)
+    syncViewport()
+    query.addEventListener("change", syncViewport)
+    return () => query.removeEventListener("change", syncViewport)
+  }, [])
 
   const allVariableExpenses = useMemo(
     () =>
@@ -1911,6 +1934,11 @@ export default function ReportsPage() {
 
   const monthTableRows = config.month.dataset === "categories" ? monthCategoryRows : monthBucketRows
   const monthTableTotal = monthTableRows.reduce((sum, row) => sum + row.value, 0)
+  const showChartLegend = !isNarrowViewport
+  const formatMoneyAxisTick = (value: unknown) =>
+    isNarrowViewport
+      ? formatCompactVndTick(value)
+      : new Intl.NumberFormat("vi-VN").format(Number(value))
   const dailyTableSeries =
     config.daily.visibleSeries.length > 0
       ? config.daily.visibleSeries
@@ -1935,8 +1963,10 @@ export default function ReportsPage() {
     "sm:w-[min(92vw,720px)] lg:w-[50vw] lg:min-w-[560px]",
   )
 
-  const pivotShowTable = pivotSplitView !== "chart"
-  const pivotShowChart = pivotSplitView !== "table"
+  const effectivePivotSplitView =
+    isNarrowViewport && pivotSplitView === "both" ? "table" : pivotSplitView
+  const pivotShowTable = effectivePivotSplitView !== "chart"
+  const pivotShowChart = effectivePivotSplitView !== "table"
 
   return (
     <div className="space-y-4">
@@ -2014,9 +2044,9 @@ export default function ReportsPage() {
 
           <div className="grid gap-3">
             <div className="rounded-lg border bg-background p-4">
-              <div className="flex items-start justify-between gap-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="text-sm font-medium">Tổng chi trong khoảng</div>
-                <div className="text-lg font-semibold whitespace-nowrap tabular-nums">
+                <div className="text-right text-base font-semibold tabular-nums sm:text-lg">
                   {formatVnd(totals.totalSpent)}
                 </div>
               </div>
@@ -2045,12 +2075,12 @@ export default function ReportsPage() {
             </div>
 
             <div className="rounded-lg border bg-background p-4">
-              <div className="flex items-start justify-between gap-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="text-sm font-medium">So với kỳ trước</div>
                 {hasPrev ? (
                   <div
                     className={cn(
-                      "text-lg font-semibold whitespace-nowrap tabular-nums",
+                      "text-right text-base font-semibold tabular-nums sm:text-lg",
                       delta > 0 ? "text-destructive" : "text-foreground",
                     )}
                   >
@@ -2916,7 +2946,7 @@ export default function ReportsPage() {
                   <Button
                     type="button"
                     size="sm"
-                    variant={pivotSplitView === "table" ? "secondary" : "ghost"}
+                    variant={effectivePivotSplitView === "table" ? "secondary" : "ghost"}
                     className="h-8 gap-2 px-2"
                     title="Chỉ xem bảng pivot"
                     onClick={() => setPivotSplitView("table")}
@@ -2927,8 +2957,8 @@ export default function ReportsPage() {
                   <Button
                     type="button"
                     size="sm"
-                    variant={pivotSplitView === "both" ? "secondary" : "ghost"}
-                    className="h-8 gap-2 px-2"
+                    variant={effectivePivotSplitView === "both" ? "secondary" : "ghost"}
+                    className="hidden h-8 gap-2 px-2 sm:inline-flex"
                     title="Chia đôi bảng + biểu đồ"
                     onClick={() => setPivotSplitView("both")}
                   >
@@ -2938,7 +2968,7 @@ export default function ReportsPage() {
                   <Button
                     type="button"
                     size="sm"
-                    variant={pivotSplitView === "chart" ? "secondary" : "ghost"}
+                    variant={effectivePivotSplitView === "chart" ? "secondary" : "ghost"}
                     className="h-8 gap-2 px-2"
                     title="Chỉ xem biểu đồ pivot"
                     onClick={() => setPivotSplitView("chart")}
@@ -3071,17 +3101,22 @@ export default function ReportsPage() {
                             cursor={false}
                             content={<ChartTooltipContent hideLabel />}
                           />
-                          <Legend {...monthLegendProps} payload={monthCategoryLegendPayload} />
+                          {showChartLegend ? (
+                            <Legend {...monthLegendProps} payload={monthCategoryLegendPayload} />
+                          ) : null}
                           <Pie
                             data={monthCategoryChartRows}
                             dataKey="value"
                             nameKey="name"
                             cx="50%"
                             cy="50%"
-                            outerRadius={110}
+                            outerRadius={isNarrowViewport ? 86 : 110}
                             labelLine={false}
-                            label={(p) =>
-                              `${shortenLabel(String(p.name), 12)} ${(p.percent * 100).toFixed(0)}%`
+                            label={
+                              isNarrowViewport
+                                ? false
+                                : (p) =>
+                                    `${shortenLabel(String(p.name), 12)} ${(p.percent * 100).toFixed(0)}%`
                             }
                           >
                             {monthCategoryChartRows.map((entry) => (
@@ -3099,20 +3134,19 @@ export default function ReportsPage() {
                           margin={{ left: 8, right: 16, top: 8, bottom: 8 }}
                         >
                           <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                          <XAxis
-                            type="number"
-                            tickFormatter={(v) =>
-                              new Intl.NumberFormat("vi-VN").format(Number(v))
-                            }
-                          />
+                          <XAxis type="number" tickFormatter={formatMoneyAxisTick} />
                           <YAxis
                             type="category"
                             dataKey="name"
-                            width={130}
-                            tickFormatter={(v) => shortenLabel(String(v), 18)}
+                            width={isNarrowViewport ? 88 : 130}
+                            tickFormatter={(v) =>
+                              shortenLabel(String(v), isNarrowViewport ? 10 : 18)
+                            }
                           />
                           <Tooltip content={<ChartTooltipContent />} />
-                          <Legend {...monthLegendProps} payload={monthCategoryLegendPayload} />
+                          {showChartLegend ? (
+                            <Legend {...monthLegendProps} payload={monthCategoryLegendPayload} />
+                          ) : null}
                           <Bar dataKey="value" name="VND" radius={[0, 6, 6, 0]}>
                             {monthCategoryChartRows.map((entry) => (
                               <Cell
@@ -3135,17 +3169,22 @@ export default function ReportsPage() {
                           cursor={false}
                           content={<ChartTooltipContent hideLabel />}
                         />
-                        <Legend {...monthLegendProps} payload={monthBucketLegendPayload} />
+                        {showChartLegend ? (
+                          <Legend {...monthLegendProps} payload={monthBucketLegendPayload} />
+                        ) : null}
                         <Pie
                           data={monthBucketChartRows}
                           dataKey="value"
                           nameKey="name"
                           cx="50%"
                           cy="50%"
-                          outerRadius={110}
+                          outerRadius={isNarrowViewport ? 86 : 110}
                           labelLine={false}
-                          label={(p) =>
-                            `${shortenLabel(String(p.name), 12)} ${(p.percent * 100).toFixed(0)}%`
+                          label={
+                            isNarrowViewport
+                              ? false
+                              : (p) =>
+                                  `${shortenLabel(String(p.name), 12)} ${(p.percent * 100).toFixed(0)}%`
                           }
                         >
                           {monthBucketChartRows.map((entry) => (
@@ -3161,15 +3200,15 @@ export default function ReportsPage() {
                         <CartesianGrid {...chartGridProps} />
                         <XAxis
                           dataKey="name"
-                          tickFormatter={(v) => shortenLabel(String(v), 14)}
-                        />
-                        <YAxis
                           tickFormatter={(v) =>
-                            new Intl.NumberFormat("vi-VN").format(Number(v))
+                            shortenLabel(String(v), isNarrowViewport ? 8 : 14)
                           }
                         />
+                        <YAxis tickFormatter={formatMoneyAxisTick} />
                         <Tooltip content={<ChartTooltipContent />} />
-                        <Legend {...monthLegendProps} payload={monthBucketLegendPayload} />
+                        {showChartLegend ? (
+                          <Legend {...monthLegendProps} payload={monthBucketLegendPayload} />
+                        ) : null}
                         <Bar dataKey="value" name="VND" radius={[6, 6, 0, 0]}>
                           {monthBucketChartRows.map((entry) => (
                             <Cell
@@ -3322,11 +3361,7 @@ export default function ReportsPage() {
                       >
                         <CartesianGrid {...chartGridProps} />
                         <XAxis dataKey="label" tickFormatter={(v) => String(v)} />
-                        <YAxis
-                          tickFormatter={(v) =>
-                            new Intl.NumberFormat("vi-VN").format(Number(v))
-                          }
-                        />
+                        <YAxis tickFormatter={formatMoneyAxisTick} />
                         <Tooltip
                           cursor={false}
                           content={
@@ -3335,7 +3370,7 @@ export default function ReportsPage() {
                             />
                           }
                         />
-                        <Legend {...interactiveLegendProps} />
+                        {showChartLegend ? <Legend {...interactiveLegendProps} /> : null}
                         {showDailyNeeds ? (
                           <Bar
                             dataKey="needs"
@@ -3397,11 +3432,7 @@ export default function ReportsPage() {
                       >
                         <CartesianGrid {...chartGridProps} />
                         <XAxis dataKey="label" tickFormatter={(v) => String(v)} />
-                        <YAxis
-                          tickFormatter={(v) =>
-                            new Intl.NumberFormat("vi-VN").format(Number(v))
-                          }
-                        />
+                        <YAxis tickFormatter={formatMoneyAxisTick} />
                         <Tooltip
                           cursor={false}
                           content={
@@ -3410,7 +3441,7 @@ export default function ReportsPage() {
                             />
                           }
                         />
-                        <Legend {...interactiveLegendProps} />
+                        {showChartLegend ? <Legend {...interactiveLegendProps} /> : null}
                         {config.daily.visibleSeries.map((k) => (
                           <Area
                             key={k}
@@ -3444,11 +3475,7 @@ export default function ReportsPage() {
                       >
                         <CartesianGrid {...chartGridProps} />
                         <XAxis dataKey="label" tickFormatter={(v) => String(v)} />
-                        <YAxis
-                          tickFormatter={(v) =>
-                            new Intl.NumberFormat("vi-VN").format(Number(v))
-                          }
-                        />
+                        <YAxis tickFormatter={formatMoneyAxisTick} />
                         <Tooltip
                           cursor={false}
                           content={
@@ -3457,7 +3484,7 @@ export default function ReportsPage() {
                             />
                           }
                         />
-                        <Legend {...interactiveLegendProps} />
+                        {showChartLegend ? <Legend {...interactiveLegendProps} /> : null}
                         {config.daily.visibleSeries.map((k) => (
                           <Line
                             key={k}
@@ -3636,11 +3663,7 @@ export default function ReportsPage() {
                           dataKey="month"
                           tickFormatter={(v) => formatMonthLabel(v as YearMonth)}
                         />
-                        <YAxis
-                          tickFormatter={(v) =>
-                            new Intl.NumberFormat("vi-VN").format(Number(v))
-                          }
-                        />
+                        <YAxis tickFormatter={formatMoneyAxisTick} />
                         <Tooltip
                           content={
                             <ChartTooltipContent
@@ -3648,7 +3671,7 @@ export default function ReportsPage() {
                             />
                           }
                         />
-                        <Legend {...interactiveLegendProps} />
+                        {showChartLegend ? <Legend {...interactiveLegendProps} /> : null}
                         {config.trend.visibleSeries.includes("balance") && !isLegendKeyHidden("balance") ? (
                           <ReferenceLine
                             y={0}
@@ -3674,11 +3697,7 @@ export default function ReportsPage() {
                           dataKey="month"
                           tickFormatter={(v) => formatMonthLabel(v as YearMonth)}
                         />
-                        <YAxis
-                          tickFormatter={(v) =>
-                            new Intl.NumberFormat("vi-VN").format(Number(v))
-                          }
-                        />
+                        <YAxis tickFormatter={formatMoneyAxisTick} />
                         <Tooltip
                           content={
                             <ChartTooltipContent
@@ -3686,7 +3705,7 @@ export default function ReportsPage() {
                             />
                           }
                         />
-                        <Legend {...interactiveLegendProps} />
+                        {showChartLegend ? <Legend {...interactiveLegendProps} /> : null}
                         {config.trend.visibleSeries.includes("balance") && !isLegendKeyHidden("balance") ? (
                           <ReferenceLine
                             y={0}
@@ -3714,11 +3733,7 @@ export default function ReportsPage() {
                           dataKey="month"
                           tickFormatter={(v) => formatMonthLabel(v as YearMonth)}
                         />
-                        <YAxis
-                          tickFormatter={(v) =>
-                            new Intl.NumberFormat("vi-VN").format(Number(v))
-                          }
-                        />
+                        <YAxis tickFormatter={formatMoneyAxisTick} />
                         <Tooltip
                           content={
                             <ChartTooltipContent
@@ -3726,7 +3741,7 @@ export default function ReportsPage() {
                             />
                           }
                         />
-                        <Legend {...interactiveLegendProps} />
+                        {showChartLegend ? <Legend {...interactiveLegendProps} /> : null}
                         {config.trend.visibleSeries.includes("balance") && !isLegendKeyHidden("balance") ? (
                           <ReferenceLine
                             y={0}
@@ -4077,12 +4092,13 @@ export default function ReportsPage() {
                               margin={{ left: 8, right: 16, top: 8, bottom: 8 }}
                             >
                               <CartesianGrid {...chartGridProps} />
-                              <XAxis dataKey="name" />
-                              <YAxis
+                              <XAxis
+                                dataKey="name"
                                 tickFormatter={(v) =>
-                                  new Intl.NumberFormat("vi-VN").format(Number(v))
+                                  isNarrowViewport ? shortenLabel(String(v), 8) : String(v)
                                 }
                               />
+                              <YAxis tickFormatter={formatMoneyAxisTick} />
                               <Tooltip
                                 cursor={false}
                                 content={
@@ -4096,9 +4112,10 @@ export default function ReportsPage() {
                                   />
                                 }
                               />
-                              {pivotChartSeries.length > 1 ||
-                              showPivotDynamicDailyCapLine ||
-                              showPivotBaseDailyCap ? (
+                              {showChartLegend &&
+                              (pivotChartSeries.length > 1 ||
+                                showPivotDynamicDailyCapLine ||
+                                showPivotBaseDailyCap) ? (
                                 <Legend
                                   {...chartLegendProps}
                                   onClick={(entry: { dataKey?: unknown; value?: unknown }) => {
@@ -4164,12 +4181,13 @@ export default function ReportsPage() {
                               margin={{ left: 8, right: 16, top: 8, bottom: 8 }}
                             >
                               <CartesianGrid {...chartGridProps} />
-                              <XAxis dataKey="name" />
-                              <YAxis
+                              <XAxis
+                                dataKey="name"
                                 tickFormatter={(v) =>
-                                  new Intl.NumberFormat("vi-VN").format(Number(v))
+                                  isNarrowViewport ? shortenLabel(String(v), 8) : String(v)
                                 }
                               />
+                              <YAxis tickFormatter={formatMoneyAxisTick} />
                               <Tooltip
                                 cursor={false}
                                 content={
@@ -4183,9 +4201,10 @@ export default function ReportsPage() {
                                   />
                                 }
                               />
-                              {pivotChartSeries.length > 1 ||
-                              showPivotDynamicDailyCapLine ||
-                              showPivotBaseDailyCap ? (
+                              {showChartLegend &&
+                              (pivotChartSeries.length > 1 ||
+                                showPivotDynamicDailyCapLine ||
+                                showPivotBaseDailyCap) ? (
                                 <Legend
                                   {...chartLegendProps}
                                   onClick={(entry: { dataKey?: unknown; value?: unknown }) => {
@@ -4249,12 +4268,13 @@ export default function ReportsPage() {
                               margin={{ left: 8, right: 16, top: 8, bottom: 8 }}
                             >
                               <CartesianGrid {...chartGridProps} />
-                              <XAxis dataKey="name" />
-                              <YAxis
+                              <XAxis
+                                dataKey="name"
                                 tickFormatter={(v) =>
-                                  new Intl.NumberFormat("vi-VN").format(Number(v))
+                                  isNarrowViewport ? shortenLabel(String(v), 8) : String(v)
                                 }
                               />
+                              <YAxis tickFormatter={formatMoneyAxisTick} />
                               <Tooltip
                                 cursor={false}
                                 content={
@@ -4268,9 +4288,10 @@ export default function ReportsPage() {
                                   />
                                 }
                               />
-                              {pivotChartSeries.length > 1 ||
-                              showPivotDynamicDailyCapLine ||
-                              showPivotBaseDailyCap ? (
+                              {showChartLegend &&
+                              (pivotChartSeries.length > 1 ||
+                                showPivotDynamicDailyCapLine ||
+                                showPivotBaseDailyCap) ? (
                                 <Legend
                                   {...chartLegendProps}
                                   onClick={(entry: { dataKey?: unknown; value?: unknown }) => {

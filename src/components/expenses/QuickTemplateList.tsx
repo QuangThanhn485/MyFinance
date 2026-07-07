@@ -280,7 +280,7 @@ export default function QuickTemplateList({
                         <div className="truncate text-sm font-medium" title={template.name}>
                           {template.name}
                         </div>
-                        <div className="whitespace-nowrap text-sm font-semibold tabular-nums">
+                        <div className="max-w-[8rem] truncate text-right text-sm font-semibold tabular-nums">
                           {formatVnd(template.amount)}
                         </div>
                       </div>

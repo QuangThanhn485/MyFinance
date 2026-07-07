@@ -827,7 +827,7 @@ export default function SettingsPage() {
                 />
               )}
             </div>
-            <div className="flex flex-wrap justify-end gap-2">
+            <div className="flex flex-wrap justify-end gap-2 [&>button]:w-full sm:[&>button]:w-auto">
               <Button type="button" variant="outline" onClick={() => setFundDialogType(null)}>
                 Huỷ
               </Button>
@@ -880,7 +880,7 @@ export default function SettingsPage() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="flex flex-wrap justify-end gap-2">
+            <div className="flex flex-wrap justify-end gap-2 [&>button]:w-full sm:[&>button]:w-auto">
               <Button type="button" variant="outline" onClick={() => setCreateFixedCostOpen(false)}>
                 Huỷ
               </Button>
@@ -910,7 +910,7 @@ export default function SettingsPage() {
               <Label>Số tiền (VND)</Label>
               <MoneyInput value={editingAmountVnd} onValueChange={setEditingAmountVnd} placeholder="Ví dụ: 1.200.000" />
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2 [&>button]:w-full sm:[&>button]:w-auto">
               <Button
                 onClick={() => {
                   if (!editingAmountId) return

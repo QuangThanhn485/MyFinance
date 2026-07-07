@@ -1035,7 +1035,7 @@ export default function ExpensesPage() {
                   </div>
                   <div
                     className={cn(
-                      "text-2xl font-semibold tabular-nums",
+                      "break-words text-xl font-semibold tabular-nums sm:text-2xl",
                       capForNextDay && "text-amber-700 dark:text-amber-400",
                       shownDailyTotalCapVnd <= 0 && "text-destructive",
                     )}
@@ -1379,7 +1379,7 @@ export default function ExpensesPage() {
               </div>
             </div>
 
-            <div className="flex flex-wrap justify-end gap-2 pt-1">
+            <div className="flex flex-wrap justify-end gap-2 pt-1 [&>button]:w-full sm:[&>button]:w-auto">
               <Button type="button" variant="outline" onClick={() => setAddExpenseDialogOpen(false)}>
                 Huỷ
               </Button>
@@ -1534,7 +1534,7 @@ export default function ExpensesPage() {
                 <Label>Ghi chú</Label>
                 <Textarea rows={3} {...editForm.register("note")} />
               </div>
-              <div className="flex flex-wrap justify-end gap-2">
+              <div className="flex flex-wrap justify-end gap-2 [&>button]:w-full sm:[&>button]:w-auto">
                 <Button type="button" variant="outline" onClick={() => setEditingId(null)}>
                   Hủy
                 </Button>
@@ -1650,7 +1650,7 @@ export default function ExpensesPage() {
               })}
             </div>
 
-            <div className="flex flex-wrap justify-end gap-2 pt-1">
+            <div className="flex flex-wrap justify-end gap-2 pt-1 [&>button]:w-full sm:[&>button]:w-auto">
               <Button variant="outline" onClick={() => setHealthDialogOpen(false)}>
                 Đóng
               </Button>
