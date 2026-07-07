@@ -924,7 +924,7 @@ export default function ExpensesPage() {
     <div
       ref={rootRef}
       style={pageHeight ? { height: pageHeight } : undefined}
-      className="flex flex-col gap-3 overflow-hidden"
+      className="flex flex-col gap-3 lg:overflow-hidden"
     >
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
@@ -933,8 +933,8 @@ export default function ExpensesPage() {
             Bố cục một màn hình: thống kê, thêm chi tiêu và danh sách trong ngày.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="w-[170px] sm:w-[200px]">
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+          <div className="min-w-[170px] flex-1 sm:w-[200px] sm:flex-none">
             <DatePicker
               value={selectedDate}
               onChange={(value) => value && setSelectedDate(value)}
@@ -982,8 +982,8 @@ export default function ExpensesPage() {
         </div>
       ) : null}
 
-      <div className="flex-1 min-h-0 overflow-hidden">
-        <div className="h-full flex flex-col gap-3 lg:flex-row">
+      <div className="lg:flex-1 lg:min-h-0 lg:overflow-hidden">
+        <div className="flex flex-col gap-3 lg:h-full lg:flex-row">
           <div
             style={panelStyle(statsCollapsed, 0.9)}
             className="min-h-0 transition-[flex-basis,min-width,max-width] duration-200 ease-out lg:order-3"
@@ -994,9 +994,9 @@ export default function ExpensesPage() {
               collapsed={statsCollapsed}
               onToggle={() => setStatsCollapsed((prev) => !prev)}
               summary={`Hôm nay: ${formatVnd(dailyTotal)}`}
-              contentClassName="h-full min-h-0"
+              contentClassName="lg:h-full lg:min-h-0"
             >
-              <div className="h-full overflow-y-auto pr-1 text-sm space-y-3">
+              <div className="space-y-3 text-sm lg:h-full lg:overflow-y-auto lg:pr-1">
                 {/* Nhịp chi gần đây */}
                 <div className="space-y-1.5">
                   <LabelValueRow label="Chi ngày này" value={formatVnd(dailyTotal)} />
@@ -1095,7 +1095,7 @@ export default function ExpensesPage() {
               collapsed={addCollapsed}
               onToggle={() => setAddCollapsed((prev) => !prev)}
               summary={`${sortedTemplates.length} item thêm nhanh`}
-              contentClassName="h-full min-h-0"
+              contentClassName="lg:h-full lg:min-h-0"
               headerActions={
                 <div className="flex items-center gap-1">
                   <Button
@@ -1131,7 +1131,7 @@ export default function ExpensesPage() {
                 </div>
               }
             >
-              <div className="h-full min-h-0">
+              <div className="lg:h-full lg:min-h-0">
                 <QuickTemplateList
                   templates={sortedTemplates}
                   categories={categoryOptions}
@@ -1179,19 +1179,19 @@ export default function ExpensesPage() {
               collapsed={listCollapsed}
               onToggle={() => setListCollapsed((prev) => !prev)}
               summary={`${expensesToday.length} item • ${formatVnd(dailyTotal)}`}
-              contentClassName="h-full min-h-0"
+              contentClassName="lg:h-full lg:min-h-0"
               headerActions={
                 selectedMonthLocked ? (
                   <Badge variant="outline">Đã chốt tháng</Badge>
                 ) : null
               }
             >
-              <div className="h-full min-h-0 flex flex-col">
+              <div className="flex flex-col lg:h-full lg:min-h-0">
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 pb-2">
                   <span className="truncate text-sm text-muted-foreground">Ngày {selectedDate}</span>
                   <span className="whitespace-nowrap font-semibold tabular-nums">{formatVnd(dailyTotal)}</span>
                 </div>
-                <div ref={listScrollRef} className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-2">
+                <div ref={listScrollRef} className="space-y-2 lg:flex-1 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
                   {expensesToday.length === 0 ? (
                     <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
                       Chưa có chi tiêu nào cho ngày này.
@@ -1211,7 +1211,7 @@ export default function ExpensesPage() {
                             highlightExpenseId === expense.id && "border-primary/40 bg-primary/5 ring-1 ring-primary/20",
                           )}
                         >
-                          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
+                          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
                             <div className="min-w-0">
                               <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
                                 <span className="truncate text-sm text-muted-foreground" title={expense.note || "Không có ghi chú"}>
@@ -1225,7 +1225,7 @@ export default function ExpensesPage() {
                                 {categoryLabel(expense.category)} • {BUCKET_LABELS_VI[expense.bucket]}
                               </div>
                             </div>
-                            <div className="flex gap-1">
+                            <div className="flex flex-wrap justify-end gap-1 sm:flex-nowrap">
                               <Button
                                 type="button"
                                 size="sm"
@@ -1534,7 +1534,7 @@ export default function ExpensesPage() {
                 <Label>Ghi chú</Label>
                 <Textarea rows={3} {...editForm.register("note")} />
               </div>
-              <div className="flex justify-end gap-2">
+              <div className="flex flex-wrap justify-end gap-2">
                 <Button type="button" variant="outline" onClick={() => setEditingId(null)}>
                   Hủy
                 </Button>
@@ -1650,7 +1650,7 @@ export default function ExpensesPage() {
               })}
             </div>
 
-            <div className="flex justify-end gap-2 pt-1">
+            <div className="flex flex-wrap justify-end gap-2 pt-1">
               <Button variant="outline" onClick={() => setHealthDialogOpen(false)}>
                 Đóng
               </Button>

@@ -426,7 +426,7 @@ export default function SettingsPage() {
 
         <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="flex items-center justify-between gap-2">
+              <CardTitle className="flex flex-wrap items-center justify-between gap-2">
                 <span>Cấu hình tháng {selectedMonth}</span>
                 {selectedMonthLocked ? (
                   <span className="text-xs text-muted-foreground">Đã chốt (vẫn có thể chỉnh chuẩn hoá)</span>
@@ -613,7 +613,7 @@ export default function SettingsPage() {
                 />
               </div>
 
-              <div className="mt-3 grid max-h-56 gap-2 overflow-y-auto pr-1">
+              <div className="mt-3 grid gap-2 pr-1 sm:max-h-56 sm:overflow-y-auto">
                 {emergencyFundSummary.transactions.length === 0 ? (
                   <div className="rounded-md border border-dashed bg-background p-3 text-muted-foreground">
                     Chưa có biến động quỹ trong tháng này.
@@ -663,9 +663,9 @@ export default function SettingsPage() {
 
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="flex items-center justify-between gap-2">
+            <CardTitle className="flex flex-wrap items-center justify-between gap-2">
               <span>Chi phí cố định • {selectedMonth}</span>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs text-muted-foreground">{fixedCosts.length} khoản</span>
                 <Button
                   type="button"
@@ -680,7 +680,7 @@ export default function SettingsPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid max-h-[calc(100vh-180px)] gap-2 overflow-y-auto pr-1">
+            <div className="grid gap-2 pr-1 lg:max-h-[calc(100vh-180px)] lg:overflow-y-auto">
               {fixedCosts.length === 0 ? (
                 <div className="space-y-3 rounded-md border border-dashed p-3 text-sm text-muted-foreground">
                   <div>Tháng này chưa có chi phí cố định.</div>
@@ -709,14 +709,14 @@ export default function SettingsPage() {
               ) : (
                 fixedCosts.map((fc) => (
                   <div key={fc.id} className="rounded-md border p-3">
-                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
+                    <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
                       <div className="min-w-0">
                         <div className="truncate font-medium" title={fc.name}>{fc.name}</div>
                         <div className="text-sm text-muted-foreground">
                           {formatVnd(fc.amountVnd)} • {categoryLabel(fc.category)}
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center justify-end gap-2">
                         <Switch
                           checked={fc.active}
                           onCheckedChange={(checked) => updateFixedCost(fc.id, { active: checked })}
@@ -743,7 +743,7 @@ export default function SettingsPage() {
                         </Button>
                       </div>
                     </div>
-                    <div className="mt-2 w-[180px]">
+                    <div className="mt-2 w-full sm:w-[180px]">
                       <Select
                         value={fc.category}
                         onValueChange={(v) => updateFixedCost(fc.id, { category: v as ExpenseCategory })}
@@ -827,7 +827,7 @@ export default function SettingsPage() {
                 />
               )}
             </div>
-            <div className="flex justify-end gap-2">
+            <div className="flex flex-wrap justify-end gap-2">
               <Button type="button" variant="outline" onClick={() => setFundDialogType(null)}>
                 Huỷ
               </Button>
@@ -880,7 +880,7 @@ export default function SettingsPage() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="flex justify-end gap-2">
+            <div className="flex flex-wrap justify-end gap-2">
               <Button type="button" variant="outline" onClick={() => setCreateFixedCostOpen(false)}>
                 Huỷ
               </Button>
@@ -910,7 +910,7 @@ export default function SettingsPage() {
               <Label>Số tiền (VND)</Label>
               <MoneyInput value={editingAmountVnd} onValueChange={setEditingAmountVnd} placeholder="Ví dụ: 1.200.000" />
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button
                 onClick={() => {
                   if (!editingAmountId) return

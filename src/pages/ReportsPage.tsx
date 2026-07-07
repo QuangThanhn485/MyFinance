@@ -1924,10 +1924,16 @@ export default function ReportsPage() {
     "left-0 right-0 bottom-0 top-auto translate-x-0 translate-y-0 w-full max-w-none max-h-[85dvh] rounded-t-xl border-0 border-t p-4 data-[state=open]:[--tw-enter-scale:1] data-[state=closed]:[--tw-exit-scale:1] sm:left-auto sm:right-0 sm:top-0 sm:bottom-auto sm:h-dvh sm:max-h-none sm:rounded-none sm:rounded-l-xl sm:border-l sm:border-t-0 sm:p-6 data-[state=open]:slide-in-from-bottom-2 sm:data-[state=open]:slide-in-from-right-2 data-[state=closed]:slide-out-to-bottom-2 sm:data-[state=closed]:slide-out-to-right-2"
   const controlsPanelClassName = cn(
     panelBaseClassName,
-    "p-3 sm:p-4 sm:w-[50vw] sm:min-w-[560px]",
+    "p-3 sm:w-[min(92vw,720px)] sm:p-4 lg:w-[50vw] lg:min-w-[560px]",
   )
-  const insightsPanelClassName = cn(panelBaseClassName, "sm:w-[80vw] sm:min-w-[720px]")
-  const summaryPanelClassName = cn(panelBaseClassName, "sm:w-[50vw] sm:min-w-[560px]")
+  const insightsPanelClassName = cn(
+    panelBaseClassName,
+    "sm:w-[min(92vw,960px)] lg:w-[80vw] lg:min-w-[720px]",
+  )
+  const summaryPanelClassName = cn(
+    panelBaseClassName,
+    "sm:w-[min(92vw,720px)] lg:w-[50vw] lg:min-w-[560px]",
+  )
 
   const pivotShowTable = pivotSplitView !== "chart"
   const pivotShowChart = pivotSplitView !== "table"
@@ -1967,7 +1973,7 @@ export default function ReportsPage() {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 sm:justify-end shrink-0">
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end sm:shrink-0">
           <DateRangePicker
             value={dateRange}
             onChange={setDateRange}
@@ -2592,14 +2598,14 @@ export default function ReportsPage() {
                   onDragEnd={handlePivotDragEnd}
                 >
                   <div className="rounded-lg border bg-muted/5 p-3 space-y-3">
-                  <div className="flex items-start justify-between gap-3">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0 space-y-1">
                       <div className="text-sm font-semibold">Bố cục Pivot</div>
                       <div className="text-xs text-muted-foreground">
                         Kéo chip vào Hàng/Cột. Kéo để đổi thứ tự.
                       </div>
                     </div>
-                    <div className="flex items-center gap-1">
+                    <div className="flex flex-wrap items-center gap-1 sm:justify-end">
                       <Button
                         type="button"
                         variant="outline"
@@ -2728,7 +2734,7 @@ export default function ReportsPage() {
                       Hàng = {pivotRowSummaryText} • Cột = {pivotColumnSummaryText}
                     </div>
 
-                    <div className="flex items-center justify-between gap-3 rounded-md border bg-background/70 px-3 py-2">
+                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-background/70 px-3 py-2">
                       <div className="flex min-w-0 items-center gap-2">
                         <Checkbox
                           id="pivot-color-by-amount"
@@ -2791,8 +2797,8 @@ export default function ReportsPage() {
               }))
             }
           >
-            <div className="flex items-center gap-2">
-              <div className="flex-1 overflow-x-auto pb-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="min-w-0 flex-[1_1_180px] overflow-x-auto pb-1">
                 <TabsList className="w-max justify-start">
                   <TabsTrigger value="month">Phân bổ</TabsTrigger>
                   <TabsTrigger value="daily">Theo ngày</TabsTrigger>
@@ -3053,7 +3059,7 @@ export default function ReportsPage() {
               */}
 
               <div className="grid gap-4 lg:grid-cols-2">
-                <div className="h-[320px]">
+                <div className="h-[280px] sm:h-[320px]">
                 {config.month.dataset === "categories" ? (
                   monthCategoryRows.length === 0 ? (
                     <ChartEmptyState />
@@ -3304,7 +3310,7 @@ export default function ReportsPage() {
               */}
 
               <div className="grid gap-4 lg:grid-cols-2">
-                <div className="h-[320px]">
+                <div className="h-[280px] sm:h-[320px]">
                 {dailyData.every((r) => r.total === 0 && r.needs === 0 && r.wants === 0) ? (
                   <ChartEmptyState />
                 ) : (
@@ -3618,7 +3624,7 @@ export default function ReportsPage() {
               */}
 
               <div className="grid gap-4 lg:grid-cols-2">
-                <div className="h-[320px]">
+                <div className="h-[280px] sm:h-[320px]">
                 {trendData.every((r) => r.totalSpent === 0 && r.variableSpent === 0 && r.fixedCosts === 0) ? (
                   <ChartEmptyState />
                 ) : (
@@ -3804,7 +3810,7 @@ export default function ReportsPage() {
                 {pivotShowTable ? (
                   <Card>
                     <CardContent className="p-3 space-y-2">
-                      <div className="flex items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="text-base font-semibold">Bảng pivot</div>
                       </div>
 
@@ -4020,10 +4026,10 @@ export default function ReportsPage() {
                 {pivotShowChart ? (
                   <Card>
                     <CardContent className="p-3 space-y-2">
-                      <div className="flex items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="text-base font-semibold">Biểu đồ pivot</div>
                         {pivotHasColumns ? (
-                          <div className="flex items-center gap-2">
+                          <div className="flex flex-wrap items-center gap-2">
                             <Button
                               type="button"
                               size="sm"
@@ -4060,7 +4066,7 @@ export default function ReportsPage() {
                           ) : null}
                         </div>
                       ) : null}
-                    <div className="h-[460px]">
+                    <div className="h-[320px] sm:h-[460px]">
                       {pivotChartData.length === 0 ? (
                         <ChartEmptyState className="min-h-[320px]" />
                       ) : (

@@ -75,7 +75,7 @@ export default function AppLayout() {
 
           <Dialog open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
             <DialogContent
-              className="left-0 top-0 h-viewport w-[280px] max-w-[85vw] translate-x-0 translate-y-0 rounded-none border-0 p-0 sm:max-w-[85vw]"
+              className="left-0 top-0 h-viewport max-h-none w-[280px] max-w-[85vw] translate-x-0 translate-y-0 overflow-hidden rounded-none border-0 p-0 sm:max-w-[85vw]"
               aria-label="Menu"
             >
               <SideNav

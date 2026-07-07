@@ -96,16 +96,16 @@ export default function QuickTemplateEditorDrawer({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="left-auto right-0 top-0 h-viewport w-full max-w-lg translate-x-0 translate-y-0 rounded-none border-l p-0">
+      <DialogContent className="left-auto right-0 top-0 h-viewport max-h-none w-full max-w-lg translate-x-0 translate-y-0 overflow-hidden rounded-none border-l p-0">
         <div className="flex h-full min-h-0 flex-col">
-          <DialogHeader className="border-b px-6 py-4">
+          <DialogHeader className="border-b px-4 py-4 sm:px-6">
             <DialogTitle>
               {mode === "create" ? "Thêm item nhanh" : "Sửa item nhanh"}
             </DialogTitle>
           </DialogHeader>
 
           <form
-            className="flex-1 min-h-0 overflow-y-auto px-6 py-4 space-y-4"
+            className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-4 sm:px-6"
             onSubmit={form.handleSubmit((values) => {
               onSave({
                 name: values.name.trim(),
@@ -197,7 +197,7 @@ export default function QuickTemplateEditorDrawer({
               <Textarea rows={3} placeholder="Ghi chú mẫu (tuỳ chọn)" {...form.register("note")} />
             </div>
 
-            <div className="flex justify-end gap-2 pt-2">
+            <div className="flex flex-wrap justify-end gap-2 pt-2">
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
                 Hủy
               </Button>

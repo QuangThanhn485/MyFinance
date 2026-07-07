@@ -29,8 +29,8 @@ export default function CollapsibleCard({
 }: CollapsibleCardProps) {
   if (collapsed) {
     return (
-      <Card className={cn("h-full min-h-0", className)}>
-        <div className="flex h-full min-h-0 flex-col items-center gap-2 px-1 py-2">
+      <Card className={cn("min-h-0 lg:h-full", className)}>
+        <div className="flex min-h-0 items-center gap-3 px-3 py-2 lg:h-full lg:flex-col lg:gap-2 lg:px-1">
           <Button
             type="button"
             variant="ghost"
@@ -44,7 +44,14 @@ export default function CollapsibleCard({
             <PanelLeftOpen className="h-4 w-4" />
           </Button>
 
-          <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 overflow-hidden">
+          <div className="min-w-0 flex-1 lg:hidden">
+            <div className="truncate text-sm font-semibold">{title}</div>
+            {summary ? (
+              <div className="truncate text-xs text-muted-foreground">{summary}</div>
+            ) : null}
+          </div>
+
+          <div className="hidden min-h-0 flex-1 flex-col items-center justify-center gap-2 overflow-hidden lg:flex">
             {icon ? (
               <span className="text-muted-foreground [&>svg]:h-4 [&>svg]:w-4">{icon}</span>
             ) : null}
@@ -65,7 +72,7 @@ export default function CollapsibleCard({
   }
 
   return (
-    <Card className={cn("h-full min-h-0 flex flex-col", className)}>
+    <Card className={cn("flex min-h-0 flex-col lg:h-full", className)}>
       <CardHeader className="py-3 px-4">
         <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
           <div className="flex min-w-0 items-center gap-2">
@@ -89,7 +96,7 @@ export default function CollapsibleCard({
           </div>
         </div>
       </CardHeader>
-      <CardContent className={cn("flex-1 min-h-0 px-4 pb-4", contentClassName)}>
+      <CardContent className={cn("px-4 pb-4 lg:flex-1 lg:min-h-0", contentClassName)}>
         {children}
       </CardContent>
     </Card>

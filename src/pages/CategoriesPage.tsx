@@ -142,7 +142,7 @@ export default function CategoriesPage() {
             Quản lý danh mục dùng trong chi tiêu, chi phí cố định và mẫu thêm nhanh.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <div className="hidden items-center gap-1.5 rounded-md border bg-muted/30 px-3 py-1.5 text-xs sm:flex">
             <span className="tabular-nums font-semibold">{categoryOptions.length}</span>
             <span className="text-muted-foreground">tổng</span>
@@ -202,7 +202,7 @@ export default function CategoriesPage() {
               Không có danh mục phù hợp với bộ lọc hiện tại.
             </div>
           ) : (
-            <div className="max-h-[calc(100vh-360px)] space-y-1.5 overflow-y-auto pr-1">
+            <div className="space-y-1.5 pr-1 md:max-h-[calc(100vh-360px)] md:overflow-y-auto">
               {rows.map(({ category, usage, used }) => {
                 const isLastCategory = categoryOptions.length <= 1
                 const isEditing = editingCategoryId === category.id

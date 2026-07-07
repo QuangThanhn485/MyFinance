@@ -86,7 +86,7 @@ function KpiCard({
       <div className="text-[11px] font-medium text-muted-foreground truncate">{label}</div>
       <div
         className={cn(
-          "mt-1 text-xl font-semibold tracking-tight tabular-nums whitespace-nowrap",
+          "mt-1 break-words text-lg font-semibold tracking-tight tabular-nums sm:text-xl",
           danger && "text-destructive",
         )}
       >
@@ -135,7 +135,7 @@ function LegendRow({
           {pctIncome.toFixed(0)}%
         </span>
       ) : null}
-      <span className={cn("w-28 shrink-0 text-right font-medium tabular-nums", valueClassName)}>
+      <span className={cn("w-24 shrink-0 text-right font-medium tabular-nums sm:w-28", valueClassName)}>
         {formatVnd(value)}
       </span>
     </div>
@@ -210,11 +210,11 @@ function BudgetHeader({
   compactMode: boolean
 }) {
   return (
-    <div className="sticky top-14 md:top-0 z-30 -mx-3 sm:-mx-4 lg:-mx-6">
+    <div className="z-30 -mx-3 sm:-mx-4 md:sticky md:top-0 lg:-mx-6">
       <div className="border-b bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div
           className={cn(
-            "flex items-center justify-between gap-3 px-3 sm:px-4 lg:px-6",
+            "flex flex-col items-start gap-3 px-3 sm:flex-row sm:items-center sm:justify-between sm:px-4 lg:px-6",
             compactMode ? "py-2.5" : "py-3",
           )}
         >
@@ -234,7 +234,7 @@ function BudgetHeader({
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
             <div className="hidden sm:block text-xs text-muted-foreground">Tháng</div>
             <MonthPicker value={month} onChange={onMonthChange} className="w-[140px]" />
             <Button
@@ -306,7 +306,7 @@ function AllocationCard({
     <Card>
       <CardHeader
         className={cn(
-          "flex-row items-start justify-between gap-2",
+          "flex-row flex-wrap items-start justify-between gap-2",
           compactMode ? "pb-2" : "pb-3",
         )}
       >
@@ -411,7 +411,7 @@ function SpendingProgressCard({
     <Card>
       <CardHeader
         className={cn(
-          "flex-row items-start justify-between gap-2",
+          "flex-row flex-wrap items-start justify-between gap-2",
           compactMode ? "pb-2" : "pb-3",
         )}
       >
@@ -519,7 +519,7 @@ function CategoryCard({
     <Card>
       <CardHeader
         className={cn(
-          "flex-row items-start justify-between gap-2",
+          "flex-row flex-wrap items-start justify-between gap-2",
           compactMode ? "pb-2" : "pb-3",
         )}
       >
@@ -620,7 +620,7 @@ function LeftDrawer({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="left-0 top-0 h-viewport w-[100vw] sm:w-[460px] max-w-[100vw] translate-x-0 translate-y-0 rounded-none border-0 border-r p-0 gap-0"
+        className="left-0 top-0 h-viewport max-h-none w-[100vw] max-w-[100vw] translate-x-0 translate-y-0 overflow-hidden rounded-none border-0 border-r p-0 gap-0 sm:w-[460px]"
         aria-label="Chi tiết & cài đặt ngân sách"
       >
         <Tabs
@@ -789,7 +789,7 @@ function LeftDrawer({
               <section id="budget-settings-ui" className="space-y-3">
                 <div className="text-sm font-semibold">Hiển thị</div>
                 <div className="rounded-lg border bg-card p-3 text-sm">
-                  <div className="flex items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="min-w-0">
                       <div className="font-medium truncate">Compact mode</div>
                       <div className="text-xs text-muted-foreground truncate">

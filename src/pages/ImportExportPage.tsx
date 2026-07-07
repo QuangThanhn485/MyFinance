@@ -124,8 +124,8 @@ export default function ImportExportPage() {
         {/* ------------------------------- XUẤT (an toàn) ------------------------------- */}
         <Card className="border-emerald-500/30">
           <CardHeader className="pb-3">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-2.5">
                 <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
                   <Download className="h-5 w-5" />
                 </span>
@@ -187,8 +187,8 @@ export default function ImportExportPage() {
         {/* ------------------------------- NHẬP (ghi đè) ------------------------------- */}
         <Card className="border-amber-500/40 bg-amber-500/[0.03]">
           <CardHeader className="pb-3">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-2.5">
                 <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400">
                   <Upload className="h-5 w-5" />
                 </span>
@@ -235,7 +235,7 @@ export default function ImportExportPage() {
             </div>
 
             {importFileName ? (
-              <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
                 <span className="min-w-0 truncate">
                   Đã chọn: <span className="font-medium">{importFileName}</span>
                 </span>
@@ -322,7 +322,7 @@ export default function ImportExportPage() {
       {/* ------------------------------- VÙNG NGUY HIỂM ------------------------------- */}
       <Card className="border-destructive/40">
         <CardHeader className="pb-3">
-          <div className="flex items-center gap-2.5">
+          <div className="flex min-w-0 items-center gap-2.5">
             <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-destructive/10 text-destructive">
               <Trash2 className="h-5 w-5" />
             </span>

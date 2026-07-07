@@ -25,7 +25,7 @@ export default function LabelValueRow({
   return (
     <div
       className={cn(
-        "grid grid-cols-[minmax(0,1fr)_auto] gap-3",
+        "grid grid-cols-[minmax(0,1fr)_auto] gap-3 max-[420px]:grid-cols-1 max-[420px]:gap-1",
         align === "center" ? "items-center" : "items-start",
         className,
       )}
@@ -44,7 +44,7 @@ export default function LabelValueRow({
       </div>
       <div
         className={cn(
-          "whitespace-nowrap font-medium tabular-nums",
+          "min-w-0 text-right whitespace-nowrap font-medium tabular-nums max-[420px]:text-left max-[420px]:whitespace-normal max-[420px]:break-words",
           valueClassName,
         )}
       >
@@ -53,4 +53,3 @@ export default function LabelValueRow({
     </div>
   )
 }
-

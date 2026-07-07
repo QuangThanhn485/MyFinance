@@ -86,7 +86,7 @@ function MetricCard({
       <CardContent className="p-4">
         <div className="space-y-1">
           <div className="text-xs uppercase tracking-wide text-muted-foreground">{title}</div>
-          <div className={cn("text-xl font-semibold tabular-nums", toneTextClass(tone))}>
+          <div className={cn("break-words text-lg font-semibold tabular-nums sm:text-xl", toneTextClass(tone))}>
             {value}
           </div>
           {subValue ? <div className="text-xs text-muted-foreground">{subValue}</div> : null}
@@ -216,8 +216,8 @@ export default function DashboardPage() {
             Tháng {month} • {daysRemaining} ngày còn lại trong tháng.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm">
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+          <div className="min-w-0 rounded-md border bg-muted/40 px-3 py-2 text-sm">
             <span className="text-muted-foreground">MSS: </span>
             <span className="font-semibold tabular-nums">{formatVnd(MSS)}</span>
           </div>
@@ -283,26 +283,26 @@ export default function DashboardPage() {
       <div className="grid gap-4 lg:grid-cols-2">
         {/* Hôm nay */}
         <Card>
-          <CardHeader className="flex-row items-center justify-between gap-2 pb-3">
+          <CardHeader className="flex-row flex-wrap items-center justify-between gap-2 pb-3">
             <CardTitle className="text-base">Chi tiêu hôm nay</CardTitle>
             <StatusPill tone={dailyStatusTone}>
               {remainingTodayVnd >= 0 ? "Trong hạn mức" : "Vượt hạn mức"}
             </StatusPill>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex items-end justify-between gap-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
               <div>
                 <div className="text-xs text-muted-foreground">Còn được chi hôm nay</div>
                 <div
                   className={cn(
-                    "text-3xl font-semibold tabular-nums",
+                    "text-2xl font-semibold tabular-nums sm:text-3xl",
                     toneTextClass(remainingTodayVnd < 0 ? "danger" : "ok"),
                   )}
                 >
                   {formatVnd(remainingTodayVnd)}
                 </div>
               </div>
-              <div className="text-right">
+              <div className="sm:text-right">
                 <div className="text-xs text-muted-foreground">Đã chi hôm nay</div>
                 <div className="text-lg font-semibold tabular-nums">{formatVnd(todaySpent)}</div>
               </div>
@@ -320,7 +320,7 @@ export default function DashboardPage() {
 
         {/* Triển vọng tháng */}
         <Card>
-          <CardHeader className="flex-row items-center justify-between gap-2 pb-3">
+          <CardHeader className="flex-row flex-wrap items-center justify-between gap-2 pb-3">
             <CardTitle className="text-base">Triển vọng tháng này</CardTitle>
             <StatusPill tone={monthTone}>
               {savingsMet ? "Đúng hướng" : aboveMss ? "Cần chú ý" : "Rủi ro"}
@@ -329,7 +329,7 @@ export default function DashboardPage() {
           <CardContent className="space-y-4">
             <div>
               <div className="text-xs text-muted-foreground">Dự báo tiết kiệm cuối tháng</div>
-              <div className={cn("text-3xl font-semibold tabular-nums", toneTextClass(monthTone))}>
+              <div className={cn("text-2xl font-semibold tabular-nums sm:text-3xl", toneTextClass(monthTone))}>
                 {formatVnd(projectedSavingsEndMonthVnd)}
               </div>
               <div className="mt-0.5 text-sm text-muted-foreground">{monthVerdict}</div>
@@ -376,19 +376,19 @@ export default function DashboardPage() {
 
         {/* Quỹ khẩn cấp */}
         <Card>
-          <CardHeader className="flex-row items-center justify-between gap-2 pb-3">
+          <CardHeader className="flex-row flex-wrap items-center justify-between gap-2 pb-3">
             <CardTitle className="text-base">Quỹ khẩn cấp &amp; an toàn</CardTitle>
             <StatusPill tone={emergencyTone}>{emergency.status}</StatusPill>
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
-            <div className="flex items-end justify-between gap-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
               <div>
                 <div className="text-xs text-muted-foreground">Phủ được</div>
-                <div className={cn("text-2xl font-semibold tabular-nums", toneTextClass(emergencyTone))}>
+                <div className={cn("text-xl font-semibold tabular-nums sm:text-2xl", toneTextClass(emergencyTone))}>
                   {formatCoverageMonths(emergency.coverageMonths)}
                 </div>
               </div>
-              <div className="text-right text-xs text-muted-foreground">
+              <div className="text-xs text-muted-foreground sm:text-right">
                 chi thiết yếu/tháng
                 <div className="text-sm font-medium text-foreground tabular-nums">
                   {formatVnd(emergency.essentialMonthlyVnd)}

@@ -236,7 +236,7 @@ export default function DailyCapPlannerPage() {
                     <Gauge className="h-4 w-4" />
                     Trần cần giữ
                   </div>
-                  <div className="mt-2 text-2xl font-semibold tabular-nums">
+                  <div className="mt-2 text-xl font-semibold tabular-nums sm:text-2xl">
                     {formatVnd(byDaysPlan.requiredDailyCeilingVnd)}
                   </div>
                 </div>
@@ -245,7 +245,7 @@ export default function DailyCapPlannerPage() {
                     <TrendingUp className="h-4 w-4" />
                     Cap sau {planDays} ngày
                   </div>
-                  <div className="mt-2 text-2xl font-semibold tabular-nums">
+                  <div className="mt-2 text-xl font-semibold tabular-nums sm:text-2xl">
                     {formatVnd(byDaysPlan.projectedDailyCapAfterPlanVnd)}
                   </div>
                 </div>
@@ -300,13 +300,13 @@ export default function DailyCapPlannerPage() {
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="rounded-md border bg-background p-3">
                   <div className="text-sm text-muted-foreground">Số ngày cần giữ</div>
-                  <div className="mt-2 text-2xl font-semibold tabular-nums">
+                  <div className="mt-2 text-xl font-semibold tabular-nums sm:text-2xl">
                     {byCeilingPlan.daysNeeded === 0 ? "0 ngày" : `${byCeilingPlan.daysNeeded} ngày`}
                   </div>
                 </div>
                 <div className="rounded-md border bg-background p-3">
                   <div className="text-sm text-muted-foreground">Cap sau kế hoạch</div>
-                  <div className="mt-2 text-2xl font-semibold tabular-nums">
+                  <div className="mt-2 text-xl font-semibold tabular-nums sm:text-2xl">
                     {formatVnd(byCeilingPlan.projectedDailyCapAfterPlanVnd)}
                   </div>
                 </div>

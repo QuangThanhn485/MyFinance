@@ -160,7 +160,7 @@ export default function QuickTemplateList({
     visibleTemplates.every((template) => qtyOf(template.id) > 0)
 
   return (
-    <div className="h-full min-h-0 flex flex-col gap-2">
+    <div className="flex min-h-[360px] flex-col gap-2 lg:h-full lg:min-h-0">
       <div className="flex min-h-8 items-center gap-2">
         {groups.length > 0 ? (
           <Tabs
@@ -244,7 +244,7 @@ export default function QuickTemplateList({
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 rounded-md border bg-muted/20">
+      <div className="min-h-[240px] flex-1 rounded-md border bg-muted/20 lg:min-h-0">
         <div className="h-full overflow-y-auto p-2 space-y-1.5">
           {templates.length === 0 ? (
             <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
