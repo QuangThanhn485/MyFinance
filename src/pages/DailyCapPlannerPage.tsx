@@ -147,7 +147,7 @@ export default function DailyCapPlannerPage() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Phân tích nâng cap ngày</h1>
+          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Phân tích nâng cap ngày</h1>
           <p className="text-sm text-muted-foreground">
             Tháng {month} · Dữ liệu tính từ {dayContext.remainingStartDate}
           </p>

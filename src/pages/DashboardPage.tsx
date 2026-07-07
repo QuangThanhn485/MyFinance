@@ -208,10 +208,10 @@ export default function DashboardPage() {
         : `Hôm nay đã vượt hạn mức ${formatVnd(Math.abs(remainingTodayVnd))}.`
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4 sm:space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Tổng quan</h1>
+          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Tổng quan</h1>
           <p className="text-sm text-muted-foreground">
             Tháng {month} • {daysRemaining} ngày còn lại trong tháng.
           </p>

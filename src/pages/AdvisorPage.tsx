@@ -434,10 +434,10 @@ export default function AdvisorPage() {
   const DecisionIcon = decision?.icon
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Tư vấn mua sắm</h1>
+          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Tư vấn mua sắm</h1>
           <p className="max-w-3xl text-sm text-muted-foreground">
             Công cụ này không hỏi bạn có thích món đó không. Nó kiểm tra dòng tiền, MSS,
             quỹ khẩn cấp, nhịp chi tiêu, nợ, cap còn lại, lịch sử tháng trước và kế hoạch

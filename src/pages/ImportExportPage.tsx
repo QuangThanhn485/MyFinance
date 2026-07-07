@@ -109,9 +109,9 @@ export default function ImportExportPage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
+    <div className="mx-auto max-w-5xl space-y-4 sm:space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Sao lưu &amp; Phục hồi</h1>
+        <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Sao lưu &amp; Phục hồi</h1>
         <p className="text-sm text-muted-foreground">
           <span className="font-medium text-emerald-700 dark:text-emerald-400">Xuất</span> = lưu một
           bản sao ra file (an toàn).{" "}

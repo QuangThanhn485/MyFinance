@@ -137,7 +137,7 @@ export default function CategoriesPage() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Danh mục chi tiêu</h1>
+          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Danh mục chi tiêu</h1>
           <p className="text-sm text-muted-foreground">
             Quản lý danh mục dùng trong chi tiêu, chi phí cố định và mẫu thêm nhanh.
           </p>

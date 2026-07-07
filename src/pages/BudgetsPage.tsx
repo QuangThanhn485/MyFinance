@@ -647,7 +647,7 @@ function LeftDrawer({
           </div>
 
           <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto p-4">
-            <TabsContent value="details" className="mt-0 space-y-6">
+            <TabsContent value="details" className="mt-0 space-y-5 sm:space-y-6">
               <section id="budget-details-overview" className="space-y-3">
                 <div className="text-sm font-semibold">Tổng quan</div>
                 <div className="rounded-lg border bg-card p-3 space-y-2 text-sm">
@@ -743,7 +743,7 @@ function LeftDrawer({
               </section>
             </TabsContent>
 
-            <TabsContent value="explain" className="mt-0 space-y-6">
+            <TabsContent value="explain" className="mt-0 space-y-5 sm:space-y-6">
               <section id="budget-explain-core" className="space-y-3">
                 <div className="text-sm font-semibold">Các khái niệm chính</div>
                 <div className="rounded-lg border bg-card p-3 text-sm space-y-3">
@@ -785,7 +785,7 @@ function LeftDrawer({
               </section>
             </TabsContent>
 
-            <TabsContent value="settings" className="mt-0 space-y-6">
+            <TabsContent value="settings" className="mt-0 space-y-5 sm:space-y-6">
               <section id="budget-settings-ui" className="space-y-3">
                 <div className="text-sm font-semibold">Hiển thị</div>
                 <div className="rounded-lg border bg-card p-3 text-sm">
@@ -973,7 +973,7 @@ export default function BudgetsPage() {
       .slice(0, 8)
   }, [categoryLabels, categoryOptions, data, month])
 
-  const rootGap = compactMode ? "space-y-4" : "space-y-5"
+  const rootGap = compactMode ? "space-y-4" : "space-y-4 sm:space-y-5"
 
   return (
     <div className={rootGap}>

@@ -43,7 +43,7 @@ export default function AppLayout() {
   // Cùng với `body { overflow: hidden }`, điều này loại bỏ hẳn thanh cuộn thứ hai và khoảng hở
   // dưới sidebar ở các trang dài như /settings.
   const mainContainerClassName =
-    "flex-1 min-h-0 overflow-y-auto w-full px-3 sm:px-4 lg:px-6 py-4 sm:py-6"
+    "flex-1 min-h-0 overflow-y-auto w-full px-4 sm:px-5 lg:px-6 py-4 sm:py-6"
 
   return (
     <div className="h-full overflow-hidden bg-background">
