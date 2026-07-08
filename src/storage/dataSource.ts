@@ -21,6 +21,12 @@ export type StorageManifest = {
   keyPrefix?: string
 }
 
+type RemoteSnapshot = {
+  schemaVersion: 2
+  manifest: StorageManifest
+  values: Record<string, string>
+}
+
 export type StorageComparison = {
   local: StorageManifest
   remote: StorageManifest | null
@@ -31,8 +37,10 @@ export type StorageComparison = {
 export const DATA_SOURCE_CONFIG_KEY = "smartSpend.storage.config.v1"
 export const DATA_SOURCE_LOCAL_META_KEY = "smartSpend.storage.localMeta.v1"
 export const DATA_SOURCE_LAST_SYNC_KEY = "smartSpend.storage.lastSync.v1"
+export const DATA_SOURCE_REMOTE_CLEANUP_KEY = "smartSpend.storage.remoteCleanup.v1"
 
-const REMOTE_MANIFEST_KEY = "myfinance:storage:manifest"
+const REMOTE_SNAPSHOT_KEY = "myfinance:storage:snapshot"
+const LEGACY_REMOTE_MANIFEST_KEY = "myfinance:storage:manifest"
 const LEGACY_REMOTE_KEY_PREFIX = "myfinance:storage:key:"
 const REMOTE_VERSION_KEY_PREFIX = "myfinance:storage:version:"
 
@@ -40,6 +48,7 @@ const INTERNAL_KEYS = new Set([
   DATA_SOURCE_CONFIG_KEY,
   DATA_SOURCE_LOCAL_META_KEY,
   DATA_SOURCE_LAST_SYNC_KEY,
+  DATA_SOURCE_REMOTE_CLEANUP_KEY,
 ])
 
 const APP_DATA_PREFIXES = ["cttm_", "smartSpend.", "expenses."]
@@ -267,11 +276,54 @@ function parseRemoteValue<T>(value: unknown, fallback: T): T {
   return fallback
 }
 
-export async function getRemoteManifest(config: UpstashConfig): Promise<StorageManifest | null> {
+function isValidManifest(value: unknown): value is StorageManifest {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      (value as StorageManifest).schemaVersion === 1 &&
+      Array.isArray((value as StorageManifest).keys),
+  )
+}
+
+function parseRemoteSnapshot(value: unknown): RemoteSnapshot | null {
+  const snapshot = parseRemoteValue<RemoteSnapshot | null>(value, null)
+  if (
+    !snapshot ||
+    snapshot.schemaVersion !== 2 ||
+    !isValidManifest(snapshot.manifest) ||
+    !snapshot.values ||
+    typeof snapshot.values !== "object" ||
+    Array.isArray(snapshot.values)
+  ) {
+    return null
+  }
+
+  return snapshot
+}
+
+async function getRemoteSnapshot(config: UpstashConfig): Promise<RemoteSnapshot | null> {
   const redis = await createRedis(config)
-  const raw = await redis.get(REMOTE_MANIFEST_KEY)
+  const snapshot = parseRemoteSnapshot(await redis.get(REMOTE_SNAPSHOT_KEY))
+  if (!snapshot) return null
+
+  if (
+    Object.keys(snapshot.values).length !== snapshot.manifest.keyCount ||
+    checksum(snapshot.values) !== snapshot.manifest.checksum
+  ) {
+    throw new StorageSyncError("Snapshot Redis không khớp manifest đồng bộ.")
+  }
+
+  return snapshot
+}
+
+export async function getRemoteManifest(config: UpstashConfig): Promise<StorageManifest | null> {
+  const snapshot = await getRemoteSnapshot(config)
+  if (snapshot) return snapshot.manifest
+
+  const redis = await createRedis(config)
+  const raw = await redis.get(LEGACY_REMOTE_MANIFEST_KEY)
   const manifest = parseRemoteValue<StorageManifest | null>(raw, null)
-  if (!manifest || manifest.schemaVersion !== 1 || !Array.isArray(manifest.keys)) {
+  if (!isValidManifest(manifest)) {
     return null
   }
   return manifest
@@ -280,62 +332,100 @@ export async function getRemoteManifest(config: UpstashConfig): Promise<StorageM
 const remoteValueKey = (key: string, manifest?: Pick<StorageManifest, "keyPrefix">) =>
   `${manifest?.keyPrefix ?? LEGACY_REMOTE_KEY_PREFIX}${encodeURIComponent(key)}`
 
-const remoteVersionKeyPrefix = (revision: number) => `${REMOTE_VERSION_KEY_PREFIX}${revision}:key:`
-
 type RedisClient = Awaited<ReturnType<typeof createRedis>>
 
-async function cleanupRemoteSnapshot(redis: RedisClient, manifest: StorageManifest | null, keepKeyPrefix: string) {
-  if (!manifest || (manifest.keyPrefix ?? LEGACY_REMOTE_KEY_PREFIX) === keepKeyPrefix) return
-
-  for (const key of manifest.keys) {
-    await redis.del(remoteValueKey(key, manifest))
-  }
+function remoteCleanupSignature(config: UpstashConfig) {
+  return `snapshot-v2:${sanitizeUpstashConfig(config).url}`
 }
 
-export async function uploadLocalToUpstash(config: UpstashConfig) {
+function hasCompletedRemoteCleanup(config: UpstashConfig) {
+  return isBrowser() && localStorage.getItem(DATA_SOURCE_REMOTE_CLEANUP_KEY) === remoteCleanupSignature(config)
+}
+
+function markRemoteCleanupCompleted(config: UpstashConfig) {
+  if (!isBrowser()) return
+  localStorage.setItem(DATA_SOURCE_REMOTE_CLEANUP_KEY, remoteCleanupSignature(config))
+}
+
+async function scanRemoteKeys(redis: RedisClient, pattern: string) {
+  const keys = new Set<string>()
+  let cursor = "0"
+
+  do {
+    const result = (await (redis as any).scan(cursor, { match: pattern, count: 100 })) as unknown
+    const tuple = Array.isArray(result) ? result : ["0", []]
+    cursor = String(tuple[0] ?? "0")
+
+    const batch = Array.isArray(tuple[1]) ? tuple[1] : []
+    for (const key of batch) {
+      if (typeof key === "string") keys.add(key)
+    }
+  } while (cursor !== "0")
+
+  return [...keys]
+}
+
+async function cleanupRemoteKeys(redis: RedisClient, keys: string[]) {
+  if (keys.length === 0) return
+  await (redis as { del: (...keys: string[]) => Promise<unknown> }).del(...keys)
+}
+
+export async function cleanupUpstashLegacyKeys(config: UpstashConfig) {
+  const snapshot = await getRemoteSnapshot(config)
+  if (!snapshot) return
+
+  const redis = await createRedis(config)
+  const keys = new Set<string>()
+
+  keys.add(LEGACY_REMOTE_MANIFEST_KEY)
+  for (const key of await scanRemoteKeys(redis, `${LEGACY_REMOTE_KEY_PREFIX}*`)) keys.add(key)
+  for (const key of await scanRemoteKeys(redis, `${REMOTE_VERSION_KEY_PREFIX}*`)) keys.add(key)
+
+  await cleanupRemoteKeys(redis, [...keys])
+  markRemoteCleanupCompleted(config)
+}
+
+async function cleanupUpstashLegacyKeysOnce(config: UpstashConfig) {
+  if (hasCompletedRemoteCleanup(config)) return
+  await cleanupUpstashLegacyKeys(config)
+}
+
+export async function uploadLocalToUpstash(config: UpstashConfig, options: { cleanupLegacy?: boolean } = {}) {
   const redis = await createRedis(config)
   const snapshot = collectLocalSnapshot(true)
   const updatedAt = Date.now()
   const revision = nextRevision(snapshot.manifest.revision)
-  const keyPrefix = remoteVersionKeyPrefix(revision)
   const manifest: StorageManifest = {
     ...snapshot.manifest,
     revision,
     updatedAt,
-    keyPrefix,
+  }
+  const remoteSnapshot: RemoteSnapshot = {
+    schemaVersion: 2,
+    manifest,
+    values: snapshot.values,
   }
 
-  const previousManifest = await getRemoteManifest(config)
-  for (const [key, value] of Object.entries(snapshot.values)) {
-    try {
-      await redis.set(remoteValueKey(key, manifest), value)
-    } catch (error) {
-      throw new StorageSyncError(
-        `Không thể ghi key "${key}" (${formatBytes(byteLength(value))}) lên Redis. ${getStorageErrorMessage(
-          error,
-          "Redis từ chối thao tác ghi.",
-        )}`,
-        { cause: error },
-      )
-    }
-  }
+  const payload = JSON.stringify(remoteSnapshot)
 
   try {
-    await redis.set(REMOTE_MANIFEST_KEY, JSON.stringify(manifest))
+    await redis.set(REMOTE_SNAPSHOT_KEY, payload)
   } catch (error) {
     throw new StorageSyncError(
-      `Dữ liệu đã ghi xong nhưng không thể ghi manifest đồng bộ. ${getStorageErrorMessage(
+      `Không thể ghi snapshot (${formatBytes(byteLength(payload))}) lên Redis. ${getStorageErrorMessage(
         error,
-        "Redis từ chối thao tác ghi manifest.",
+        "Redis từ chối thao tác ghi snapshot.",
       )}`,
       { cause: error },
     )
   }
 
-  try {
-    await cleanupRemoteSnapshot(redis, previousManifest, keyPrefix)
-  } catch (error) {
-    console.warn("Uploaded new Redis snapshot but could not clean previous snapshot:", error)
+  if (options.cleanupLegacy) {
+    try {
+      await cleanupUpstashLegacyKeysOnce(config)
+    } catch (error) {
+      console.warn("Uploaded Redis snapshot but could not clean legacy Redis keys:", error)
+    }
   }
 
   setLocalMeta({ revision, updatedAt })
@@ -385,26 +475,32 @@ export function getStorageErrorMessage(error: unknown, fallback: string) {
 
 export async function downloadUpstashToLocal(config: UpstashConfig) {
   const redis = await createRedis(config)
-  const manifest = await getRemoteManifest(config)
+  const remoteSnapshot = await getRemoteSnapshot(config)
+  const manifest = remoteSnapshot?.manifest ?? (await getRemoteManifest(config))
   if (!manifest) return null
 
-  const remoteValues: Record<string, string> = {}
-  const missingKeys: string[] = []
-  for (const key of manifest.keys) {
-    const value = await redis.get(remoteValueKey(key, manifest))
-    if (typeof value === "string") {
-      remoteValues[key] = value
-    } else if (value !== null && value !== undefined) {
-      remoteValues[key] = JSON.stringify(value)
-    } else {
-      missingKeys.push(key)
+  let remoteValues: Record<string, string>
+  if (remoteSnapshot) {
+    remoteValues = remoteSnapshot.values
+  } else {
+    remoteValues = {}
+    const missingKeys: string[] = []
+    for (const key of manifest.keys) {
+      const value = await redis.get(remoteValueKey(key, manifest))
+      if (typeof value === "string") {
+        remoteValues[key] = value
+      } else if (value !== null && value !== undefined) {
+        remoteValues[key] = JSON.stringify(value)
+      } else {
+        missingKeys.push(key)
+      }
     }
-  }
 
-  if (missingKeys.length > 0) {
-    throw new StorageSyncError(
-      `Manifest Redis đang trỏ tới ${missingKeys.length} key không còn tồn tại. LocalStorage chưa bị thay đổi.`,
-    )
+    if (missingKeys.length > 0) {
+      throw new StorageSyncError(
+        `Manifest Redis đang trỏ tới ${missingKeys.length} key không còn tồn tại. LocalStorage chưa bị thay đổi.`,
+      )
+    }
   }
 
   if (Object.keys(remoteValues).length !== manifest.keyCount || checksum(remoteValues) !== manifest.checksum) {
@@ -507,7 +603,7 @@ function scheduleUpload() {
   uploadTimer = window.setTimeout(() => {
     uploadTimer = null
     void flushUpload()
-  }, 900)
+  }, 2500)
 }
 
 async function flushUpload() {

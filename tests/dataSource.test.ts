@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
+  cleanupUpstashLegacyKeys,
   downloadUpstashToLocal,
   getRemoteManifest,
   parseUpstashConfigInput,
@@ -9,7 +10,9 @@ import {
 
 const redisMock = vi.hoisted(() => ({
   store: new Map<string, string>(),
+  failSetKey: null as string | null,
   failSetValue: null as string | null,
+  delCalls: [] as string[][],
 }))
 
 vi.mock("@upstash/redis/cloudflare", () => ({
@@ -23,13 +26,26 @@ vi.mock("@upstash/redis/cloudflare", () => ({
     }
 
     async set(key: string, value: unknown) {
+      if (key === redisMock.failSetKey) throw new Error("forced set failure")
       if (value === redisMock.failSetValue) throw new Error("forced set failure")
       redisMock.store.set(key, typeof value === "string" ? value : JSON.stringify(value))
       return "OK"
     }
 
-    async del(key: string) {
-      return redisMock.store.delete(key) ? 1 : 0
+    async del(...keys: string[]) {
+      redisMock.delCalls.push(keys)
+      let deleted = 0
+      for (const key of keys) {
+        if (redisMock.store.delete(key)) deleted += 1
+      }
+      return deleted
+    }
+
+    async scan(cursor: string, opts?: { match?: string }) {
+      if (cursor !== "0") return ["0", []]
+      const prefix = opts?.match?.endsWith("*") ? opts.match.slice(0, -1) : opts?.match
+      const keys = [...redisMock.store.keys()].filter((key) => (prefix ? key.startsWith(prefix) : true))
+      return ["0", keys]
     }
   },
 }))
@@ -40,7 +56,9 @@ describe("data source config parsing", () => {
   beforeEach(() => {
     localStorage.clear()
     redisMock.store.clear()
+    redisMock.failSetKey = null
     redisMock.failSetValue = null
+    redisMock.delCalls = []
   })
 
   it("keeps raw Upstash URL and token values", () => {
@@ -74,18 +92,71 @@ describe("data source config parsing", () => {
     })
   })
 
-  it("does not move the Redis manifest to a partial upload when writing a later snapshot fails", async () => {
+  it("stores the remote copy as a single snapshot key", async () => {
+    localStorage.setItem("cttm_v1", "main-data")
+    localStorage.setItem("cttm_backup_last_v1", "backup-data")
+
+    const manifest = await uploadLocalToUpstash(TEST_UPSTASH)
+
+    expect(manifest.keyCount).toBe(2)
+    expect(redisMock.store.has("myfinance:storage:snapshot")).toBe(true)
+    expect([...redisMock.store.keys()]).toEqual(["myfinance:storage:snapshot"])
+  })
+
+  it("cleans legacy versioned keys only when cleanup is explicitly requested", async () => {
+    redisMock.store.set("myfinance:storage:manifest", "{}")
+    redisMock.store.set("myfinance:storage:key:cttm_v1", "legacy-main")
+    redisMock.store.set("myfinance:storage:version:123:key:cttm_v1", "legacy-version")
+    localStorage.setItem("cttm_v1", "main-data")
+
+    await uploadLocalToUpstash(TEST_UPSTASH)
+
+    expect(redisMock.store.has("myfinance:storage:manifest")).toBe(true)
+    expect(redisMock.store.has("myfinance:storage:key:cttm_v1")).toBe(true)
+    expect(redisMock.store.has("myfinance:storage:version:123:key:cttm_v1")).toBe(true)
+
+    await uploadLocalToUpstash(TEST_UPSTASH, { cleanupLegacy: true })
+
+    expect([...redisMock.store.keys()]).toEqual(["myfinance:storage:snapshot"])
+    expect(redisMock.delCalls).toHaveLength(1)
+    expect(redisMock.delCalls[0]).toEqual(
+      expect.arrayContaining([
+        "myfinance:storage:manifest",
+        "myfinance:storage:key:cttm_v1",
+        "myfinance:storage:version:123:key:cttm_v1",
+      ]),
+    )
+  })
+
+  it("does not delete legacy Redis data when no valid snapshot exists yet", async () => {
+    redisMock.store.set("myfinance:storage:manifest", "{}")
+    redisMock.store.set("myfinance:storage:key:cttm_v1", "legacy-main")
+    redisMock.store.set("myfinance:storage:version:123:key:cttm_v1", "legacy-version")
+
+    await cleanupUpstashLegacyKeys(TEST_UPSTASH)
+
+    expect([...redisMock.store.keys()].sort()).toEqual([
+      "myfinance:storage:key:cttm_v1",
+      "myfinance:storage:manifest",
+      "myfinance:storage:version:123:key:cttm_v1",
+    ])
+    expect(redisMock.delCalls).toHaveLength(0)
+  })
+
+  it("does not replace the Redis snapshot when writing a later snapshot fails", async () => {
     localStorage.setItem("cttm_v1", "old-value")
     const firstManifest = await uploadLocalToUpstash(TEST_UPSTASH)
+    const firstSnapshot = redisMock.store.get("myfinance:storage:snapshot")
 
     localStorage.setItem("cttm_v1", "new-value")
-    redisMock.failSetValue = "new-value"
+    redisMock.failSetKey = "myfinance:storage:snapshot"
 
-    await expect(uploadLocalToUpstash(TEST_UPSTASH)).rejects.toThrow(/cttm_v1/)
+    await expect(uploadLocalToUpstash(TEST_UPSTASH)).rejects.toThrow(/snapshot/)
 
     const remoteManifest = await getRemoteManifest(TEST_UPSTASH)
     expect(remoteManifest?.revision).toBe(firstManifest.revision)
-    expect(redisMock.store.get(`${firstManifest.keyPrefix}cttm_v1`)).toBe("old-value")
+    expect(redisMock.store.get("myfinance:storage:snapshot")).toBe(firstSnapshot)
+    expect(redisMock.store.get("myfinance:storage:snapshot")).toContain("old-value")
   })
 
   it("does not modify localStorage when Redis values do not match the manifest checksum", async () => {

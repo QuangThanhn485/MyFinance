@@ -25,6 +25,7 @@ import {
   type DataSourceMode,
   type StorageComparison,
   type UpstashConfig,
+  cleanupUpstashLegacyKeys,
   compareLocalAndRemote,
   downloadUpstashToLocal,
   getDataSourceConfig,
@@ -99,7 +100,7 @@ export function DataSourceProvider({ children }: { children: React.ReactNode }) 
     }
     setSyncing(true)
     try {
-      await uploadLocalToUpstash(current.upstash)
+      await uploadLocalToUpstash(current.upstash, { cleanupLegacy: true })
       await refresh()
       toast.success("Đã tải dữ liệu localStorage lên Upstash Redis.")
     } catch (error) {
@@ -140,11 +141,13 @@ export function DataSourceProvider({ children }: { children: React.ReactNode }) 
         setComparison(nextComparison)
 
         if (!nextComparison.remoteHasData) {
-          await uploadLocalToUpstash(upstash)
+          await uploadLocalToUpstash(upstash, { cleanupLegacy: true })
           await refresh()
           toast.success("Kết nối thành công. Redis đang trống nên dữ liệu localStorage đã được tải lên.")
           return
         }
+
+        await cleanupUpstashLegacyKeys(upstash)
 
         if (current.mode === "upstash" && nextComparison.relation !== "same") {
           await downloadAndReload(upstash)
@@ -202,7 +205,7 @@ export function DataSourceProvider({ children }: { children: React.ReactNode }) 
         setComparison(nextComparison)
 
         if (!nextComparison.remoteHasData) {
-          await uploadLocalToUpstash(current.upstash)
+          await uploadLocalToUpstash(current.upstash, { cleanupLegacy: true })
           setDataSourceMode("upstash", current.upstash)
           setConfig(getDataSourceConfig())
           await refresh()
@@ -234,7 +237,7 @@ export function DataSourceProvider({ children }: { children: React.ReactNode }) 
     if (!pendingDecision) return
     setSyncing(true)
     try {
-      await uploadLocalToUpstash(pendingDecision.upstash)
+      await uploadLocalToUpstash(pendingDecision.upstash, { cleanupLegacy: true })
       setConfig(getDataSourceConfig())
       setPendingDecision(null)
       await refresh()
