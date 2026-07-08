@@ -23,6 +23,7 @@ export default function App() {
         <Route path="/daily-cap-planner" element={<DailyCapPlannerPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/categories" element={<CategoriesPage />} />
+        <Route path="/data" element={<ImportExportPage />} />
         <Route path="/import-export" element={<ImportExportPage />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Route>

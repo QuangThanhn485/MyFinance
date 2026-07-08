@@ -8,7 +8,7 @@ const navItems = [
   { to: "/advisor", label: "Tư vấn mua sắm" },
   { to: "/reports", label: "Báo cáo" },
   { to: "/settings", label: "Cài đặt" },
-  { to: "/import-export", label: "Xuất/Nhập" },
+  { to: "/import-export", label: "Dữ liệu" },
 ]
 
 export default function TopNav() {

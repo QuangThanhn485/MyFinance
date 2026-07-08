@@ -2,6 +2,7 @@ import React from "react"
 import ReactDOM from "react-dom/client"
 import { BrowserRouter } from "react-router-dom"
 import { Toaster } from "sonner"
+import { DataSourceProvider } from "@/app/DataSourceProvider"
 import App from "@/app/App"
 import { ThemeProvider, useTheme } from "@/app/theme/ThemeProvider"
 import { initializeTheme } from "@/lib/theme"
@@ -37,7 +38,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <ThemeProvider>
       <BrowserRouter>
-        <AppShell />
+        <DataSourceProvider>
+          <AppShell />
+        </DataSourceProvider>
       </BrowserRouter>
     </ThemeProvider>
   </React.StrictMode>,

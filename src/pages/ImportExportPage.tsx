@@ -1,13 +1,22 @@
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import {
   AlertTriangle,
+  CheckCircle2,
+  Cloud,
   Copy,
+  Database,
   Download,
+  DownloadCloud,
   FileUp,
+  HardDrive,
+  KeyRound,
+  Loader2,
+  RefreshCw,
   ShieldCheck,
   Trash2,
   Upload,
+  UploadCloud,
 } from "lucide-react"
 import {
   AlertDialog,
@@ -28,11 +37,41 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { todayIso } from "@/lib/date"
 import { cn } from "@/lib/utils"
+import { useDataSource } from "@/app/DataSourceProvider"
+import { collectLocalSnapshot, parseUpstashConfigInput } from "@/storage/dataSource"
 import { useAppStore } from "@/store/useAppStore"
 
 const CONFIRM_CODE = "485000"
 
+function getRelationLabel(relation: string) {
+  switch (relation) {
+    case "same":
+      return "Đã đồng bộ"
+    case "local-newer":
+      return "Local mới hơn"
+    case "remote-newer":
+      return "Redis mới hơn"
+    case "diverged":
+      return "Cần chọn nguồn"
+    case "remote-empty":
+      return "Redis trống"
+    default:
+      return "Chưa kiểm tra"
+  }
+}
+
 export default function ImportExportPage() {
+  const {
+    config: dataSourceConfig,
+    comparison,
+    loading: dataSourceLoading,
+    syncing: dataSourceSyncing,
+    saveUpstash,
+    activateMode,
+    refresh,
+    uploadLocal,
+    downloadRemote,
+  } = useDataSource()
   const exportJson = useAppStore((s) => s.actions.exportJson)
   const importJson = useAppStore((s) => s.actions.importJson)
   const resetAll = useAppStore((s) => s.actions.resetAll)
@@ -47,8 +86,28 @@ export default function ImportExportPage() {
 
   const [resetAllOpen, setResetAllOpen] = useState(false)
   const [resetAllPhrase, setResetAllPhrase] = useState("")
+  const [upstashUrl, setUpstashUrl] = useState(dataSourceConfig.upstash?.url ?? "")
+  const [upstashToken, setUpstashToken] = useState(dataSourceConfig.upstash?.token ?? "")
 
   const hasImportData = importText.trim().length > 0
+  const dataSourceBusy = dataSourceLoading || dataSourceSyncing
+  const upstashConfigured = Boolean(dataSourceConfig.upstash?.url && dataSourceConfig.upstash?.token)
+  const localManifest = comparison?.local ?? collectLocalSnapshot(false).manifest
+  const remoteManifest = comparison?.remote ?? null
+  const relation = comparison?.relation ?? "remote-empty"
+  const relationText = getRelationLabel(relation)
+  const activeModeLabel = dataSourceConfig.mode === "upstash" ? "Upstash Redis" : "localStorage"
+  const parsedUpstashConfig = parseUpstashConfigInput(upstashUrl, upstashToken)
+  const canSaveUpstash = Boolean(parsedUpstashConfig.url && parsedUpstashConfig.token)
+
+  useEffect(() => {
+    setUpstashUrl(dataSourceConfig.upstash?.url ?? "")
+    setUpstashToken(dataSourceConfig.upstash?.token ?? "")
+  }, [dataSourceConfig.upstash?.token, dataSourceConfig.upstash?.url])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
 
   const generateJson = () => {
     const text = exportJson()
@@ -108,17 +167,174 @@ export default function ImportExportPage() {
     setExportText("")
   }
 
+  const saveUpstashConfig = async () => {
+    setUpstashUrl(parsedUpstashConfig.url)
+    setUpstashToken(parsedUpstashConfig.token)
+    await saveUpstash(parsedUpstashConfig)
+  }
+
+  const formatManifestTime = (timestamp?: number) => {
+    if (!timestamp) return "Chưa có"
+    return new Date(timestamp).toLocaleString("vi-VN")
+  }
+
   return (
     <div className="mx-auto max-w-5xl space-y-4 sm:space-y-6">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Sao lưu &amp; Phục hồi</h1>
+        <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Dữ liệu</h1>
         <p className="text-sm text-muted-foreground">
-          <span className="font-medium text-emerald-700 dark:text-emerald-400">Xuất</span> = lưu một
-          bản sao ra file (an toàn).{" "}
-          <span className="font-medium text-amber-700 dark:text-amber-400">Nhập</span> = phục hồi từ
-          file và <span className="font-medium">ghi đè</span> dữ liệu hiện tại.
+          Chọn nơi app đọc ghi dữ liệu, đồng bộ với Upstash Redis, hoặc xuất nhập file sao lưu khi cần.
         </p>
       </div>
+
+      <Card className="border-sky-500/30">
+        <CardHeader className="pb-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2.5">
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-sky-500/10 text-sky-600 dark:text-sky-400">
+                <Database className="h-5 w-5" />
+              </span>
+              <div>
+                <CardTitle className="text-base">Nguồn lưu trữ</CardTitle>
+                <div className="text-xs text-muted-foreground">
+                  Đang dùng <span className="font-medium text-foreground">{activeModeLabel}</span>
+                </div>
+              </div>
+            </div>
+            <Badge variant="outline" className="gap-1 border-sky-500/40 text-sky-700 dark:text-sky-400">
+              {dataSourceBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+              {dataSourceBusy ? "Đang kiểm tra" : relationText}
+            </Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-3 md:grid-cols-2">
+            <button
+              type="button"
+              className={cn(
+                "rounded-lg border p-4 text-left transition hover:border-primary/50 hover:bg-muted/40",
+                dataSourceConfig.mode === "localStorage" && "border-primary bg-primary/5",
+              )}
+              disabled={dataSourceBusy}
+              onClick={() => void activateMode("localStorage")}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <HardDrive className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                  <span className="font-medium">localStorage</span>
+                </div>
+                {dataSourceConfig.mode === "localStorage" ? <Badge>Đang dùng</Badge> : null}
+              </div>
+              <p className="mt-2 text-xs text-muted-foreground">
+                Dữ liệu nằm trong trình duyệt hiện tại. Phù hợp khi chỉ dùng một máy hoặc cần chế độ offline.
+              </p>
+            </button>
+
+            <button
+              type="button"
+              className={cn(
+                "rounded-lg border p-4 text-left transition hover:border-primary/50 hover:bg-muted/40",
+                dataSourceConfig.mode === "upstash" && "border-primary bg-primary/5",
+              )}
+              disabled={dataSourceBusy || !upstashConfigured}
+              onClick={() => void activateMode("upstash")}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Cloud className="h-4 w-4 text-sky-600 dark:text-sky-400" />
+                  <span className="font-medium">Upstash Redis</span>
+                </div>
+                {dataSourceConfig.mode === "upstash" ? <Badge>Đang dùng</Badge> : null}
+              </div>
+              <p className="mt-2 text-xs text-muted-foreground">
+                App đọc ghi qua Redis bằng REST URL và token. Khi có chênh lệch dữ liệu, app sẽ hỏi trước khi ghi đè.
+              </p>
+            </button>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+            <div className="rounded-lg border bg-muted/20 p-4">
+              <div className="mb-3 flex items-center gap-2">
+                <KeyRound className="h-4 w-4 text-muted-foreground" />
+                <div className="text-sm font-medium">Cấu hình Upstash Redis</div>
+              </div>
+              <div className="grid gap-3">
+                <div className="grid gap-1.5">
+                  <Label htmlFor="upstash-url">REST URL</Label>
+                  <Input
+                    id="upstash-url"
+                    value={upstashUrl}
+                    onChange={(event) => setUpstashUrl(event.target.value)}
+                    placeholder="https://..."
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="upstash-token">REST token</Label>
+                  <Input
+                    id="upstash-token"
+                    type="password"
+                    value={upstashToken}
+                    onChange={(event) => setUpstashToken(event.target.value)}
+                    placeholder="AX..."
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Token chỉ lưu trong trình duyệt này và không được đồng bộ lên Redis.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button onClick={() => void saveUpstashConfig()} disabled={dataSourceBusy || !canSaveUpstash}>
+                    {dataSourceBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                    Lưu & kiểm tra
+                  </Button>
+                  <Button variant="outline" onClick={() => void refresh()} disabled={dataSourceBusy || !upstashConfigured}>
+                    <RefreshCw className={cn("h-4 w-4", dataSourceBusy && "animate-spin")} />
+                    Kiểm tra lại
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-lg border bg-muted/20 p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div className="text-sm font-medium">Trạng thái dữ liệu</div>
+                <Badge variant="secondary">{relationText}</Badge>
+              </div>
+              <div className="space-y-3 text-sm">
+                <div className="rounded-md bg-background p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-muted-foreground">localStorage</span>
+                    <span className="font-medium">{localManifest.keyCount} keys</span>
+                  </div>
+                  <div className="mt-1 text-xs text-muted-foreground">{formatManifestTime(localManifest.updatedAt)}</div>
+                </div>
+                <div className="rounded-md bg-background p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-muted-foreground">Upstash Redis</span>
+                    <span className="font-medium">{remoteManifest ? `${remoteManifest.keyCount} keys` : "Chưa có data"}</span>
+                  </div>
+                  <div className="mt-1 text-xs text-muted-foreground">{formatManifestTime(remoteManifest?.updatedAt)}</div>
+                </div>
+              </div>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
+                <Button variant="outline" onClick={() => void uploadLocal()} disabled={dataSourceBusy || !upstashConfigured}>
+                  <UploadCloud className="h-4 w-4" />
+                  Tải local lên Redis
+                </Button>
+                <Button variant="outline" onClick={() => void downloadRemote()} disabled={dataSourceBusy || !remoteManifest}>
+                  <DownloadCloud className="h-4 w-4" />
+                  Tải Redis về local
+                </Button>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4 lg:grid-cols-2">
         {/* ------------------------------- XUẤT (an toàn) ------------------------------- */}

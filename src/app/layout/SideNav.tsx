@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ComponentType } from "react"
 import { NavLink, useLocation } from "react-router-dom"
 import {
-  ArrowLeftRight,
   BarChart3,
   ChevronRight,
+  Database,
   LayoutDashboard,
   PanelLeftClose,
   PanelLeftOpen,
@@ -121,9 +121,9 @@ const NAV_TREE: NavNode[] = [
       {
         id: "import-export",
         type: "leaf",
-        label: "Xuất/Nhập",
+        label: "Dữ liệu",
         to: "/import-export",
-        icon: ArrowLeftRight,
+        icon: Database,
       },
     ],
   },
