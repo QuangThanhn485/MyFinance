@@ -25,7 +25,6 @@ import {
   type DataSourceMode,
   type StorageComparison,
   type UpstashConfig,
-  addDataSourceConflictListener,
   compareLocalAndRemote,
   downloadUpstashToLocal,
   getDataSourceConfig,
@@ -39,16 +38,7 @@ import {
 
 type PendingDecision =
   | {
-      kind:
-        | "config-remote-existing"
-        | "activate-upstash-local-newer"
-        | "activate-upstash-remote-newer"
-        | "activate-upstash-diverged"
-        | "activate-local-remote-newer"
-        | "boot-local-newer"
-        | "boot-remote-newer"
-        | "boot-diverged"
-        | "background-diverged"
+      kind: "activate-local-remote-newer"
       comparison: StorageComparison
       upstash: UpstashConfig
     }
@@ -156,11 +146,13 @@ export function DataSourceProvider({ children }: { children: React.ReactNode }) 
           return
         }
 
-        setPendingDecision({
-          kind: "config-remote-existing",
-          comparison: nextComparison,
-          upstash,
-        })
+        if (current.mode === "upstash" && nextComparison.relation !== "same") {
+          await downloadAndReload(upstash)
+          toast.success("Kết nối thành công. Đang tải dữ liệu Redis về local cache.")
+          return
+        }
+
+        toast.success("Kết nối Upstash Redis thành công.")
       } catch (error) {
         toast.error(getStorageErrorMessage(error, "Không thể kết nối Upstash Redis."))
       } finally {
@@ -225,16 +217,10 @@ export function DataSourceProvider({ children }: { children: React.ReactNode }) 
           return
         }
 
-        setPendingDecision({
-          kind:
-            nextComparison.relation === "remote-newer"
-              ? "activate-upstash-remote-newer"
-              : nextComparison.relation === "local-newer"
-                ? "activate-upstash-local-newer"
-                : "activate-upstash-diverged",
-          comparison: nextComparison,
-          upstash: current.upstash,
-        })
+        setDataSourceMode("upstash", current.upstash)
+        setConfig(getDataSourceConfig())
+        await downloadAndReload(current.upstash)
+        toast.success("Đã dùng Upstash Redis. Redis là nguồn chính nên dữ liệu đã được tải về local cache.")
       } catch (error) {
         toast.error(getStorageErrorMessage(error, "Không thể chuyển nguồn dữ liệu."))
       } finally {
@@ -249,9 +235,6 @@ export function DataSourceProvider({ children }: { children: React.ReactNode }) 
     setSyncing(true)
     try {
       await uploadLocalToUpstash(pendingDecision.upstash)
-      if (pendingDecision.kind.startsWith("activate-upstash")) {
-        setDataSourceMode("upstash", pendingDecision.upstash)
-      }
       setConfig(getDataSourceConfig())
       setPendingDecision(null)
       await refresh()
@@ -269,9 +252,6 @@ export function DataSourceProvider({ children }: { children: React.ReactNode }) 
     setSyncing(true)
     try {
       await downloadAndReload(pendingDecision.upstash)
-      if (pendingDecision.kind.startsWith("activate-upstash")) {
-        setDataSourceMode("upstash", pendingDecision.upstash)
-      }
       if (pendingDecision.kind === "activate-local-remote-newer") {
         setDataSourceMode("localStorage", pendingDecision.upstash)
       }
@@ -320,16 +300,7 @@ export function DataSourceProvider({ children }: { children: React.ReactNode }) 
           return
         }
 
-        setPendingDecision({
-          kind:
-            nextComparison.relation === "remote-newer"
-              ? "boot-remote-newer"
-              : nextComparison.relation === "local-newer"
-                ? "boot-local-newer"
-                : "boot-diverged",
-          comparison: nextComparison,
-          upstash: current.upstash,
-        })
+        await downloadAndReload(current.upstash)
       } catch (error) {
         if (!cancelled) {
           toast.error(getStorageErrorMessage(error, "Không thể kiểm tra Upstash Redis."))
@@ -343,19 +314,6 @@ export function DataSourceProvider({ children }: { children: React.ReactNode }) 
       cancelled = true
     }
   }, [])
-
-  useEffect(
-    () =>
-      addDataSourceConflictListener((detail) => {
-        setComparison(detail.comparison)
-        setPendingDecision({
-          kind: "background-diverged",
-          comparison: detail.comparison,
-          upstash: detail.upstash,
-        })
-      }),
-    [],
-  )
 
   const value = useMemo<DataSourceContextValue>(
     () => ({
@@ -464,66 +422,11 @@ function getDecisionCopy(decision: PendingDecision) {
     }
   }
 
-  if (decision.kind === "config-remote-existing") {
-    return {
-      title: "Upstash Redis đã có dữ liệu",
-      description:
-        "Redis đã có dữ liệu MyFinance. Hãy chọn nguồn dữ liệu muốn giữ trước khi tiếp tục để tránh ghi đè nhầm.",
-      keepLocal: "Giữ local",
-      uploadLocal: "Ghi local lên Redis",
-      downloadRemote: "Ghi Redis vào local",
-    }
-  }
-
-  if (decision.kind === "background-diverged") {
-    return {
-      title: "Redis đã thay đổi từ nơi khác",
-      description:
-        "App vừa dừng một lần đồng bộ nền vì dữ liệu trên Upstash Redis đã thay đổi sau lần sync cuối của trình duyệt này. Hãy chọn nguồn muốn giữ để tránh ghi đè nhầm.",
-      keepLocal: "Tạm dừng sync",
-      uploadLocal: "Ghi local lên Redis",
-      downloadRemote: "Tải Redis về local",
-    }
-  }
-
-  if (decision.kind === "activate-local-remote-newer") {
-    return {
-      title: "Redis mới hơn localStorage",
-      description:
-        "Bạn đang chuyển về localStorage nhưng dữ liệu trên Redis mới hơn. Nên tải Redis về local để tránh mất dữ liệu mới.",
-      keepLocal: "Vẫn dùng local",
-      uploadLocal: "Ghi local lên Redis",
-      downloadRemote: "Tải Redis về local",
-    }
-  }
-
-  if (decision.kind.includes("local-newer")) {
-    return {
-      title: "localStorage mới hơn Redis",
-      description:
-        "Dữ liệu Redis có vẻ cũ hơn localStorage. Bạn có thể tải localStorage lên Redis trước khi dùng Upstash.",
-      keepLocal: "Giữ local",
-      uploadLocal: "Tải local lên Redis",
-      downloadRemote: "Dùng dữ liệu Redis",
-    }
-  }
-
-  if (decision.kind.includes("remote-newer")) {
-    return {
-      title: "Redis mới hơn localStorage",
-      description:
-        "Dữ liệu Upstash Redis mới hơn dữ liệu localStorage hiện tại. Hãy chọn nguồn dữ liệu muốn giữ.",
-      keepLocal: "Giữ local",
-      uploadLocal: "Ghi local lên Redis",
-      downloadRemote: "Tải Redis về local",
-    }
-  }
-
   return {
-    title: "Dữ liệu hai nơi khác nhau",
+    title: "Redis mới hơn localStorage",
     description:
-      "localStorage và Upstash Redis khác nhau nhưng không xác định được nguồn mới hơn. Hãy chọn rõ nguồn dữ liệu muốn giữ.",
-    keepLocal: "Giữ local",
+      "Bạn đang chuyển về localStorage nhưng dữ liệu trên Redis mới hơn. Nên tải Redis về local để tránh mất dữ liệu mới.",
+    keepLocal: "Vẫn dùng local",
     uploadLocal: "Ghi local lên Redis",
     downloadRemote: "Tải Redis về local",
   }

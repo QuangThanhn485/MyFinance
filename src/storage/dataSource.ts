@@ -28,11 +28,6 @@ export type StorageComparison = {
   relation: "same" | "local-newer" | "remote-newer" | "diverged" | "remote-empty"
 }
 
-export type StorageConflictDetail = {
-  comparison: StorageComparison
-  upstash: UpstashConfig
-}
-
 export const DATA_SOURCE_CONFIG_KEY = "smartSpend.storage.config.v1"
 export const DATA_SOURCE_LOCAL_META_KEY = "smartSpend.storage.localMeta.v1"
 export const DATA_SOURCE_LAST_SYNC_KEY = "smartSpend.storage.lastSync.v1"
@@ -49,7 +44,6 @@ const INTERNAL_KEYS = new Set([
 
 const APP_DATA_PREFIXES = ["cttm_", "smartSpend.", "expenses."]
 const STORAGE_EVENT_NAME = "myfinance-storage-sync"
-const STORAGE_CONFLICT_EVENT_NAME = "myfinance-storage-conflict"
 
 let suppressMirror = false
 let patchInstalled = false
@@ -82,18 +76,6 @@ export function addDataSourceListener(listener: () => void) {
   if (!isBrowser()) return () => {}
   window.addEventListener(STORAGE_EVENT_NAME, listener)
   return () => window.removeEventListener(STORAGE_EVENT_NAME, listener)
-}
-
-function dispatchDataSourceConflict(detail: StorageConflictDetail) {
-  if (!isBrowser()) return
-  window.dispatchEvent(new CustomEvent<StorageConflictDetail>(STORAGE_CONFLICT_EVENT_NAME, { detail }))
-}
-
-export function addDataSourceConflictListener(listener: (detail: StorageConflictDetail) => void) {
-  if (!isBrowser()) return () => {}
-  const handler = (event: Event) => listener((event as CustomEvent<StorageConflictDetail>).detail)
-  window.addEventListener(STORAGE_CONFLICT_EVENT_NAME, handler)
-  return () => window.removeEventListener(STORAGE_CONFLICT_EVENT_NAME, handler)
 }
 
 export function sanitizeUpstashConfig(config: UpstashConfig): UpstashConfig {
@@ -217,11 +199,6 @@ function getLocalMeta(): LocalMeta {
 function setLocalMeta(meta: LocalMeta) {
   if (!isBrowser()) return
   localStorage.setItem(DATA_SOURCE_LOCAL_META_KEY, JSON.stringify(meta))
-}
-
-function getLastSyncMeta(): LastSyncMeta | null {
-  if (!isBrowser()) return null
-  return safeParse<LastSyncMeta | null>(localStorage.getItem(DATA_SOURCE_LAST_SYNC_KEY), null)
 }
 
 function setLastSyncMeta(meta: LastSyncMeta) {
@@ -512,25 +489,6 @@ export async function compareLocalAndRemote(config: UpstashConfig): Promise<Stor
   return { local, remote, remoteHasData, relation: "diverged" }
 }
 
-export async function getRemoteWriteConflict(config: UpstashConfig): Promise<StorageComparison | null> {
-  const local = collectLocalSnapshot(true).manifest
-  const remote = await getRemoteManifest(config)
-  const remoteHasData = Boolean(remote && remote.keyCount > 0)
-
-  if (!remote || !remoteHasData) return null
-  if (local.checksum === remote.checksum && local.keyCount === remote.keyCount) return null
-
-  const lastSync = getLastSyncMeta()
-  const remoteChangedSinceLastSync =
-    !lastSync ||
-    remote.revision !== lastSync.revision ||
-    (lastSync.checksum ? remote.checksum !== lastSync.checksum : false)
-
-  if (!remoteChangedSinceLastSync) return null
-
-  return { local, remote, remoteHasData, relation: "diverged" }
-}
-
 export function withStorageMirrorSuppressed<T>(fn: () => T): T {
   suppressMirror = true
   try {
@@ -563,12 +521,6 @@ async function flushUpload() {
 
   uploadInFlight = true
   try {
-    const conflict = await getRemoteWriteConflict(config.upstash)
-    if (conflict) {
-      dispatchDataSourceConflict({ comparison: conflict, upstash: config.upstash })
-      return
-    }
-
     await uploadLocalToUpstash(config.upstash)
   } catch (error) {
     console.error("Failed to mirror localStorage to Upstash Redis:", error)

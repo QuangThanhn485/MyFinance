@@ -247,7 +247,7 @@ export default function ImportExportPage() {
                 {dataSourceConfig.mode === "upstash" ? <Badge>Đang dùng</Badge> : null}
               </div>
               <p className="mt-2 text-xs text-muted-foreground">
-                App đọc ghi qua Redis bằng REST URL và token. Khi có chênh lệch dữ liệu, app sẽ hỏi trước khi ghi đè.
+                App đọc ghi qua Redis bằng REST URL và token. Khi bật mode này, Redis là nguồn chính; localStorage chỉ là cache.
               </p>
             </button>
           </div>

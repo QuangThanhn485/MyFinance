@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
   downloadUpstashToLocal,
   getRemoteManifest,
-  getRemoteWriteConflict,
   parseUpstashConfigInput,
   uploadLocalToUpstash,
 } from "@/storage/dataSource"
@@ -110,38 +109,4 @@ describe("data source config parsing", () => {
     expect(localStorage.getItem("cttm_v1")).toBe("local-value")
   })
 
-  it("allows background upload only when Redis has not changed since the last sync", async () => {
-    localStorage.setItem("cttm_v1", "base-value")
-    await uploadLocalToUpstash(TEST_UPSTASH)
-
-    localStorage.setItem("cttm_v1", "local-change")
-    await expect(getRemoteWriteConflict(TEST_UPSTASH)).resolves.toBeNull()
-  })
-
-  it("detects a background upload conflict when Redis changed from another client", async () => {
-    localStorage.setItem("cttm_v1", "base-value")
-    const firstManifest = await uploadLocalToUpstash(TEST_UPSTASH)
-
-    const remoteRevision = firstManifest.revision + 1
-    redisMock.store.set(
-      "myfinance:storage:manifest",
-      JSON.stringify({
-        schemaVersion: 1,
-        revision: remoteRevision,
-        updatedAt: remoteRevision,
-        keyCount: 1,
-        keys: ["cttm_v1"],
-        checksum: "remote-client-checksum",
-        keyPrefix: `myfinance:storage:version:${remoteRevision}:key:`,
-      }),
-    )
-    redisMock.store.set(`myfinance:storage:version:${remoteRevision}:key:cttm_v1`, "remote-change")
-
-    localStorage.setItem("cttm_v1", "local-change")
-
-    await expect(getRemoteWriteConflict(TEST_UPSTASH)).resolves.toMatchObject({
-      relation: "diverged",
-      remote: { revision: remoteRevision },
-    })
-  })
 })
