@@ -220,7 +220,7 @@ function BudgetHeader({
         >
           <div className="min-w-0">
             <div className="flex items-center gap-2 min-w-0">
-              <h1 className="text-xl sm:text-2xl font-semibold tracking-tight truncate">
+              <h1 className="truncate text-lg font-semibold tracking-tight sm:text-2xl">
                 Ngân sách
               </h1>
               {locked ? (
@@ -229,14 +229,14 @@ function BudgetHeader({
                 </span>
               ) : null}
             </div>
-            <div className="text-xs text-muted-foreground truncate">
+            <div className="hidden truncate text-xs text-muted-foreground sm:block">
               Báo cáo chi tiêu theo tháng (I, F, E, W, S)
             </div>
           </div>
 
-          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+          <div className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 sm:flex sm:w-auto sm:flex-wrap sm:justify-end">
             <div className="hidden sm:block text-xs text-muted-foreground">Tháng</div>
-            <MonthPicker value={month} onChange={onMonthChange} className="w-[140px]" />
+            <MonthPicker value={month} onChange={onMonthChange} className="w-full sm:w-[140px]" />
             <Button
               type="button"
               variant="outline"

@@ -43,6 +43,10 @@ export default function DateRangePicker({
     (preset) =>
       preset.range.start === value.start && preset.range.end === value.end,
   )
+  const fullLabel = `${activePreset ? `${activePreset.label}: ` : ""}${formatDateLabel(value.start)} - ${formatDateLabel(value.end)}`
+  const mobileLabel = activePreset
+    ? activePreset.label
+    : `${formatDateLabel(value.start).slice(0, 5)} - ${formatDateLabel(value.end).slice(0, 5)}`
 
   const updateStart = (start?: ISODate) => {
     if (!start) return
@@ -61,14 +65,16 @@ export default function DateRangePicker({
           type="button"
           variant="outline"
           className={cn(
-            "h-10 min-w-0 w-full justify-start gap-2 bg-background px-3 font-normal shadow-sm sm:min-w-[260px]",
+            "h-9 min-w-0 w-full justify-start gap-2 bg-background px-2.5 text-xs font-normal shadow-sm sm:h-10 sm:min-w-[260px] sm:px-3 sm:text-sm",
             className,
           )}
         >
           <CalendarDays className="h-4 w-4 text-muted-foreground" />
-          <span className="min-w-0 flex-1 truncate text-left tabular-nums">
-            {activePreset ? `${activePreset.label}: ` : ""}
-            {formatDateLabel(value.start)} - {formatDateLabel(value.end)}
+          <span className="min-w-0 flex-1 truncate text-left tabular-nums sm:hidden">
+            {mobileLabel}
+          </span>
+          <span className="hidden min-w-0 flex-1 truncate text-left tabular-nums sm:block">
+            {fullLabel}
           </span>
         </Button>
       </PopoverTrigger>

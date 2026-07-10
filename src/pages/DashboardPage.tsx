@@ -208,16 +208,16 @@ export default function DashboardPage() {
         : `Hôm nay đã vượt hạn mức ${formatVnd(Math.abs(remainingTodayVnd))}.`
 
   return (
-    <div className="space-y-4 sm:space-y-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
+    <div className="space-y-3 sm:space-y-5">
+      <div className="flex flex-wrap items-end justify-between gap-2 sm:gap-3">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Tổng quan</h1>
-          <p className="text-sm text-muted-foreground">
+          <h1 className="text-lg font-semibold tracking-tight sm:text-2xl">Tổng quan</h1>
+          <p className="hidden text-sm text-muted-foreground sm:block">
             Tháng {month} • {daysRemaining} ngày còn lại trong tháng.
           </p>
         </div>
-        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
-          <div className="min-w-0 rounded-md border bg-muted/40 px-3 py-2 text-sm">
+        <div className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 sm:flex sm:w-auto sm:flex-wrap sm:justify-end">
+          <div className="min-w-0 rounded-md border bg-muted/40 px-2.5 py-1.5 text-xs sm:px-3 sm:py-2 sm:text-sm">
             <span className="text-muted-foreground">MSS: </span>
             <span className="font-semibold tabular-nums">{formatVnd(MSS)}</span>
           </div>
@@ -228,7 +228,7 @@ export default function DashboardPage() {
       </div>
 
       {!incomeConfigured ? (
-        <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
+        <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-sm break-words">
           <span className="font-medium">Chưa thiết lập thu nhập.</span>{" "}
           <Link to="/settings" className="underline underline-offset-2">
             Vào Cài đặt
@@ -253,7 +253,7 @@ export default function DashboardPage() {
       ) : null}
 
       {/* Các chỉ số cần nhìn nhanh nhất */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-2 sm:grid-cols-2 sm:gap-3 lg:grid-cols-4">
         <MetricCard
           title="Còn được chi hôm nay"
           value={formatVnd(remainingTodayVnd)}

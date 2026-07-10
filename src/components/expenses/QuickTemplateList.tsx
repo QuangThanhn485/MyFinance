@@ -160,7 +160,7 @@ export default function QuickTemplateList({
     visibleTemplates.every((template) => qtyOf(template.id) > 0)
 
   return (
-    <div className="flex min-h-[360px] flex-col gap-2 lg:h-full lg:min-h-0">
+    <div className="flex min-h-[300px] flex-col gap-2 sm:min-h-[360px] lg:h-full lg:min-h-0">
       <div className="flex min-h-8 items-center gap-2">
         {groups.length > 0 ? (
           <Tabs
@@ -244,8 +244,8 @@ export default function QuickTemplateList({
         </div>
       </div>
 
-      <div className="min-h-[240px] flex-1 rounded-md border bg-muted/20 lg:min-h-0">
-        <div className="h-full overflow-y-auto p-2 space-y-1.5">
+      <div className="min-h-[180px] flex-1 rounded-md border bg-muted/20 sm:min-h-[240px] lg:min-h-0">
+        <div className="h-full space-y-1.5 overflow-y-auto p-1.5 sm:p-2">
           {templates.length === 0 ? (
             <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
               Chưa có mẫu phù hợp. Hãy tạo mẫu mới bằng nút Thêm mẫu.
@@ -267,7 +267,63 @@ export default function QuickTemplateList({
                       : "hover:border-muted-foreground/40",
                   )}
                 >
-                  <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2">
+                  <div className="space-y-2 sm:hidden">
+                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
+                      <div
+                        className="min-w-0 break-words text-sm font-semibold leading-snug"
+                        title={template.name}
+                      >
+                        {template.name}
+                      </div>
+                      <div className="shrink-0 text-right text-sm font-semibold tabular-nums">
+                        {formatVnd(template.amount)}
+                      </div>
+                    </div>
+
+                    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-none text-muted-foreground">
+                      <span className="min-w-0 max-w-full truncate" title={secondaryText}>
+                        {secondaryText}
+                      </span>
+                      <span className="shrink-0 rounded bg-muted px-1.5 py-1 uppercase tracking-wide">
+                        {template.bucket}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2">
+                      <QuantityStepper
+                        value={qty}
+                        onChange={(quantity) => onQuantityChange(template.id, quantity)}
+                        ariaLabel={`số lượng ${template.name}`}
+                      />
+
+                      <div className="flex items-center gap-1">
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="outline"
+                          className="h-8 w-8"
+                          onClick={() => onEdit(template)}
+                          aria-label={`Sửa mẫu ${template.name}`}
+                          title="Sửa mẫu"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="secondary"
+                          className="h-8 w-8"
+                          onClick={() => onQuickAdd(template)}
+                          aria-label={`Thêm nhanh 1 khoản từ mẫu ${template.name}`}
+                          title="Thêm nhanh 1 khoản vào danh sách chi tiêu"
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="hidden grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 sm:grid">
                     {/* Bộ đếm số lượng: nhập nhiều lượt cho mỗi mẫu trong một lần thêm */}
                     <QuantityStepper
                       value={qty}

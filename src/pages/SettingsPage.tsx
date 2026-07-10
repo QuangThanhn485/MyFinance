@@ -360,16 +360,16 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3 sm:space-y-4">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Cài đặt theo tháng</h1>
-        <p className="text-sm text-muted-foreground">
+        <h1 className="text-lg font-semibold tracking-tight sm:text-2xl">Cài đặt theo tháng</h1>
+        <p className="hidden text-sm text-muted-foreground sm:block">
           Mỗi tháng có cấu hình riêng. Tháng mới mặc định kế thừa cấu hình tháng trước.
         </p>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)_minmax(0,1fr)]">
-        <div className="space-y-4">
+      <div className="grid gap-3 sm:gap-4 lg:grid-cols-[280px_minmax(0,1fr)_minmax(0,1fr)]">
+        <div className="space-y-3 sm:space-y-4">
         <Card>
           <CardHeader className="pb-3">
             <CardTitle>Chọn tháng</CardTitle>

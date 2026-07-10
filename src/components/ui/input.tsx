@@ -1,11 +1,12 @@
 import * as React from "react"
 import { cn } from "@/lib/utils"
+import { keepFocusedFieldVisible } from "@/lib/mobileFocus"
 
 export interface InputProps
   extends React.InputHTMLAttributes<HTMLInputElement> {}
 
 const Input = React.forwardRef<HTMLInputElement, InputProps>(
-  ({ className, type, ...props }, ref) => {
+  ({ className, type, onFocus, ...props }, ref) => {
     return (
       <input
         type={type}
@@ -14,6 +15,10 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
           className,
         )}
         ref={ref}
+        onFocus={(event) => {
+          keepFocusedFieldVisible(event.currentTarget)
+          onFocus?.(event)
+        }}
         {...props}
       />
     )
@@ -22,4 +27,3 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
 Input.displayName = "Input"
 
 export { Input }
-

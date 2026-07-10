@@ -134,11 +134,11 @@ export default function CategoriesPage() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="space-y-3 sm:space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Danh mục chi tiêu</h1>
-          <p className="text-sm text-muted-foreground">
+          <h1 className="text-lg font-semibold tracking-tight sm:text-2xl">Danh mục chi tiêu</h1>
+          <p className="hidden text-sm text-muted-foreground sm:block">
             Quản lý danh mục dùng trong chi tiêu, chi phí cố định và mẫu thêm nhanh.
           </p>
         </div>

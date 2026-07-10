@@ -179,10 +179,10 @@ export default function ImportExportPage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-4 sm:space-y-6">
+    <div className="mx-auto max-w-5xl space-y-3 sm:space-y-6">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Dữ liệu</h1>
-        <p className="text-sm text-muted-foreground">
+        <h1 className="text-lg font-semibold tracking-tight sm:text-2xl">Dữ liệu</h1>
+        <p className="hidden text-sm text-muted-foreground sm:block">
           Chọn nơi app đọc ghi dữ liệu, đồng bộ với Upstash Redis, hoặc xuất nhập file sao lưu khi cần.
         </p>
       </div>

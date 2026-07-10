@@ -73,7 +73,7 @@ export default function CollapsibleCard({
 
   return (
     <Card className={cn("flex min-h-0 flex-col lg:h-full", className)}>
-      <CardHeader className="py-3 px-4">
+      <CardHeader className="px-2.5 py-2 sm:px-4 sm:py-3">
         <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
           <div className="flex min-w-0 items-center gap-2">
             {icon ? <span className="text-muted-foreground">{icon}</span> : null}
@@ -96,7 +96,7 @@ export default function CollapsibleCard({
           </div>
         </div>
       </CardHeader>
-      <CardContent className={cn("px-4 pb-4 lg:flex-1 lg:min-h-0", contentClassName)}>
+      <CardContent className={cn("px-2.5 pb-2.5 sm:px-4 sm:pb-4 lg:flex-1 lg:min-h-0", contentClassName)}>
         {children}
       </CardContent>
     </Card>

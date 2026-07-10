@@ -42,6 +42,11 @@ import {
   XAxis,
   YAxis,
 } from "recharts"
+import type {
+  NameType,
+  Payload as TooltipPayload,
+  ValueType,
+} from "recharts/types/component/DefaultTooltipContent"
 import {
   BarChart3,
   Columns2,
@@ -626,6 +631,17 @@ type PivotTable = {
   colTotals: Record<string, PivotCell>
   grandTotal: PivotCell
 }
+type ChartInteractionState = {
+  activeCoordinate?: { x?: number; y?: number }
+  activeLabel?: string
+  activePayload?: TooltipPayload<ValueType, NameType>[]
+}
+type ControlledTooltipState = {
+  active: boolean
+  coordinate?: { x?: number; y?: number }
+  label?: string
+  payload?: TooltipPayload<ValueType, NameType>[]
+}
 
 function getPivotGroupValue(
   group: PivotGroupKey,
@@ -738,6 +754,19 @@ function formatCompactVndTick(value: unknown) {
   if (abs >= 1_000_000) return `${(n / 1_000_000).toFixed(abs >= 10_000_000 ? 0 : 1)}tr`
   if (abs >= 1_000) return `${Math.round(n / 1_000)}k`
   return new Intl.NumberFormat("vi-VN").format(Math.round(n))
+}
+
+function formatShortDateAxisLabel(value: string) {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return `${value.slice(8, 10)}/${value.slice(5, 7)}`
+  }
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(value)) {
+    return value.slice(0, 5)
+  }
+  if (/^\d{8}$/.test(value)) {
+    return `${value.slice(6, 8)}/${value.slice(4, 6)}`
+  }
+  return value
 }
 
 function formatImpactRangeVndHint(input: {
@@ -1114,6 +1143,10 @@ export default function ReportsPage() {
     if (typeof window === "undefined") return false
     return window.matchMedia("(max-width: 639px)").matches
   })
+  const [pivotTooltip, setPivotTooltip] = useState<ControlledTooltipState>({
+    active: false,
+  })
+  const lastPivotChartTapRef = useRef<{ label?: string; time: number } | null>(null)
   const pivotSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
   )
@@ -1134,6 +1167,13 @@ export default function ReportsPage() {
     query.addEventListener("change", syncViewport)
     return () => query.removeEventListener("change", syncViewport)
   }, [])
+
+  useEffect(() => {
+    if (!isNarrowViewport) {
+      setPivotTooltip({ active: false })
+      lastPivotChartTapRef.current = null
+    }
+  }, [isNarrowViewport])
 
   const allVariableExpenses = useMemo(
     () =>
@@ -1529,7 +1569,7 @@ export default function ReportsPage() {
   const pivotChartData = pivotChartRows.map((row) => {
     const label =
       pivotChartPrimary === "day"
-        ? String(row.sortValue).padStart(2, "0")
+        ? formatShortDateAxisLabel(String(row.key.split("||")[0] ?? row.label))
         : pivotChartPrimary === "week"
           ? `W${row.sortValue}`
           : shortenLabel(row.label, 16)
@@ -1645,8 +1685,11 @@ export default function ReportsPage() {
       )
     : ["Tổng"]
   const pivotRowHeaderDepth = pivotRowHeaderLabels.length
+  const pivotRowHeaderColWidth = isNarrowViewport ? 112 : PIVOT_ROW_HEADER_COL_WIDTH
+  const pivotRowHeaderLabelWidth = isNarrowViewport ? 96 : 140
+  const pivotColumnHeaderLabelWidth = isNarrowViewport ? 112 : 180
   const pivotRowStickyOffsets = pivotRowHeaderLabels.map(
-    (_, idx) => idx * PIVOT_ROW_HEADER_COL_WIDTH,
+    (_, idx) => idx * pivotRowHeaderColWidth,
   )
   const pivotColumnHeaderRows = useMemo(() => {
     const cols = pivotTable.cols
@@ -1939,6 +1982,11 @@ export default function ReportsPage() {
     isNarrowViewport
       ? formatCompactVndTick(value)
       : new Intl.NumberFormat("vi-VN").format(Number(value))
+  const reportChartMargin = isNarrowViewport
+    ? { left: 0, right: 4, top: 12, bottom: 0 }
+    : { left: 8, right: 16, top: 8, bottom: 8 }
+  const reportChartYAxisWidth = isNarrowViewport ? 48 : 60
+  const reportChartTick = { fontSize: isNarrowViewport ? 11 : 12 }
   const dailyTableSeries =
     config.daily.visibleSeries.length > 0
       ? config.daily.visibleSeries
@@ -1967,13 +2015,60 @@ export default function ReportsPage() {
     isNarrowViewport && pivotSplitView === "both" ? "table" : pivotSplitView
   const pivotShowTable = effectivePivotSplitView !== "chart"
   const pivotShowChart = effectivePivotSplitView !== "table"
+  const handlePivotChartTap = (state: ChartInteractionState | null | undefined) => {
+    if (!isNarrowViewport) return
+    const label = String(state?.activeLabel ?? "")
+    const now = Date.now()
+    const previous = lastPivotChartTapRef.current
+    const isDoubleTap =
+      !!previous && previous.label === label && now - previous.time <= 360
+
+    lastPivotChartTapRef.current = { label, time: now }
+
+    if (!isDoubleTap || !state?.activePayload?.length) {
+      setPivotTooltip({ active: false })
+      return
+    }
+
+    setPivotTooltip({
+      active: true,
+      coordinate: state.activeCoordinate,
+      label: state.activeLabel,
+      payload: state.activePayload,
+    })
+  }
+  const pivotTooltipProps = isNarrowViewport
+    ? {
+        active: pivotTooltip.active,
+        coordinate: pivotTooltip.coordinate,
+        label: pivotTooltip.label,
+        payload: pivotTooltip.payload,
+      }
+    : {}
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-2 sm:space-y-4">
       <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
-        <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
-          <h1 className="shrink-0 text-xl font-semibold tracking-tight">Báo cáo</h1>
-          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-3">
+          <div className="min-w-0">
+            <h1 className="shrink-0 text-lg font-semibold tracking-tight sm:text-xl">
+              Báo cáo
+            </h1>
+            <div className="mt-1 flex min-w-0 gap-1.5 overflow-x-auto pb-0.5 sm:hidden">
+              <Badge variant="secondary" className="shrink-0 whitespace-nowrap text-[11px]">
+                Chi:{" "}
+                <span className="font-semibold tabular-nums">
+                  {formatVnd(totals.totalSpent)}
+                </span>
+              </Badge>
+              {leakageDetected ? (
+                <Badge variant="destructive" className="shrink-0 whitespace-nowrap text-[11px]">
+                  Rò rỉ: {smallCount}×
+                </Badge>
+              ) : null}
+            </div>
+          </div>
+          <div className="hidden min-w-0 flex-1 flex-wrap items-center gap-2 sm:flex">
             <Badge variant="outline" className="whitespace-nowrap">
               Thu nhập tham chiếu:{" "}
               <span className="ml-1 font-semibold tabular-nums">
@@ -2003,7 +2098,7 @@ export default function ReportsPage() {
           </div>
         </div>
 
-        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end sm:shrink-0">
+        <div className="grid w-full grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-1.5 sm:w-auto sm:flex sm:flex-wrap sm:justify-end sm:gap-2 sm:shrink-0">
           <DateRangePicker
             value={dateRange}
             onChange={setDateRange}
@@ -2014,21 +2109,23 @@ export default function ReportsPage() {
             type="button"
             size="sm"
             variant="outline"
-            className="h-8 gap-2"
+            className="h-9 w-9 gap-2 px-0 sm:h-8 sm:w-auto sm:px-3"
             onClick={() => setSummaryOpen(true)}
+            aria-label="Tóm tắt"
           >
             <Info className="h-4 w-4" />
-            Tóm tắt
+            <span className="sr-only sm:not-sr-only">Tóm tắt</span>
           </Button>
           <Button
             type="button"
             size="sm"
             variant="outline"
-            className="h-8 gap-2"
+            className="h-9 w-9 gap-2 px-0 sm:h-8 sm:w-auto sm:px-3"
             onClick={() => setInsightsOpen(true)}
+            aria-label="Insight"
           >
             <Sparkles className="h-4 w-4" />
-            Insight
+            <span className="sr-only sm:not-sr-only">Insight</span>
           </Button>
         </div>
       </div>
@@ -2810,7 +2907,7 @@ export default function ReportsPage() {
       </Dialog>
 
       <Card>
-        <CardContent className="space-y-3">
+        <CardContent className="space-y-2 p-2.5 sm:space-y-3 sm:p-6">
           <Tabs
             value={config.mode}
             onValueChange={(v) =>
@@ -2827,13 +2924,21 @@ export default function ReportsPage() {
               }))
             }
           >
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="min-w-0 flex-[1_1_180px] overflow-x-auto pb-1">
-                <TabsList className="w-max justify-start">
-                  <TabsTrigger value="month">Phân bổ</TabsTrigger>
-                  <TabsTrigger value="daily">Theo ngày</TabsTrigger>
-                  <TabsTrigger value="trend">Xu hướng</TabsTrigger>
-                  <TabsTrigger value="pivot">Pivot</TabsTrigger>
+            <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
+              <div className="col-span-2 min-w-0 sm:col-auto">
+                <TabsList className="grid h-9 w-full grid-cols-4 justify-stretch sm:inline-flex sm:h-10 sm:w-max sm:justify-start">
+                  <TabsTrigger className="px-2 text-xs sm:px-3 sm:text-sm" value="month">
+                    Phân bổ
+                  </TabsTrigger>
+                  <TabsTrigger className="px-2 text-xs sm:px-3 sm:text-sm" value="daily">
+                    Theo ngày
+                  </TabsTrigger>
+                  <TabsTrigger className="px-2 text-xs sm:px-3 sm:text-sm" value="trend">
+                    Xu hướng
+                  </TabsTrigger>
+                  <TabsTrigger className="px-2 text-xs sm:px-3 sm:text-sm" value="pivot">
+                    Pivot
+                  </TabsTrigger>
                 </TabsList>
               </div>
               {config.mode === "month" ? (
@@ -2846,7 +2951,7 @@ export default function ReportsPage() {
                     }))
                   }
                 >
-                  <SelectTrigger className="h-9 w-[140px] sm:w-[170px]">
+                  <SelectTrigger className="h-9 w-full text-xs sm:w-[170px] sm:text-sm">
                     <SelectValue placeholder="Biểu đồ" />
                   </SelectTrigger>
                   <SelectContent>
@@ -2867,7 +2972,7 @@ export default function ReportsPage() {
                     }))
                   }
                 >
-                  <SelectTrigger className="h-9 w-[140px] sm:w-[170px]">
+                  <SelectTrigger className="h-9 w-full text-xs sm:w-[170px] sm:text-sm">
                     <SelectValue placeholder="Biểu đồ" />
                   </SelectTrigger>
                   <SelectContent>
@@ -2889,7 +2994,7 @@ export default function ReportsPage() {
                     }))
                   }
                 >
-                  <SelectTrigger className="h-9 w-[140px] sm:w-[170px]">
+                  <SelectTrigger className="h-9 w-full text-xs sm:w-[170px] sm:text-sm">
                     <SelectValue placeholder="Biểu đồ" />
                   </SelectTrigger>
                   <SelectContent>
@@ -2898,7 +3003,7 @@ export default function ReportsPage() {
                     <SelectItem value="bar">Cột (Bar)</SelectItem>
                   </SelectContent>
                 </Select>
-              ) : (
+              ) : effectivePivotSplitView === "table" ? null : (
                 <Select
                   value={config.pivot.chartType}
                   onValueChange={(v) =>
@@ -2911,7 +3016,7 @@ export default function ReportsPage() {
                     }))
                   }
                 >
-                  <SelectTrigger className="h-9 w-[140px] sm:w-[170px]">
+                  <SelectTrigger className="h-9 w-full text-xs sm:w-[170px] sm:text-sm">
                     <SelectValue placeholder="Biểu đồ" />
                   </SelectTrigger>
                   <SelectContent>
@@ -2931,7 +3036,7 @@ export default function ReportsPage() {
                     }))
                   }
                 >
-                  <SelectTrigger className="h-9 w-[150px] sm:w-[190px]">
+                  <SelectTrigger className="h-9 w-full text-xs sm:w-[190px] sm:text-sm">
                     <SelectValue placeholder="Chỉ số" />
                   </SelectTrigger>
                   <SelectContent>
@@ -2942,12 +3047,12 @@ export default function ReportsPage() {
                 </Select>
               ) : null}
               {config.mode === "pivot" ? (
-                <div className="inline-flex items-center rounded-md border bg-background p-0.5">
+                <div className="inline-flex w-full items-center rounded-md border bg-background p-0.5 sm:w-auto">
                   <Button
                     type="button"
                     size="sm"
                     variant={effectivePivotSplitView === "table" ? "secondary" : "ghost"}
-                    className="h-8 gap-2 px-2"
+                    className="h-8 flex-1 gap-2 px-2 text-xs sm:flex-none sm:text-sm"
                     title="Chỉ xem bảng pivot"
                     onClick={() => setPivotSplitView("table")}
                   >
@@ -2969,7 +3074,7 @@ export default function ReportsPage() {
                     type="button"
                     size="sm"
                     variant={effectivePivotSplitView === "chart" ? "secondary" : "ghost"}
-                    className="h-8 gap-2 px-2"
+                    className="h-8 flex-1 gap-2 px-2 text-xs sm:flex-none sm:text-sm"
                     title="Chỉ xem biểu đồ pivot"
                     onClick={() => setPivotSplitView("chart")}
                   >
@@ -2982,7 +3087,7 @@ export default function ReportsPage() {
                 type="button"
                 size="sm"
                 variant="outline"
-                className="h-9 gap-2 shrink-0"
+                className="h-9 w-full shrink-0 gap-2 text-xs sm:w-auto sm:text-sm"
                 onClick={() => setControlsOpen(true)}
               >
                 <SlidersHorizontal className="h-4 w-4" />
@@ -3820,12 +3925,12 @@ export default function ReportsPage() {
               </div>
             </TabsContent>
 
-            <TabsContent value="pivot" className="space-y-3">
-              <div className={cn("grid gap-4", pivotShowTable && pivotShowChart && "lg:grid-cols-2")}>
+            <TabsContent value="pivot" className="min-w-0 space-y-3">
+              <div className={cn("grid min-w-0 gap-4", pivotShowTable && pivotShowChart && "lg:grid-cols-2")}>
                 {pivotShowTable ? (
-                  <Card>
-                    <CardContent className="p-3 space-y-2">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Card className="min-w-0 overflow-hidden">
+                    <CardContent className="min-w-0 space-y-2 p-2 sm:p-3">
+                      <div className="hidden flex-wrap items-center justify-between gap-2 sm:flex">
                         <div className="text-base font-semibold">Bảng pivot</div>
                       </div>
 
@@ -3834,8 +3939,8 @@ export default function ReportsPage() {
                         Chưa có dữ liệu để tạo pivot.
                       </div>
                     ) : (
-                      <div className="relative max-h-[520px] overflow-auto rounded-md border border-border/80">
-                        <table className="min-w-max w-full text-sm border-separate border-spacing-0 border border-border/80">
+                      <div className="relative max-h-[520px] w-full max-w-full overflow-auto overscroll-x-contain rounded-md border border-border/80">
+                        <table className="w-max min-w-full border-separate border-spacing-0 border border-border/80 text-xs sm:text-sm">
                           <thead className="sticky top-0 z-30 bg-muted text-xs uppercase text-muted-foreground shadow-[0_2px_0_rgba(0,0,0,0.08)]">
                             {pivotColumnHeaderRows.map((headerRow, level) => (
                               <tr key={`pivot-head-${level}`} className="border-b border-border/70">
@@ -3844,15 +3949,16 @@ export default function ReportsPage() {
                                       <th
                                         key={`pivot-row-head-${index}`}
                                         rowSpan={pivotColumnHeaderDepth}
-                                        className="sticky top-0 z-40 bg-muted px-3 py-2 text-left font-medium whitespace-nowrap border-b border-border/70 border-r border-border/70"
+                                        className="sticky top-0 z-40 whitespace-nowrap border-b border-r border-border/70 bg-muted px-2 py-2 text-left font-medium sm:px-3"
                                         style={{
                                           left: `${pivotRowStickyOffsets[index]}px`,
-                                          minWidth: `${PIVOT_ROW_HEADER_COL_WIDTH}px`,
-                                          width: `${PIVOT_ROW_HEADER_COL_WIDTH}px`,
+                                          minWidth: `${pivotRowHeaderColWidth}px`,
+                                          width: `${pivotRowHeaderColWidth}px`,
                                         }}
                                       >
                                         <span
-                                          className="block max-w-[140px] truncate"
+                                          className="block truncate"
+                                          style={{ maxWidth: `${pivotRowHeaderLabelWidth}px` }}
                                           title={label}
                                         >
                                           {label}
@@ -3882,16 +3988,20 @@ export default function ReportsPage() {
                                       <th
                                         key={group.key}
                                         colSpan={group.span}
-                                        className="bg-muted px-3 py-2 text-center font-medium whitespace-nowrap border-b border-border/70 border-r border-border/70"
+                                        className="whitespace-nowrap border-b border-r border-border/70 bg-muted px-2 py-2 text-center font-medium sm:px-3"
                                       >
                                         <span
-                                          className="block max-w-[180px] truncate"
+                                          className="block truncate"
+                                          style={{ maxWidth: `${pivotColumnHeaderLabelWidth}px` }}
                                           title={hint ? `${group.label} (${hint})` : group.label}
                                         >
                                           {group.label}
                                         </span>
                                         {hint ? (
-                                          <span className="mt-0.5 block max-w-[180px] truncate text-[11px] font-normal tabular-nums text-muted-foreground/90">
+                                          <span
+                                            className="mt-0.5 block truncate text-[11px] font-normal tabular-nums text-muted-foreground/90"
+                                            style={{ maxWidth: `${pivotColumnHeaderLabelWidth}px` }}
+                                          >
                                             {hint}
                                           </span>
                                         ) : null}
@@ -3902,7 +4012,7 @@ export default function ReportsPage() {
                                 {level === 0 ? (
                                   <th
                                     rowSpan={pivotColumnHeaderDepth}
-                                    className="sticky top-0 z-30 bg-muted px-3 py-2 text-right font-medium whitespace-nowrap border-b border-border/70 border-r border-border/70"
+                                    className="sticky top-0 z-30 whitespace-nowrap border-b border-r border-border/70 bg-muted px-2 py-2 text-right font-medium sm:px-3"
                                   >
                                     Tổng
                                   </th>
@@ -3921,15 +4031,16 @@ export default function ReportsPage() {
                                     <td
                                       key={`${row.key}-row-${level}`}
                                       rowSpan={span}
-                                      className="sticky z-10 bg-background px-3 py-2 align-top font-medium text-foreground border-b border-border/60 border-r border-border/60"
+                                      className="sticky z-10 border-b border-r border-border/60 bg-background px-2 py-2 align-top font-medium text-foreground sm:px-3"
                                       style={{
                                         left: `${pivotRowStickyOffsets[level]}px`,
-                                        minWidth: `${PIVOT_ROW_HEADER_COL_WIDTH}px`,
-                                        width: `${PIVOT_ROW_HEADER_COL_WIDTH}px`,
+                                        minWidth: `${pivotRowHeaderColWidth}px`,
+                                        width: `${pivotRowHeaderColWidth}px`,
                                       }}
                                     >
                                       <span
-                                        className="block max-w-[140px] truncate"
+                                        className="block truncate"
+                                        style={{ maxWidth: `${pivotRowHeaderLabelWidth}px` }}
                                         title={cellLabel}
                                       >
                                         {cellLabel}
@@ -3949,7 +4060,7 @@ export default function ReportsPage() {
                                     <td
                                       key={`${row.key}-${col.key}`}
                                       style={style}
-                                      className="px-3 py-2 text-right tabular-nums whitespace-nowrap border-b border-border/60 border-r border-border/60 transition-colors"
+                                      className="whitespace-nowrap border-b border-r border-border/60 px-2 py-2 text-right tabular-nums transition-colors sm:px-3"
                                     >
                                       {formatPivotValue(value, config.pivot.metric)}
                                     </td>
@@ -3969,7 +4080,7 @@ export default function ReportsPage() {
                                   return (
                                     <td
                                       style={style}
-                                      className="px-3 py-2 text-right font-medium tabular-nums whitespace-nowrap border-b border-border/60 border-r border-border/60 transition-colors"
+                                      className="whitespace-nowrap border-b border-r border-border/60 px-2 py-2 text-right font-medium tabular-nums transition-colors sm:px-3"
                                     >
                                       {formatPivotValue(value, config.pivot.metric)}
                                     </td>
@@ -3981,11 +4092,11 @@ export default function ReportsPage() {
                               {pivotRowHeaderLabels.map((label, level) => (
                                 <td
                                   key={`pivot-total-${level}`}
-                                  className="sticky z-10 bg-muted/40 px-3 py-2 font-medium border-b border-border/60 border-r border-border/60"
+                                  className="sticky z-10 border-b border-r border-border/60 bg-muted/40 px-2 py-2 font-medium sm:px-3"
                                   style={{
                                     left: `${pivotRowStickyOffsets[level]}px`,
-                                    minWidth: `${PIVOT_ROW_HEADER_COL_WIDTH}px`,
-                                    width: `${PIVOT_ROW_HEADER_COL_WIDTH}px`,
+                                    minWidth: `${pivotRowHeaderColWidth}px`,
+                                    width: `${pivotRowHeaderColWidth}px`,
                                   }}
                                 >
                                   {level === 0 ? "Tổng" : null}
@@ -4003,7 +4114,7 @@ export default function ReportsPage() {
                                   <td
                                     key={`total-${col.key}`}
                                     style={style}
-                                    className="px-3 py-2 text-right font-medium tabular-nums whitespace-nowrap border-b border-border/60 border-r border-border/60 transition-colors"
+                                    className="whitespace-nowrap border-b border-r border-border/60 px-2 py-2 text-right font-medium tabular-nums transition-colors sm:px-3"
                                   >
                                     {formatPivotValue(value, config.pivot.metric)}
                                   </td>
@@ -4023,7 +4134,7 @@ export default function ReportsPage() {
                                 return (
                                   <td
                                     style={style}
-                                    className="px-3 py-2 text-right font-semibold tabular-nums whitespace-nowrap border-b border-border/60 border-r border-border/60 transition-colors"
+                                    className="whitespace-nowrap border-b border-r border-border/60 px-2 py-2 text-right font-semibold tabular-nums transition-colors sm:px-3"
                                   >
                                     {formatPivotValue(value, config.pivot.metric)}
                                   </td>
@@ -4039,9 +4150,9 @@ export default function ReportsPage() {
                 ) : null}
 
                 {pivotShowChart ? (
-                  <Card>
-                    <CardContent className="p-3 space-y-2">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Card className="-mx-1 min-w-0 overflow-hidden sm:mx-0">
+                    <CardContent className="min-w-0 space-y-2 p-1 sm:p-3">
+                      <div className="hidden flex-wrap items-center justify-between gap-2 sm:flex">
                         <div className="text-base font-semibold">Biểu đồ pivot</div>
                         {pivotHasColumns ? (
                           <div className="flex flex-wrap items-center gap-2">
@@ -4067,7 +4178,7 @@ export default function ReportsPage() {
                         ) : null}
                       </div>
                       {showPivotBaseDailyCap || showPivotDynamicDailyCapLine ? (
-                        <div className="text-xs text-muted-foreground">
+                        <div className="hidden text-xs text-muted-foreground sm:block">
                           {showPivotBaseDailyCap ? (
                             <>
                               Nét đứt = Cap chi/ngày gốc đầu tháng (ngày 1):{" "}
@@ -4081,25 +4192,36 @@ export default function ReportsPage() {
                           ) : null}
                         </div>
                       ) : null}
-                    <div className="h-[320px] sm:h-[460px]">
+                    <div className="h-[340px] sm:h-[460px]">
                       {pivotChartData.length === 0 ? (
-                        <ChartEmptyState className="min-h-[320px]" />
+                        <ChartEmptyState className="min-h-[340px] sm:min-h-[320px]" />
                       ) : (
                         <ResponsiveContainer width="100%" height="100%">
                           {config.pivot.chartType === "bar" ? (
                             <ComposedChart
                               data={pivotChartData}
-                              margin={{ left: 8, right: 16, top: 8, bottom: 8 }}
+                              margin={reportChartMargin}
+                              onClick={handlePivotChartTap}
                             >
                               <CartesianGrid {...chartGridProps} />
                               <XAxis
                                 dataKey="name"
+                                height={isNarrowViewport ? 24 : 30}
+                                minTickGap={isNarrowViewport ? 18 : 5}
+                                tick={reportChartTick}
+                                tickLine={!isNarrowViewport}
                                 tickFormatter={(v) =>
-                                  isNarrowViewport ? shortenLabel(String(v), 8) : String(v)
+                                  isNarrowViewport ? shortenLabel(String(v), 6) : String(v)
                                 }
                               />
-                              <YAxis tickFormatter={formatMoneyAxisTick} />
+                              <YAxis
+                                tick={reportChartTick}
+                                tickLine={!isNarrowViewport}
+                                tickFormatter={formatMoneyAxisTick}
+                                width={reportChartYAxisWidth}
+                              />
                               <Tooltip
+                                {...pivotTooltipProps}
                                 cursor={false}
                                 content={
                                   <ChartTooltipContent
@@ -4178,17 +4300,28 @@ export default function ReportsPage() {
                           ) : config.pivot.chartType === "area" ? (
                             <AreaChart
                               data={pivotChartData}
-                              margin={{ left: 8, right: 16, top: 8, bottom: 8 }}
+                              margin={reportChartMargin}
+                              onClick={handlePivotChartTap}
                             >
                               <CartesianGrid {...chartGridProps} />
                               <XAxis
                                 dataKey="name"
+                                height={isNarrowViewport ? 24 : 30}
+                                minTickGap={isNarrowViewport ? 18 : 5}
+                                tick={reportChartTick}
+                                tickLine={!isNarrowViewport}
                                 tickFormatter={(v) =>
-                                  isNarrowViewport ? shortenLabel(String(v), 8) : String(v)
+                                  isNarrowViewport ? shortenLabel(String(v), 6) : String(v)
                                 }
                               />
-                              <YAxis tickFormatter={formatMoneyAxisTick} />
+                              <YAxis
+                                tick={reportChartTick}
+                                tickLine={!isNarrowViewport}
+                                tickFormatter={formatMoneyAxisTick}
+                                width={reportChartYAxisWidth}
+                              />
                               <Tooltip
+                                {...pivotTooltipProps}
                                 cursor={false}
                                 content={
                                   <ChartTooltipContent
@@ -4265,17 +4398,28 @@ export default function ReportsPage() {
                           ) : (
                             <LineChart
                               data={pivotChartData}
-                              margin={{ left: 8, right: 16, top: 8, bottom: 8 }}
+                              margin={reportChartMargin}
+                              onClick={handlePivotChartTap}
                             >
                               <CartesianGrid {...chartGridProps} />
                               <XAxis
                                 dataKey="name"
+                                height={isNarrowViewport ? 24 : 30}
+                                minTickGap={isNarrowViewport ? 18 : 5}
+                                tick={reportChartTick}
+                                tickLine={!isNarrowViewport}
                                 tickFormatter={(v) =>
-                                  isNarrowViewport ? shortenLabel(String(v), 8) : String(v)
+                                  isNarrowViewport ? shortenLabel(String(v), 6) : String(v)
                                 }
                               />
-                              <YAxis tickFormatter={formatMoneyAxisTick} />
+                              <YAxis
+                                tick={reportChartTick}
+                                tickLine={!isNarrowViewport}
+                                tickFormatter={formatMoneyAxisTick}
+                                width={reportChartYAxisWidth}
+                              />
                               <Tooltip
+                                {...pivotTooltipProps}
                                 cursor={false}
                                 content={
                                   <ChartTooltipContent

@@ -434,17 +434,17 @@ export default function AdvisorPage() {
   const DecisionIcon = decision?.icon
 
   return (
-    <div className="space-y-4 sm:space-y-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+    <div className="space-y-3 sm:space-y-6">
+      <div className="flex flex-col gap-2 sm:gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Tư vấn mua sắm</h1>
-          <p className="max-w-3xl text-sm text-muted-foreground">
+          <h1 className="text-lg font-semibold tracking-tight sm:text-2xl">Tư vấn mua sắm</h1>
+          <p className="hidden max-w-3xl text-sm text-muted-foreground sm:block">
             Công cụ này không hỏi bạn có thích món đó không. Nó kiểm tra dòng tiền, MSS,
             quỹ khẩn cấp, nhịp chi tiêu, nợ, cap còn lại, lịch sử tháng trước và kế hoạch
             mua đã lưu trước khi đưa kết luận.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-1.5 sm:gap-2">
           {dayContext.dateHasExpense ? (
             <Badge variant="outline" className="gap-1 border-primary/40">
               <LockKeyhole className="h-3.5 w-3.5" />
@@ -459,7 +459,7 @@ export default function AdvisorPage() {
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+      <div className="grid gap-3 sm:gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">

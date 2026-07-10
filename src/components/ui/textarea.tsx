@@ -1,11 +1,12 @@
 import * as React from "react"
 import { cn } from "@/lib/utils"
+import { keepFocusedFieldVisible } from "@/lib/mobileFocus"
 
 export interface TextareaProps
   extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {}
 
 const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
-  ({ className, ...props }, ref) => {
+  ({ className, onFocus, ...props }, ref) => {
     return (
       <textarea
         className={cn(
@@ -13,6 +14,10 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
           className,
         )}
         ref={ref}
+        onFocus={(event) => {
+          keepFocusedFieldVisible(event.currentTarget)
+          onFocus?.(event)
+        }}
         {...props}
       />
     )
@@ -21,4 +26,3 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
 Textarea.displayName = "Textarea"
 
 export { Textarea }
-

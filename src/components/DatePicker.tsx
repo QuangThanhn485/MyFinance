@@ -6,6 +6,52 @@ import { formatIsoDate, parseIsoDateLocal } from "@/lib/date"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 
+type FlatpickrInstanceLike = {
+  input: HTMLInputElement
+  calendarContainer: HTMLElement
+}
+
+function positionCalendarInMobileViewport(instance: FlatpickrInstanceLike) {
+  if (typeof window === "undefined") return
+
+  const calendar = instance.calendarContainer
+  if (window.innerWidth >= 640) {
+    calendar.classList.remove("cttm-flatpickr-mobile")
+    ;["position", "left", "right", "top", "transform", "width", "maxWidth"].forEach((prop) => {
+      calendar.style.removeProperty(prop)
+    })
+    return
+  }
+
+  const place = () => {
+    const viewport = window.visualViewport
+    const viewportHeight = viewport?.height ?? window.innerHeight
+    const viewportOffsetTop = viewport?.offsetTop ?? 0
+    const inputRect = instance.input.getBoundingClientRect()
+    const calendarHeight = calendar.offsetHeight || 320
+    const bottomReserve = 88
+    const sideGap = 12
+    const width = Math.min(328, Math.max(296, window.innerWidth - sideGap * 2))
+
+    let top = viewportOffsetTop + inputRect.bottom + 8
+    const maxTop = viewportOffsetTop + viewportHeight - calendarHeight - bottomReserve
+    if (top > maxTop) top = Math.max(viewportOffsetTop + sideGap, maxTop)
+    top = Math.max(viewportOffsetTop + sideGap, top)
+
+    calendar.classList.add("cttm-flatpickr-mobile")
+    calendar.style.position = "fixed"
+    calendar.style.left = `${Math.round((window.innerWidth - width) / 2)}px`
+    calendar.style.right = "auto"
+    calendar.style.top = `${Math.round(top)}px`
+    calendar.style.transform = "none"
+    calendar.style.width = `${Math.round(width)}px`
+    calendar.style.maxWidth = `calc(100vw - ${sideGap * 2}px)`
+  }
+
+  window.requestAnimationFrame(place)
+  window.setTimeout(place, 80)
+}
+
 type DatePickerProps = {
   value?: ISODate
   onChange: (next?: ISODate) => void
@@ -44,11 +90,27 @@ export default function DatePicker({
         options={{
           locale: Vietnamese,
           dateFormat: "d/m/Y",
-          allowInput: true,
+          allowInput: false,
           clickOpens: true,
           disableMobile: true,
           monthSelectorType: "static",
           position: "auto center",
+          appendTo: typeof document === "undefined" ? undefined : document.body,
+        }}
+        onReady={(_dates, _dateStr, instance) => {
+          instance.input.readOnly = true
+          instance.input.setAttribute("inputmode", "none")
+          instance.input.setAttribute("autocomplete", "off")
+        }}
+        onOpen={(_dates, _dateStr, instance) => {
+          instance.input.blur()
+          positionCalendarInMobileViewport(instance)
+        }}
+        onMonthChange={(_dates, _dateStr, instance) => {
+          positionCalendarInMobileViewport(instance)
+        }}
+        onYearChange={(_dates, _dateStr, instance) => {
+          positionCalendarInMobileViewport(instance)
         }}
         onChange={(dates, _dateStr, instance) => {
           const date = dates?.[0]

@@ -924,13 +924,13 @@ export default function ExpensesPage() {
     <div
       ref={rootRef}
       style={pageHeight ? { height: pageHeight } : undefined}
-      className="flex flex-col gap-3 lg:overflow-hidden"
+      className="flex flex-col gap-2 sm:gap-3 lg:overflow-hidden"
     >
-      <div className="flex flex-wrap items-end justify-between gap-3">
+      <div className="flex flex-wrap items-end justify-between gap-2 sm:gap-3">
         <div className="min-w-0">
-          <h1 className="text-xl font-semibold tracking-tight">Ghi chi tiêu</h1>
-          <p className="text-xs text-muted-foreground sm:text-sm">
-            Bố cục một màn hình: thống kê, thêm chi tiêu và danh sách trong ngày.
+          <h1 className="text-lg font-semibold tracking-tight sm:text-xl">Ghi chi tiêu</h1>
+          <p className="hidden text-xs text-muted-foreground sm:block sm:text-sm">
+            Chọn ngày, thêm khoản mới hoặc dùng mẫu nhanh.
           </p>
         </div>
         <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
@@ -983,10 +983,10 @@ export default function ExpensesPage() {
       ) : null}
 
       <div className="lg:flex-1 lg:min-h-0 lg:overflow-hidden">
-        <div className="flex flex-col gap-3 lg:h-full lg:flex-row">
+        <div className="flex flex-col gap-2 sm:gap-3 lg:h-full lg:flex-row">
           <div
             style={panelStyle(statsCollapsed, 0.9)}
-            className="min-h-0 transition-[flex-basis,min-width,max-width] duration-200 ease-out lg:order-3"
+            className="order-3 min-h-0 transition-[flex-basis,min-width,max-width] duration-200 ease-out lg:order-3"
           >
             <CollapsibleCard
               title="Thống kê nhanh"
@@ -1087,7 +1087,7 @@ export default function ExpensesPage() {
 
           <div
             style={panelStyle(addCollapsed, 1.3)}
-            className="min-h-0 transition-[flex-basis,min-width,max-width] duration-200 ease-out lg:order-1"
+            className="order-1 min-h-0 transition-[flex-basis,min-width,max-width] duration-200 ease-out lg:order-1"
           >
             <CollapsibleCard
               title="Thêm chi tiêu"
@@ -1095,6 +1095,7 @@ export default function ExpensesPage() {
               collapsed={addCollapsed}
               onToggle={() => setAddCollapsed((prev) => !prev)}
               summary={`${sortedTemplates.length} item thêm nhanh`}
+              className="border-primary/30 bg-primary/5 lg:border-border lg:bg-card"
               contentClassName="lg:h-full lg:min-h-0"
               headerActions={
                 <div className="flex items-center gap-1">
@@ -1102,13 +1103,16 @@ export default function ExpensesPage() {
                     type="button"
                     size="sm"
                     variant="secondary"
+                    className="h-7 px-2 text-xs sm:h-8 sm:px-3 sm:text-sm"
                     onClick={() => setTemplateEditor({ mode: "create" })}
                   >
-                    Thêm mẫu
+                    <span className="sm:hidden">Mẫu</span>
+                    <span className="hidden sm:inline">Thêm mẫu</span>
                   </Button>
                   <Button
                     type="button"
                     size="sm"
+                    className="h-7 px-2 text-xs sm:h-8 sm:px-3 sm:text-sm"
                     disabled={selectedDateReadOnly}
                     title={
                       selectedMonthLocked
@@ -1171,7 +1175,7 @@ export default function ExpensesPage() {
 
           <div
             style={panelStyle(listCollapsed, 1.1)}
-            className="min-h-0 transition-[flex-basis,min-width,max-width] duration-200 ease-out lg:order-2"
+            className="order-2 min-h-0 transition-[flex-basis,min-width,max-width] duration-200 ease-out lg:order-2"
           >
             <CollapsibleCard
               title="Danh sách chi tiêu"
@@ -1268,7 +1272,7 @@ export default function ExpensesPage() {
       </div>
 
       <Dialog open={addExpenseDialogOpen} onOpenChange={setAddExpenseDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="bottom-0 left-0 right-0 top-auto max-h-[92dvh] w-full max-w-none translate-x-0 translate-y-0 overflow-y-auto rounded-b-none rounded-t-2xl border-x-0 border-b-0 p-4 sm:left-[50%] sm:top-[50%] sm:w-[calc(100vw-2rem)] sm:max-w-2xl sm:translate-x-[-50%] sm:translate-y-[-50%] sm:rounded-lg sm:border sm:p-6">
           <DialogHeader>
             <DialogTitle>Thêm chi tiêu</DialogTitle>
           </DialogHeader>

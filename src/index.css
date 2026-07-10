@@ -247,6 +247,34 @@
   z-index: 60;
 }
 
+@media (max-width: 639px) {
+  .flatpickr-calendar.cttm-flatpickr-mobile {
+    box-sizing: border-box;
+    overflow: hidden;
+  }
+
+  .flatpickr-calendar.cttm-flatpickr-mobile.arrowTop:before,
+  .flatpickr-calendar.cttm-flatpickr-mobile.arrowTop:after,
+  .flatpickr-calendar.cttm-flatpickr-mobile.arrowBottom:before,
+  .flatpickr-calendar.cttm-flatpickr-mobile.arrowBottom:after {
+    display: none;
+  }
+
+  .flatpickr-calendar.cttm-flatpickr-mobile .flatpickr-rContainer,
+  .flatpickr-calendar.cttm-flatpickr-mobile .flatpickr-weekdays,
+  .flatpickr-calendar.cttm-flatpickr-mobile .flatpickr-days,
+  .flatpickr-calendar.cttm-flatpickr-mobile .dayContainer {
+    min-width: 0 !important;
+    max-width: 100% !important;
+    width: 100% !important;
+  }
+
+  .flatpickr-calendar.cttm-flatpickr-mobile .flatpickr-day {
+    flex-basis: 14.285714%;
+    max-width: none;
+  }
+}
+
 .flatpickr-calendar.arrowTop:before,
 .flatpickr-calendar.arrowTop:after,
 .flatpickr-calendar.arrowBottom:before,
