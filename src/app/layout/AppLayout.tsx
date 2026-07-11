@@ -1,14 +1,28 @@
 import { useEffect, useState } from "react"
-import { Outlet } from "react-router-dom"
+import { Outlet, useLocation } from "react-router-dom"
 import AppOverlays from "@/app/layout/AppOverlays"
 import { MobileAppBar, MobileBottomNav } from "@/app/layout/MobileNavigation"
 import SideNav from "@/app/layout/SideNav"
 import { useAppStore } from "@/store/useAppStore"
 
 const SIDEBAR_COLLAPSED_KEY = "smartSpend.ui.sidebarCollapsed.v1"
+const APP_TITLE = "Chi Tiêu Thông Minh"
+const ROUTE_TITLES: Record<string, string> = {
+  "/dashboard": "Tổng quan",
+  "/expenses": "Ghi chi",
+  "/budgets": "Ngân sách",
+  "/advisor": "Tư vấn mua sắm",
+  "/reports": "Báo cáo",
+  "/daily-cap-planner": "Phân tích nâng cap ngày",
+  "/settings": "Cài đặt",
+  "/categories": "Danh mục",
+  "/data": "Dữ liệu",
+  "/import-export": "Dữ liệu",
+}
 
 export default function AppLayout() {
   const autoClose = useAppStore((s) => s.actions.autoClosePreviousMonthIfNeeded)
+  const location = useLocation()
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
       return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1"
@@ -32,6 +46,15 @@ export default function AppLayout() {
     }, 60_000)
     return () => window.clearInterval(timer)
   }, [autoClose])
+
+  useEffect(() => {
+    const pathname = location.pathname
+    const routeTitle =
+      ROUTE_TITLES[pathname] ??
+      Object.entries(ROUTE_TITLES).find(([path]) => pathname.startsWith(`${path}/`))?.[1]
+
+    document.title = routeTitle ? `${routeTitle} | ${APP_TITLE}` : APP_TITLE
+  }, [location.pathname])
 
   // Khung ứng dụng cao đúng bằng viewport và tự khóa cuộn: document KHÔNG cuộn, chỉ <main> cuộn
   // nội bộ. Chiều cao dùng `h-full` (= 100%) dựa trên chuỗi % html→body→#root đã khóa ở

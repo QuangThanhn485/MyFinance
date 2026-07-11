@@ -48,9 +48,12 @@ import type {
   ValueType,
 } from "recharts/types/component/DefaultTooltipContent"
 import {
+  ArrowDown,
+  ArrowUp,
   BarChart3,
   Columns2,
   Info,
+  MoveRight,
   SlidersHorizontal,
   Sparkles,
   Table,
@@ -314,7 +317,7 @@ function currentYearRange(today: ISODate): DateRangeValue {
   const year = today.slice(0, 4)
   return {
     start: `${year}-01-01` as ISODate,
-    end: `${year}-12-31` as ISODate,
+    end: today,
   }
 }
 
@@ -1411,9 +1414,11 @@ export default function ReportsPage() {
     ],
   )
   const pivotChartPrimary = config.pivot.rowFields[0]
-  const pivotChartLimit =
-    pivotChartPrimary === "day" || pivotChartPrimary === "week" ? 31 : 8
-  const pivotChartRows = pivotTable.rows.slice(0, pivotChartLimit)
+  const pivotChartIsTimeline = pivotChartPrimary === "day" || pivotChartPrimary === "week"
+  const pivotChartLimit = pivotChartIsTimeline ? null : 8
+  const pivotChartRows = pivotChartLimit === null
+    ? pivotTable.rows
+    : pivotTable.rows.slice(0, pivotChartLimit)
   const pivotHasColumns = config.pivot.columnFields.length > 0
   const pivotMoneyMetric = config.pivot.metric !== "count"
   const pivotHeatmapEnabled = pivotMoneyMetric && config.pivot.colorByAmount
@@ -1597,7 +1602,7 @@ export default function ReportsPage() {
     })
     return entry
   })
-  const pivotChartLimited = pivotTable.rows.length > pivotChartLimit
+  const pivotChartLimited = pivotChartLimit !== null && pivotTable.rows.length > pivotChartLimit
   const showPivotDynamicDailyCapLine =
     pivotChartPrimary === "day" &&
     config.pivot.metric === "sum" &&
@@ -1751,6 +1756,48 @@ export default function ReportsPage() {
         pivot: {
           ...s.pivot,
           columnFields: s.pivot.columnFields.filter((f) => f !== field),
+        },
+      }
+    })
+  }
+  const pivotFieldLabel = (field: PivotGroupKey) =>
+    PIVOT_FIELDS.find((f) => f.id === field)?.label ?? field
+  const handlePivotAssign = (field: PivotGroupKey, target: "row" | "column") => {
+    setConfig((s) => {
+      const nextRow = s.pivot.rowFields.filter((f) => f !== field)
+      const nextColumn = s.pivot.columnFields.filter((f) => f !== field)
+      if (target === "row") {
+        nextRow.push(field)
+      } else {
+        nextColumn.push(field)
+      }
+      return {
+        ...s,
+        pivot: {
+          ...s.pivot,
+          rowFields: nextRow,
+          columnFields: nextColumn,
+        },
+      }
+    })
+  }
+  const handlePivotMove = (
+    field: PivotGroupKey,
+    target: "row" | "column",
+    direction: -1 | 1,
+  ) => {
+    setConfig((s) => {
+      const list = target === "row" ? s.pivot.rowFields : s.pivot.columnFields
+      const fromIndex = list.indexOf(field)
+      const toIndex = fromIndex + direction
+      if (fromIndex < 0 || toIndex < 0 || toIndex >= list.length) return s
+      const next = arrayMove(list, fromIndex, toIndex)
+      return {
+        ...s,
+        pivot: {
+          ...s.pivot,
+          rowFields: target === "row" ? next : s.pivot.rowFields,
+          columnFields: target === "column" ? next : s.pivot.columnFields,
         },
       }
     })
@@ -2045,6 +2092,133 @@ export default function ReportsPage() {
         payload: pivotTooltip.payload,
       }
     : {}
+  const renderMobilePivotSelectedFields = (
+    fields: PivotGroupKey[],
+    target: "row" | "column",
+  ) => {
+    const title = target === "row" ? "Hàng" : "Cột"
+    const transferLabel = target === "row" ? "Cột" : "Hàng"
+    const transferTarget = target === "row" ? "column" : "row"
+
+    return (
+      <div className="rounded-md border bg-background p-3">
+        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          {title}
+        </div>
+        {fields.length === 0 ? (
+          <div className="mt-2 rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
+            Chưa chọn trường nào.
+          </div>
+        ) : (
+          <div className="mt-2 space-y-2">
+            {fields.map((field, index) => (
+              <div
+                key={`${target}-${field}`}
+                className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-lg border bg-muted/20 px-2 py-2"
+              >
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-[11px] font-semibold text-muted-foreground tabular-nums">
+                  {index + 1}
+                </span>
+                <span className="min-w-0 truncate text-sm font-medium">
+                  {pivotFieldLabel(field)}
+                </span>
+                <div className="flex items-center gap-1">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    disabled={index === 0}
+                    aria-label={`Đưa ${pivotFieldLabel(field)} lên`}
+                    onClick={() => handlePivotMove(field, target, -1)}
+                  >
+                    <ArrowUp className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    disabled={index === fields.length - 1}
+                    aria-label={`Đưa ${pivotFieldLabel(field)} xuống`}
+                    onClick={() => handlePivotMove(field, target, 1)}
+                  >
+                    <ArrowDown className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 gap-1 px-2 text-[11px]"
+                    onClick={() => handlePivotAssign(field, transferTarget)}
+                  >
+                    <MoveRight className="h-3.5 w-3.5" />
+                    {transferLabel}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    aria-label={`Bỏ ${pivotFieldLabel(field)}`}
+                    onClick={() => handlePivotRemove(field, target)}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
+  const renderMobilePivotAvailableFields = () => (
+    <div className="rounded-md border bg-background p-3">
+      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        Trường dữ liệu
+      </div>
+      <div className="mt-2 space-y-2">
+        {PIVOT_FIELDS.map((field) => {
+          const inRow = config.pivot.rowFields.includes(field.id)
+          const inColumn = config.pivot.columnFields.includes(field.id)
+          const status = inRow ? "Đang ở Hàng" : inColumn ? "Đang ở Cột" : "Chưa dùng"
+
+          return (
+            <div
+              key={field.id}
+              className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-lg border bg-muted/10 px-2 py-2"
+            >
+              <div className="min-w-0">
+                <div className="truncate text-sm font-medium">{field.label}</div>
+                <div className="text-[11px] text-muted-foreground">{status}</div>
+              </div>
+              <div className="grid grid-cols-2 gap-1">
+                <Button
+                  type="button"
+                  variant={inRow ? "secondary" : "outline"}
+                  size="sm"
+                  className="h-8 px-2 text-[11px]"
+                  onClick={() => handlePivotAssign(field.id, "row")}
+                >
+                  Hàng
+                </Button>
+                <Button
+                  type="button"
+                  variant={inColumn ? "secondary" : "outline"}
+                  size="sm"
+                  className="h-8 px-2 text-[11px]"
+                  onClick={() => handlePivotAssign(field.id, "column")}
+                >
+                  Cột
+                </Button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
 
   return (
     <div className="space-y-2 sm:space-y-4">
@@ -2708,6 +2882,98 @@ export default function ReportsPage() {
               </div>
             ) : config.mode === "pivot" ? (
               <div className="space-y-3">
+                {isNarrowViewport ? (
+                  <div className="space-y-3 rounded-lg border bg-muted/5 p-3">
+                    <div className="flex flex-col gap-3">
+                      <div className="min-w-0 space-y-1">
+                        <div className="text-sm font-semibold">Bố cục Pivot</div>
+                        <div className="text-xs text-muted-foreground">
+                          Chạm để đưa trường vào Hàng/Cột. Dùng mũi tên để đổi thứ tự.
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 px-2"
+                          onClick={() => {
+                            const defaults = defaultReportsConfig()
+                            setConfig((s) => ({
+                              ...s,
+                              pivot: defaults.pivot,
+                            }))
+                          }}
+                        >
+                          Reset
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 px-2"
+                          disabled={config.pivot.rowFields.length === 0}
+                          onClick={() =>
+                            setConfig((s) => ({
+                              ...s,
+                              pivot: { ...s.pivot, rowFields: [] },
+                            }))
+                          }
+                        >
+                          Bỏ hàng
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 px-2"
+                          disabled={config.pivot.columnFields.length === 0}
+                          onClick={() =>
+                            setConfig((s) => ({
+                              ...s,
+                              pivot: { ...s.pivot, columnFields: [] },
+                            }))
+                          }
+                        >
+                          Bỏ cột
+                        </Button>
+                      </div>
+                    </div>
+
+                    {renderMobilePivotAvailableFields()}
+
+                    <div className="grid gap-3">
+                      {renderMobilePivotSelectedFields(config.pivot.rowFields, "row")}
+                      {renderMobilePivotSelectedFields(config.pivot.columnFields, "column")}
+                    </div>
+
+                    <div className="text-xs text-muted-foreground">
+                      Hàng = {pivotRowSummaryText} • Cột = {pivotColumnSummaryText}
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-background/70 px-3 py-2">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <Checkbox
+                          id="pivot-color-by-amount-mobile"
+                          disabled={!pivotMoneyMetric}
+                          checked={pivotMoneyMetric && config.pivot.colorByAmount}
+                          onCheckedChange={(next) =>
+                            setConfig((s) => ({
+                              ...s,
+                              pivot: { ...s.pivot, colorByAmount: next === true },
+                            }))
+                          }
+                        />
+                        <Label
+                          htmlFor="pivot-color-by-amount-mobile"
+                          className="min-w-0 truncate text-sm"
+                        >
+                          Màu theo số tiền
+                        </Label>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
                 <DndContext
                   sensors={pivotSensors}
                   collisionDetection={pivotCollisionDetection}
@@ -2891,11 +3157,12 @@ export default function ReportsPage() {
                   <DragOverlay zIndex={10000}>
                     {activePivotField ? (
                       <div className="rounded-full border bg-background px-3 py-1 text-xs font-semibold shadow-xl ring-2 ring-primary/30">
-                        {PIVOT_FIELDS.find((f) => f.id === activePivotField)?.label ?? ""}
+                        {pivotFieldLabel(activePivotField)}
                       </div>
                     ) : null}
                   </DragOverlay>
                 </DndContext>
+                )}
               </div>
             ) : (
               <div className="text-sm text-muted-foreground">

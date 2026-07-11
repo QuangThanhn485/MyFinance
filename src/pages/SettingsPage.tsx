@@ -33,7 +33,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import {
   Select,
   SelectContent,
@@ -46,7 +46,7 @@ import LabelValueRow from "@/components/LabelValueRow"
 import { formatVnd } from "@/lib/currency"
 import { monthFromIsoDate, previousMonth, todayIso } from "@/lib/date"
 import { cn } from "@/lib/utils"
-import { getActualMonthlySavingsVnd, getEmergencyFundMonthSummary } from "@/selectors/savings"
+import { getEmergencyFundMonthSummary } from "@/selectors/savings"
 import { useAppStore } from "@/store/useAppStore"
 
 const MONTH_LABELS = [
@@ -164,11 +164,14 @@ export default function SettingsPage() {
     () => getEmergencyFundMonthSummary(data, selectedMonth),
     [data, selectedMonth],
   )
-  const actualMonthlySavingsVnd = useMemo(
-    () => getActualMonthlySavingsVnd(data, selectedMonth),
-    [data, selectedMonth],
+  const emergencyFundWithdrawals = useMemo(
+    () => emergencyFundSummary.transactions.filter((tx) => tx.type === "withdraw"),
+    [emergencyFundSummary.transactions],
   )
-
+  const emergencyFundDeposits = useMemo(
+    () => emergencyFundSummary.transactions.filter((tx) => tx.type === "deposit"),
+    [emergencyFundSummary.transactions],
+  )
   const schema = z
     .object({
       monthlyIncomeVnd: z.coerce.number().int().nonnegative(),
@@ -243,6 +246,8 @@ export default function SettingsPage() {
   const [editingAmountVnd, setEditingAmountVnd] = useState(0)
   const editingFixedCost = editingAmountId ? data.entities.fixedCosts.byId[editingAmountId] : null
   const [fundDialogType, setFundDialogType] = useState<SavingsTransactionType | null>(null)
+  const [fundHistoryOpen, setFundHistoryOpen] = useState(false)
+  const [fundHistoryTab, setFundHistoryTab] = useState<SavingsTransactionType>("withdraw")
   const [fundAmountVnd, setFundAmountVnd] = useState(0)
   const [fundDate, setFundDate] = useState<ISODate>(() =>
     defaultDateForMonth(currentMonth, currentMonth),
@@ -251,6 +256,38 @@ export default function SettingsPage() {
   const [fundNote, setFundNote] = useState("")
 
   const ruleType = form.watch("ruleType")
+  const fundHistoryGroups = useMemo(
+    () => [
+      {
+        key: "withdraw" as const,
+        label: "Rút quỹ",
+        totalVnd: emergencyFundSummary.withdrawnVnd,
+        transactions: emergencyFundWithdrawals,
+        icon: ArrowDownCircle,
+        amountPrefix: "-",
+        amountClassName: "text-destructive",
+        emptyText: "Chưa có khoản rút.",
+      },
+      {
+        key: "deposit" as const,
+        label: "Nạp lại",
+        totalVnd: emergencyFundSummary.depositedVnd,
+        transactions: emergencyFundDeposits,
+        icon: ArrowUpCircle,
+        amountPrefix: "+",
+        amountClassName: "text-emerald-700 dark:text-emerald-400",
+        emptyText: "Chưa có khoản nạp.",
+      },
+    ],
+    [
+      emergencyFundDeposits,
+      emergencyFundSummary.depositedVnd,
+      emergencyFundSummary.withdrawnVnd,
+      emergencyFundWithdrawals,
+    ],
+  )
+  const activeFundHistoryGroup =
+    fundHistoryGroups.find((group) => group.key === fundHistoryTab) ?? fundHistoryGroups[0]
 
   useEffect(() => {
     if (categoryOptions.some((category) => category.id === newFcCategory)) return
@@ -263,6 +300,8 @@ export default function SettingsPage() {
     setNewFcAmountVnd(0)
     setNewFcCategory(defaultCategory)
     setFundDialogType(null)
+    setFundHistoryOpen(false)
+    setFundHistoryTab("withdraw")
     setFundAmountVnd(0)
     setFundDate(defaultDateForMonth(selectedMonth, currentMonth))
     setFundReason("Khẩn cấp khác")
@@ -281,6 +320,88 @@ export default function SettingsPage() {
     setFundDate(defaultDateForMonth(selectedMonth, currentMonth))
     setFundReason(type === "deposit" ? "Nạp lại quỹ" : "Khẩn cấp khác")
     setFundNote("")
+  }
+
+  const openFundHistoryDialog = () => {
+    setFundHistoryTab(emergencyFundWithdrawals.length > 0 ? "withdraw" : "deposit")
+    setFundHistoryOpen(true)
+  }
+
+  const renderFundHistoryGroup = (
+    group: (typeof fundHistoryGroups)[number],
+    density: "desktop" | "mobile" = "desktop",
+  ) => {
+    const Icon = group.icon
+
+    return (
+      <div
+        key={group.key}
+        className={cn(
+          "flex min-h-0 flex-col rounded-md border bg-background",
+          density === "mobile" && "h-full",
+        )}
+      >
+        <div className="flex items-start justify-between gap-3 border-b px-2.5 py-2 sm:px-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <Icon className={cn("h-4 w-4 shrink-0", group.amountClassName)} />
+            <span className="truncate text-sm font-medium sm:text-base">{group.label}</span>
+          </div>
+          <div className="shrink-0 text-right">
+            <div className={cn("text-sm font-semibold tabular-nums sm:text-base", group.amountClassName)} title={formatVnd(group.totalVnd)}>
+              {formatVnd(group.totalVnd)}
+            </div>
+            <div className="text-[11px] text-muted-foreground">
+              {group.transactions.length} giao dịch
+            </div>
+          </div>
+        </div>
+
+        <div
+          className={cn(
+            "grid content-start overflow-y-auto",
+            density === "mobile" ? "min-h-0 flex-1 gap-1.5 p-1.5" : "max-h-[42vh] min-h-32 gap-2 p-2",
+          )}
+        >
+          {group.transactions.length === 0 ? (
+            <div className="grid min-h-28 place-items-center rounded-md border border-dashed px-3 py-4 text-center text-sm text-muted-foreground">
+              {group.emptyText}
+            </div>
+          ) : (
+            group.transactions.map((tx) => (
+              <div key={tx.id} className="rounded-md border bg-muted/10 px-2.5 py-2 sm:p-3">
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                      <span className={cn("text-sm font-semibold tabular-nums sm:text-base", group.amountClassName)}>
+                        {group.amountPrefix}
+                        {formatVnd(tx.amountVnd)}
+                      </span>
+                      <span className="text-[11px] text-muted-foreground sm:text-xs">{tx.date}</span>
+                    </div>
+                    <div className="mt-0.5 break-words text-xs text-muted-foreground sm:mt-1 sm:text-sm">
+                      {tx.reason}{tx.note ? ` • ${tx.note}` : ""}
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-muted-foreground hover:text-destructive sm:h-8 sm:w-8"
+                    onClick={() => {
+                      deleteSavingsTransaction(tx.id)
+                      toast.success("Đã xoá biến động quỹ.")
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    <span className="sr-only">Xoá biến động quỹ</span>
+                  </Button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    )
   }
 
   const handleCreateSavingsTransaction = () => {
@@ -368,74 +489,74 @@ export default function SettingsPage() {
         </p>
       </div>
 
-      <div className="grid gap-3 sm:gap-4 lg:grid-cols-[280px_minmax(0,1fr)_minmax(0,1fr)]">
+      <div className="grid gap-3 sm:gap-4 lg:h-[calc(100dvh-8rem)] lg:min-h-0 lg:grid-cols-[280px_minmax(0,1fr)_minmax(0,1fr)] lg:items-start">
         <div className="space-y-3 sm:space-y-4">
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle>Chọn tháng</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2">
-              <Button type="button" variant="outline" size="icon" onClick={() => setSelectedYear((y) => y - 1)}>
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-              <div className="text-center font-semibold">{selectedYear}</div>
-              <Button type="button" variant="outline" size="icon" onClick={() => setSelectedYear((y) => y + 1)}>
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-            </div>
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle>Chọn tháng</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2">
+                <Button type="button" variant="outline" size="icon" onClick={() => setSelectedYear((y) => y - 1)}>
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <div className="text-center font-semibold">{selectedYear}</div>
+                <Button type="button" variant="outline" size="icon" onClick={() => setSelectedYear((y) => y + 1)}>
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
 
-            <div className="grid grid-cols-2 gap-2">
-              {MONTH_LABELS.map((label, index) => {
-                const month = toYearMonth(selectedYear, index + 1)
-                const isPast = month < currentMonth
-                const isCurrent = month === currentMonth
-                const isSelected = month === selectedMonth
-                const locked = isMonthLocked(data, month)
+              <div className="grid grid-cols-2 gap-2">
+                {MONTH_LABELS.map((label, index) => {
+                  const month = toYearMonth(selectedYear, index + 1)
+                  const isPast = month < currentMonth
+                  const isCurrent = month === currentMonth
+                  const isSelected = month === selectedMonth
+                  const locked = isMonthLocked(data, month)
 
-                return (
-                  <button
-                    key={month}
-                    type="button"
-                    onClick={() => setSelectedMonth(month)}
-                    className={cn(
-                      "rounded-md border px-2 py-2 text-left text-sm transition-colors",
-                      isPast && "bg-muted/50 text-muted-foreground",
-                      isCurrent && "border-primary ring-1 ring-primary/30",
-                      isSelected && "bg-primary/10 text-foreground",
-                    )}
-                  >
-                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
-                      <span className="truncate">{label}</span>
-                      {locked ? <Lock className="h-3.5 w-3.5 text-muted-foreground" /> : null}
-                    </div>
-                  </button>
-                )
-              })}
-            </div>
+                  return (
+                    <button
+                      key={month}
+                      type="button"
+                      onClick={() => setSelectedMonth(month)}
+                      className={cn(
+                        "rounded-md border px-2 py-2 text-left text-sm transition-colors",
+                        isPast && "bg-muted/50 text-muted-foreground",
+                        isCurrent && "border-primary ring-1 ring-primary/30",
+                        isSelected && "bg-primary/10 text-foreground",
+                      )}
+                    >
+                      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
+                        <span className="truncate">{label}</span>
+                        {locked ? <Lock className="h-3.5 w-3.5 text-muted-foreground" /> : null}
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
 
-            <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-              {hasOwnSettings
-                ? `Tháng ${selectedMonth} đang có cấu hình riêng.`
-                : `Tháng ${selectedMonth} đang kế thừa từ tháng gần nhất trước đó.`}
-            </div>
-          </CardContent>
-        </Card>
+              <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                {hasOwnSettings
+                  ? `Tháng ${selectedMonth} đang có cấu hình riêng.`
+                  : `Tháng ${selectedMonth} đang kế thừa từ tháng gần nhất trước đó.`}
+              </div>
+            </CardContent>
+          </Card>
 
         </div>
 
         <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="flex flex-wrap items-center justify-between gap-2">
-                <span>Cấu hình tháng {selectedMonth}</span>
-                {selectedMonthLocked ? (
-                  <span className="text-xs text-muted-foreground">Đã chốt (vẫn có thể chỉnh chuẩn hoá)</span>
-                ) : null}
-              </CardTitle>
-            </CardHeader>
-          <CardContent className="space-y-4">
+          <CardHeader className="pb-2">
+            <CardTitle className="flex flex-wrap items-center justify-between gap-2">
+              <span>Cấu hình tháng {selectedMonth}</span>
+              {selectedMonthLocked ? (
+                <span className="text-xs text-muted-foreground">Đã chốt (vẫn có thể chỉnh chuẩn hoá)</span>
+              ) : null}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
             <form
-              className="grid gap-4"
+              className="grid gap-3"
               onSubmit={form.handleSubmit((values) => {
                 let budgetRule: BudgetRule
                 if (values.ruleType === "custom") {
@@ -466,7 +587,7 @@ export default function SettingsPage() {
                   toast.success(`Đã lưu cấu hình tháng ${selectedMonth}.`)
               })}
             >
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-3 sm:grid-cols-2">
                 <div className="grid gap-2">
                   <Label>Lương cứng tháng (VND)</Label>
                   <Controller
@@ -489,7 +610,7 @@ export default function SettingsPage() {
                 </div>
               </div>
 
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-3 sm:grid-cols-2">
                 <div className="grid gap-2">
                   <Label>Ngày nhận lương (1-31)</Label>
                   <Input inputMode="numeric" {...form.register("paydayDayOfMonth")} />
@@ -530,7 +651,7 @@ export default function SettingsPage() {
                 </div>
               ) : null}
 
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-3 sm:grid-cols-2">
                 <div className="grid gap-2">
                   <Label>Baseline thiết yếu biến đổi (E)</Label>
                   <Controller
@@ -553,7 +674,7 @@ export default function SettingsPage() {
                 </div>
               </div>
 
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-3 sm:grid-cols-2">
                 <div className="grid gap-2">
                   <Label>Mục tiêu quỹ khẩn cấp (tháng)</Label>
                   <Input inputMode="numeric" {...form.register("emergencyFundTargetMonths")} />
@@ -575,98 +696,100 @@ export default function SettingsPage() {
 
             <Separator />
 
-            <div className="rounded-md border bg-muted/20 p-3 text-sm">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div className="rounded-md border bg-muted/20 p-2.5 text-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2 font-medium">
                   <WalletCards className="h-4 w-4 text-muted-foreground" />
                   <span>Biến động quỹ khẩn cấp</span>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <Button type="button" size="sm" variant="outline" onClick={() => openFundDialog("withdraw")}>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-8"
+                    onClick={() => openFundDialog("withdraw")}
+                  >
                     <ArrowDownCircle className="mr-1.5 h-4 w-4" />
                     Rút quỹ
                   </Button>
-                  <Button type="button" size="sm" variant="secondary" onClick={() => openFundDialog("deposit")}>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    className="h-8"
+                    onClick={() => openFundDialog("deposit")}
+                  >
                     <ArrowUpCircle className="mr-1.5 h-4 w-4" />
                     Nạp lại
                   </Button>
                 </div>
               </div>
 
-              <div className="grid gap-2 rounded-md bg-background p-3">
-                <LabelValueRow
-                  label="Số dư đầu tháng"
-                  value={formatVnd(emergencyFundSummary.openingBalanceVnd)}
-                />
-                <LabelValueRow label="Đã nạp trong tháng" value={formatVnd(emergencyFundSummary.depositedVnd)} />
-                <LabelValueRow label="Đã rút trong tháng" value={formatVnd(emergencyFundSummary.withdrawnVnd)} />
-                <Separator />
-                <LabelValueRow
-                  label="Số dư hiện tại sau biến động"
-                  value={formatVnd(emergencyFundSummary.effectiveBalanceVnd)}
-                  valueClassName="font-semibold"
-                />
-                <LabelValueRow
-                  label="Tiết kiệm tháng này sẽ chuyển sang tháng sau"
-                  labelTitle="Tiết kiệm tháng này sẽ chuyển sang tháng sau"
-                  value={formatVnd(actualMonthlySavingsVnd)}
-                />
-              </div>
-
-              <div className="mt-3 grid gap-2 pr-1 sm:max-h-56 sm:overflow-y-auto">
-                {emergencyFundSummary.transactions.length === 0 ? (
-                  <div className="rounded-md border border-dashed bg-background p-3 text-muted-foreground">
-                    Chưa có biến động quỹ trong tháng này.
+              <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                <div className="rounded-md bg-background px-2.5 py-2">
+                  <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                    <WalletCards className="h-3.5 w-3.5" />
+                    <span>Số dư đầu tháng</span>
                   </div>
-                ) : (
-                  emergencyFundSummary.transactions.map((tx) => (
-                    <div key={tx.id} className="rounded-md border bg-background p-3">
-                      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span
-                              className={cn(
-                                "font-medium tabular-nums",
-                                tx.type === "withdraw" ? "text-destructive" : "text-emerald-700 dark:text-emerald-400",
-                              )}
-                            >
-                              {tx.type === "withdraw" ? "-" : "+"}
-                              {formatVnd(tx.amountVnd)}
-                            </span>
-                            <span className="text-xs text-muted-foreground">{tx.date}</span>
-                          </div>
-                          <div className="truncate text-sm text-muted-foreground" title={tx.note || tx.reason}>
-                            {tx.reason}{tx.note ? ` • ${tx.note}` : ""}
-                          </div>
-                        </div>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                          onClick={() => {
-                            deleteSavingsTransaction(tx.id)
-                            toast.success("Đã xoá biến động quỹ.")
-                          }}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                          <span className="sr-only">Xoá biến động quỹ</span>
-                        </Button>
+                  <div
+                    className="mt-1 truncate font-semibold tabular-nums"
+                    title={formatVnd(emergencyFundSummary.openingBalanceVnd)}
+                  >
+                    {formatVnd(emergencyFundSummary.openingBalanceVnd)}
+                  </div>
+                </div>
+                <div className="rounded-md bg-background px-2.5 py-2 ring-1 ring-primary/15">
+                  <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                    <WalletCards className="h-3.5 w-3.5" />
+                    <span>Số dư hiện tại</span>
+                  </div>
+                  <div
+                    className="mt-1 truncate text-base font-semibold tabular-nums"
+                    title={formatVnd(emergencyFundSummary.effectiveBalanceVnd)}
+                  >
+                    {formatVnd(emergencyFundSummary.effectiveBalanceVnd)}
+                  </div>
+                </div>
+                <div className="rounded-md border bg-background/70 px-2.5 py-2">
+                  <div className="grid h-full gap-2 sm:grid-rows-[auto_auto]">
+                    <div className="min-w-0">
+                      <div className="truncate text-xs font-medium text-muted-foreground">
+                        Lịch sử • {emergencyFundSummary.transactionCount} giao dịch
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs">
+                        <span className="inline-flex items-center gap-1 text-destructive">
+                          <ArrowDownCircle className="h-3.5 w-3.5" />
+                          {emergencyFundWithdrawals.length} rút
+                        </span>
+                        <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400">
+                          <ArrowUpCircle className="h-3.5 w-3.5" />
+                          {emergencyFundDeposits.length} nạp
+                        </span>
                       </div>
                     </div>
-                  ))
-                )}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8 w-full self-end"
+                      onClick={openFundHistoryDialog}
+                    >
+                      Xem lịch sử
+                    </Button>
+                  </div>
+                </div>
               </div>
             </div>
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="pb-3">
+        <Card className="lg:flex lg:h-[calc(100dvh-8rem)] lg:min-h-0 lg:flex-col lg:overflow-hidden">
+          <CardHeader className="pb-2">
             <CardTitle className="flex flex-wrap items-center justify-between gap-2">
               <span>Chi phí cố định • {selectedMonth}</span>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs text-muted-foreground">{fixedCosts.length} khoản</span>
+                <span className="text-sm text-muted-foreground">{fixedCosts.length} khoản</span>
                 <Button
                   type="button"
                   size="sm"
@@ -679,8 +802,8 @@ export default function SettingsPage() {
               </div>
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-2 pr-1 lg:max-h-[calc(100vh-180px)] lg:overflow-y-auto">
+          <CardContent className="space-y-3 p-2 sm:p-3 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
+            <div className="flex flex-col gap-2 pr-1 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
               {fixedCosts.length === 0 ? (
                 <div className="space-y-3 rounded-md border border-dashed p-3 text-sm text-muted-foreground">
                   <div>Tháng này chưa có chi phí cố định.</div>
@@ -708,15 +831,30 @@ export default function SettingsPage() {
                 </div>
               ) : (
                 fixedCosts.map((fc) => (
-                  <div key={fc.id} className="rounded-md border p-3">
-                    <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
+                  <div key={fc.id} className="rounded-md border p-2.5">
+                    <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_160px_auto] lg:items-center">
                       <div className="min-w-0">
-                        <div className="truncate font-medium" title={fc.name}>{fc.name}</div>
-                        <div className="text-sm text-muted-foreground">
+                        <div className="truncate text-sm font-semibold leading-5" title={fc.name}>{fc.name}</div>
+                        <div className="truncate text-sm leading-5 text-muted-foreground" title={`${formatVnd(fc.amountVnd)} • ${categoryLabel(fc.category)}`}>
                           {formatVnd(fc.amountVnd)} • {categoryLabel(fc.category)}
                         </div>
                       </div>
-                      <div className="flex flex-wrap items-center justify-end gap-2">
+                      <div className="w-full lg:order-2">
+                        <Select
+                          value={fc.category}
+                          onValueChange={(v) => updateFixedCost(fc.id, { category: v as ExpenseCategory })}
+                        >
+                          <SelectTrigger className="h-9 text-sm">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {categoryOptions.map((c) => (
+                              <SelectItem key={c.id} value={c.id}>{c.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="flex flex-wrap items-center justify-end gap-1.5 lg:order-3">
                         <Switch
                           checked={fc.active}
                           onCheckedChange={(checked) => updateFixedCost(fc.id, { active: checked })}
@@ -724,6 +862,7 @@ export default function SettingsPage() {
                         <Button
                           variant="outline"
                           size="sm"
+                          className="h-9 px-3 text-sm"
                           onClick={() => {
                             setEditingAmountId(fc.id)
                             setEditingAmountVnd(fc.amountVnd)
@@ -734,6 +873,7 @@ export default function SettingsPage() {
                         <Button
                           variant="destructive"
                           size="sm"
+                          className="h-9 px-3 text-sm"
                           onClick={() => {
                             deleteFixedCost(fc.id)
                             toast.success("Đã xoá.")
@@ -742,21 +882,6 @@ export default function SettingsPage() {
                           Xoá
                         </Button>
                       </div>
-                    </div>
-                    <div className="mt-2 w-full sm:w-[180px]">
-                      <Select
-                        value={fc.category}
-                        onValueChange={(v) => updateFixedCost(fc.id, { category: v as ExpenseCategory })}
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {categoryOptions.map((c) => (
-                            <SelectItem key={c.id} value={c.id}>{c.label}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
                     </div>
                   </div>
                 ))
@@ -834,6 +959,78 @@ export default function SettingsPage() {
               <Button type="button" onClick={handleCreateSavingsTransaction}>
                 {fundDialogType === "deposit" ? "Nạp quỹ" : "Rút quỹ"}
               </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={fundHistoryOpen} onOpenChange={setFundHistoryOpen}>
+        <DialogContent className="max-sm:left-0 max-sm:top-0 max-sm:h-[100dvh] max-sm:w-full max-sm:max-w-none max-sm:max-h-[100dvh] max-sm:translate-x-0 max-sm:translate-y-0 max-sm:grid-rows-[auto_1fr] max-sm:gap-0 max-sm:overflow-hidden max-sm:rounded-none max-sm:border-0 max-sm:p-0 sm:max-w-5xl">
+          <DialogHeader className="border-b px-4 pb-3 pr-12 pt-4 text-left sm:border-0 sm:p-0 sm:pr-8">
+            <DialogTitle>
+              <span className="sm:hidden">Biến động quỹ</span>
+              <span className="hidden sm:inline">Biến động quỹ khẩn cấp • {selectedMonth}</span>
+            </DialogTitle>
+            <DialogDescription>
+              Tháng {selectedMonth} • {emergencyFundSummary.transactionCount} giao dịch
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-3 max-sm:min-h-0 max-sm:grid-rows-[auto_auto_1fr] max-sm:overflow-hidden max-sm:p-4">
+            <div className="grid grid-cols-2 gap-2">
+              <div className="rounded-md border bg-muted/20 px-2.5 py-2 sm:px-3">
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <WalletCards className="h-3.5 w-3.5" />
+                  <span>Số dư đầu tháng</span>
+                </div>
+                <div className="mt-1 truncate text-sm font-semibold tabular-nums sm:text-base" title={formatVnd(emergencyFundSummary.openingBalanceVnd)}>
+                  {formatVnd(emergencyFundSummary.openingBalanceVnd)}
+                </div>
+              </div>
+              <div className="rounded-md border bg-muted/20 px-2.5 py-2 ring-1 ring-primary/15 sm:px-3">
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <WalletCards className="h-3.5 w-3.5" />
+                  <span>Số dư hiện tại</span>
+                </div>
+                <div className="mt-1 truncate text-sm font-semibold tabular-nums sm:text-base" title={formatVnd(emergencyFundSummary.effectiveBalanceVnd)}>
+                  {formatVnd(emergencyFundSummary.effectiveBalanceVnd)}
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-1 rounded-md bg-muted p-1 sm:hidden">
+              {fundHistoryGroups.map((group) => {
+                const Icon = group.icon
+                const selected = fundHistoryTab === group.key
+
+                return (
+                  <button
+                    key={group.key}
+                    type="button"
+                    className={cn(
+                      "grid min-w-0 gap-0.5 rounded px-2 py-1.5 text-left text-xs transition-colors",
+                      selected ? "bg-background text-foreground shadow-sm" : "text-muted-foreground",
+                    )}
+                    onClick={() => setFundHistoryTab(group.key)}
+                  >
+                    <span className="inline-flex min-w-0 items-center gap-1.5 font-medium">
+                      <Icon className={cn("h-3.5 w-3.5 shrink-0", group.amountClassName)} />
+                      <span className="truncate">{group.label}</span>
+                    </span>
+                    <span className={cn("truncate font-semibold tabular-nums", selected && group.amountClassName)}>
+                      {formatVnd(group.totalVnd)}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+
+            <div className="min-h-0 sm:hidden">
+              {renderFundHistoryGroup(activeFundHistoryGroup, "mobile")}
+            </div>
+
+            <div className="hidden gap-3 sm:grid lg:grid-cols-2">
+              {fundHistoryGroups.map((group) => renderFundHistoryGroup(group))}
             </div>
           </div>
         </DialogContent>
