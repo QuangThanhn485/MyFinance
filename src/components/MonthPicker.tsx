@@ -7,11 +7,12 @@ import type { YearMonth } from "@/domain/types"
 import { cn } from "@/lib/utils"
 
 type MonthPickerProps = {
-  value: YearMonth
+  value?: YearMonth
   onChange: (next: YearMonth) => void
   disabled?: boolean
   className?: string
   ariaLabel?: string
+  placeholder?: string
 }
 
 function parseYearMonthLocal(month: YearMonth): Date {
@@ -31,9 +32,10 @@ export default function MonthPicker({
   onChange,
   disabled,
   className,
+  placeholder = "Chọn tháng",
   ariaLabel = "Chọn tháng",
 }: MonthPickerProps) {
-  const selected = parseYearMonthLocal(value)
+  const selected = value ? parseYearMonthLocal(value) : undefined
   const { resolvedTheme } = useTheme()
   const monthSelectTheme = resolvedTheme === "dark" ? "dark" : "light"
 
@@ -49,6 +51,7 @@ export default function MonthPicker({
       <Flatpickr
         key={monthSelectTheme}
         value={selected}
+        placeholder={placeholder}
         disabled={disabled}
         aria-label={ariaLabel}
         options={{
@@ -69,12 +72,15 @@ export default function MonthPicker({
         onChange={(dates, _dateStr, instance) => {
           const date = dates?.[0]
           if (!date) {
-            instance.setDate(selected, false)
+            if (selected) instance.setDate(selected, false)
             return
           }
           onChange(formatYearMonth(date))
         }}
-        className="h-full w-full rounded-md border-0 bg-transparent px-3 py-2 pl-10 text-sm tabular-nums outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
+        className={cn(
+          "h-full w-full rounded-md border-0 bg-transparent px-3 py-2 pl-10 text-sm tabular-nums outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed",
+          !value && "text-muted-foreground",
+        )}
       />
     </div>
   )

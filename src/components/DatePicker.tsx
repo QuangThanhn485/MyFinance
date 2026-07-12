@@ -93,7 +93,7 @@ export default function DatePicker({
           allowInput: false,
           clickOpens: true,
           disableMobile: true,
-          monthSelectorType: "static",
+          monthSelectorType: "dropdown",
           position: "auto center",
           appendTo: typeof document === "undefined" ? undefined : document.body,
         }}
@@ -103,7 +103,6 @@ export default function DatePicker({
           instance.input.setAttribute("autocomplete", "off")
         }}
         onOpen={(_dates, _dateStr, instance) => {
-          instance.input.blur()
           positionCalendarInMobileViewport(instance)
         }}
         onMonthChange={(_dates, _dateStr, instance) => {
@@ -133,7 +132,11 @@ export default function DatePicker({
           variant="ghost"
           size="icon"
           className="absolute right-1 top-1/2 h-8 w-8 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-          onClick={() => onChange(undefined)}
+          onClick={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            onChange(undefined)
+          }}
           disabled={disabled}
         >
           <X className="h-4 w-4" />

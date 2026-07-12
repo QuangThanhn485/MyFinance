@@ -64,6 +64,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -72,14 +73,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Separator } from "@/components/ui/separator"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import DndMultiSelect from "@/components/DndMultiSelect"
 import DateRangePicker, {
   type DateRangePreset,
   type DateRangeValue,
 } from "@/components/DateRangePicker"
+import DatePicker from "@/components/DatePicker"
 import LabelValueRow from "@/components/LabelValueRow"
+import MoneyInput from "@/components/MoneyInput"
+import MonthPicker from "@/components/MonthPicker"
 import {
   ChartEmptyState,
   ChartTooltipContent,
@@ -118,6 +121,10 @@ import {
   type PivotChartType,
   type PivotGroupKey,
   type PivotMetric,
+  type SearchFilterCondition,
+  type SearchFilterConnector,
+  type SearchFilterField,
+  type SearchFilterOperator,
   type TrendSeriesKey,
 } from "@/storage/reports"
 
@@ -237,6 +244,40 @@ const PIVOT_FIELDS: { id: PivotGroupKey; label: string }[] = [
   { id: "savingsImpact", label: "Ảnh hưởng S" },
   { id: "mssImpact", label: "Ảnh hưởng MSS" },
 ]
+const SEARCH_LAYOUT_FIELDS: { id: PivotGroupKey; label: string }[] = [
+  { id: "category", label: "Danh mục" },
+  { id: "bucket", label: "Bucket" },
+  { id: "note", label: "Ghi chú" },
+  { id: "weekday", label: "Thứ" },
+  { id: "day", label: "Ngày" },
+  { id: "week", label: "Tuần" },
+  { id: "dailyCap", label: "Cap chi mỗi ngày" },
+  { id: "amountRange", label: "Mức chi" },
+  { id: "savingsImpact", label: "Ảnh hưởng S" },
+  { id: "mssImpact", label: "Ảnh hưởng MSS" },
+]
+const SEARCH_FILTER_FIELDS: { id: SearchFilterField; label: string; hint: string }[] = [
+  { id: "date", label: "Ngày", hint: "YYYY-MM-DD hoặc DD/MM/YYYY" },
+  { id: "month", label: "Tháng", hint: "YYYY-MM hoặc MM/YYYY" },
+  { id: "amountVnd", label: "Số tiền", hint: "VD: 100000" },
+  { id: "category", label: "Danh mục", hint: "VD: Ăn uống" },
+  { id: "bucket", label: "Bucket", hint: "Thiết yếu / Mong muốn" },
+  { id: "note", label: "Ghi chú", hint: "Từ khóa trong ghi chú" },
+  { id: "weekday", label: "Thứ", hint: "T2, T3, CN..." },
+  { id: "week", label: "Tuần", hint: "VD: 1, 2, 3" },
+]
+const SEARCH_OPERATOR_LABELS: Record<SearchFilterOperator, string> = {
+  eq: "Bằng",
+  contains: "Chứa",
+  gt: ">",
+  gte: ">=",
+  lt: "<",
+  lte: "<=",
+}
+const SEARCH_CONNECTOR_LABELS: Record<SearchFilterConnector, string> = {
+  and: "AND",
+  or: "OR",
+}
 const PIVOT_ROW_HEADER_COL_WIDTH = 160
 type PivotDragContainer = "available" | "row" | "column"
 type PivotDragData = { field: PivotGroupKey; container: PivotDragContainer }
@@ -425,6 +466,154 @@ function getExpensesInDateRange(state: CttmState, range: DateRangeValue): Expens
   }
   out.sort((a, b) => a.date.localeCompare(b.date))
   return out
+}
+
+function normalizeSearchText(value: unknown) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase()
+}
+
+function parseSearchNumber(value: string) {
+  const normalized = value.replace(/[^\d-]/g, "")
+  const parsed = Number(normalized)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function normalizeSearchQueryForField(field: SearchFilterField, value: string) {
+  const trimmed = value.trim()
+  if (field === "date") {
+    const dateMatch = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+    if (dateMatch) {
+      return `${dateMatch[3]}-${dateMatch[2].padStart(2, "0")}-${dateMatch[1].padStart(2, "0")}`
+    }
+  }
+  if (field === "month") {
+    const monthMatch = trimmed.match(/^(\d{1,2})\/(\d{4})$/)
+    if (monthMatch) return `${monthMatch[2]}-${monthMatch[1].padStart(2, "0")}`
+  }
+  return trimmed
+}
+
+function isIsoDateValue(value: string): value is ISODate {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value)
+}
+
+function isYearMonthValue(value: string): value is YearMonth {
+  return /^\d{4}-\d{2}$/.test(value)
+}
+
+function createSearchFilterCondition(): SearchFilterCondition {
+  return {
+    id: `filter-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    connector: "and",
+    field: "note",
+    operator: "contains",
+    value: "",
+  }
+}
+
+function getSearchFilterValue(
+  expense: Expense,
+  field: SearchFilterField,
+  categoryLabel: (category: string) => string,
+) {
+  switch (field) {
+    case "date":
+      return { raw: expense.date, text: expense.date, number: isoDateSortValue(expense.date) }
+    case "month": {
+      const month = monthFromIsoDate(expense.date)
+      return { raw: month, text: month, number: Number(month.replace("-", "")) }
+    }
+    case "amountVnd":
+      return {
+        raw: expense.amountVnd,
+        text: String(expense.amountVnd),
+        number: expense.amountVnd,
+      }
+    case "category": {
+      const label = categoryLabel(expense.category)
+      return { raw: expense.category, text: `${label} ${expense.category}`, number: null }
+    }
+    case "bucket": {
+      const label = BUCKET_LABELS_VI[expense.bucket]
+      return { raw: expense.bucket, text: `${label} ${expense.bucket}`, number: null }
+    }
+    case "weekday": {
+      const day = parseIsoDateLocal(expense.date).getDay()
+      const label = PIVOT_WEEKDAY_LABELS[day] ?? ""
+      return { raw: label, text: `${label} ${day}`, number: day === 0 ? 7 : day }
+    }
+    case "week": {
+      const week = Math.ceil(dayOfMonthFromIsoDate(expense.date) / 7)
+      return { raw: week, text: `Tuần ${week} ${week}`, number: week }
+    }
+    case "note":
+    default:
+      return { raw: expense.note ?? "", text: expense.note ?? "", number: null }
+  }
+}
+
+function searchConditionMatches(
+  expense: Expense,
+  condition: SearchFilterCondition,
+  categoryLabel: (category: string) => string,
+) {
+  const query = normalizeSearchQueryForField(condition.field, condition.value)
+  if (!query) return true
+
+  const fieldValue = getSearchFilterValue(expense, condition.field, categoryLabel)
+  const leftText = normalizeSearchText(fieldValue.text)
+  const rightText = normalizeSearchText(query)
+  const leftNumber = fieldValue.number
+  const rightNumber = parseSearchNumber(query)
+
+  if (condition.operator === "contains") {
+    return leftText.includes(rightText)
+  }
+
+  if (condition.operator === "eq") {
+    if (leftNumber !== null && rightNumber !== null) return leftNumber === rightNumber
+    return leftText === rightText
+  }
+
+  if (
+    condition.operator === "gt" ||
+    condition.operator === "gte" ||
+    condition.operator === "lt" ||
+    condition.operator === "lte"
+  ) {
+    if (leftNumber !== null && rightNumber !== null) {
+      if (condition.operator === "gt") return leftNumber > rightNumber
+      if (condition.operator === "gte") return leftNumber >= rightNumber
+      if (condition.operator === "lt") return leftNumber < rightNumber
+      return leftNumber <= rightNumber
+    }
+    const compared = leftText.localeCompare(rightText)
+    if (condition.operator === "gt") return compared > 0
+    if (condition.operator === "gte") return compared >= 0
+    if (condition.operator === "lt") return compared < 0
+    return compared <= 0
+  }
+
+  return true
+}
+
+function searchFiltersMatch(
+  expense: Expense,
+  filters: SearchFilterCondition[],
+  categoryLabel: (category: string) => string,
+) {
+  const active = filters.filter((filter) => filter.value.trim())
+  if (active.length === 0) return true
+
+  return active.reduce((result, filter, index) => {
+    const matched = searchConditionMatches(expense, filter, categoryLabel)
+    if (index === 0) return matched
+    return filter.connector === "or" ? result || matched : result && matched
+  }, true)
 }
 
 function getDateRangeTotals(state: CttmState, range: DateRangeValue) {
@@ -659,6 +848,16 @@ function getPivotGroupValue(
         label,
         parts: [label],
         sortValue: expense.bucket === "needs" ? 0 : 1,
+      }
+    }
+    case "note": {
+      const note = expense.note.trim()
+      const label = note || "(Không ghi chú)"
+      return {
+        key: `note:${note || "__empty"}`,
+        label,
+        parts: [label],
+        sortValue: note ? label : "zzzz",
       }
     }
     case "day": {
@@ -1137,6 +1336,7 @@ export default function ReportsPage() {
   const monthsInRange = useMemo(() => getMonthsInDateRange(dateRange), [dateRange])
   const isSingleFullMonth = isSingleWholeMonthRange(dateRange)
   const [config, setConfig] = useState(() => loadReportsConfig())
+  const [searchResultExpenseIds, setSearchResultExpenseIds] = useState<string[] | null>(null)
   const [controlsOpen, setControlsOpen] = useState(false)
   const [insightsOpen, setInsightsOpen] = useState(false)
   const [summaryOpen, setSummaryOpen] = useState(false)
@@ -1406,6 +1606,48 @@ export default function ReportsPage() {
       config.pivot.rowFields,
       config.pivot.columnFields,
       config.pivot.metric,
+      budgets.savingsTargetVnd,
+      budgets.mssVnd,
+      baseDailyCapVnd,
+      categoryLabels,
+      categoryOptions,
+    ],
+  )
+  const activeSearchFilters = useMemo(
+    () => config.search.filters.filter((filter) => filter.value.trim()),
+    [config.search.filters],
+  )
+  const activeSearchFilterCount = activeSearchFilters.length
+  const searchResultExpenseIdSet = useMemo(
+    () => (searchResultExpenseIds ? new Set(searchResultExpenseIds) : null),
+    [searchResultExpenseIds],
+  )
+  const searchFilteredExpenses = useMemo(
+    () =>
+      searchResultExpenseIdSet
+        ? allVariableExpenses.filter((expense) => searchResultExpenseIdSet.has(expense.id))
+        : [],
+    [allVariableExpenses, searchResultExpenseIdSet],
+  )
+  const searchTable = useMemo(
+    () =>
+      buildPivotTable(
+        searchFilteredExpenses,
+        config.search.rowFields,
+        config.search.columnFields,
+        config.search.metric,
+        {
+          savingsTargetVnd: budgets.savingsTargetVnd,
+          mssVnd: budgets.mssVnd,
+          dailyCapVnd: baseDailyCapVnd,
+          categoryLabel,
+        },
+      ),
+    [
+      searchFilteredExpenses,
+      config.search.rowFields,
+      config.search.columnFields,
+      config.search.metric,
       budgets.savingsTargetVnd,
       budgets.mssVnd,
       baseDailyCapVnd,
@@ -1740,6 +1982,64 @@ export default function ReportsPage() {
     }
     return spans
   }, [pivotRowHeaderDepth, pivotTable.rows])
+  const hasSearchRowFields = config.search.rowFields.length > 0
+  const searchRowHeaderLabels = hasSearchRowFields
+    ? config.search.rowFields.map(
+        (field) => SEARCH_LAYOUT_FIELDS.find((f) => f.id === field)?.label ?? field,
+      )
+    : ["Tổng"]
+  const searchColumnHeaderDepth = Math.max(1, config.search.columnFields.length)
+  const searchRowHeaderDepth = searchRowHeaderLabels.length
+  const searchRowHeaderColWidth = isNarrowViewport ? 112 : PIVOT_ROW_HEADER_COL_WIDTH
+  const searchRowHeaderLabelWidth = isNarrowViewport ? 96 : 140
+  const searchColumnHeaderLabelWidth = isNarrowViewport ? 112 : 180
+  const searchRowStickyOffsets = searchRowHeaderLabels.map(
+    (_, idx) => idx * searchRowHeaderColWidth,
+  )
+  const searchColumnHeaderRows = useMemo(() => {
+    const cols = searchTable.cols
+    return Array.from({ length: searchColumnHeaderDepth }, (_, level) => {
+      const groups: { key: string; label: string; span: number }[] = []
+      let index = 0
+      while (index < cols.length) {
+        const parts = cols[index].parts
+        const prefixKey = parts.slice(0, level + 1).join("||") || `col-${index}`
+        const label = parts[level] ?? cols[index].label
+        let span = 1
+        index += 1
+        while (index < cols.length) {
+          const nextParts = cols[index].parts
+          const nextPrefix = nextParts.slice(0, level + 1).join("||")
+          if (nextPrefix !== prefixKey) break
+          span += 1
+          index += 1
+        }
+        groups.push({ key: `${level}-${prefixKey}-${index}`, label, span })
+      }
+      return groups
+    })
+  }, [searchColumnHeaderDepth, searchTable.cols])
+  const searchRowSpans = useMemo(() => {
+    const spans = searchTable.rows.map(() => Array(searchRowHeaderDepth).fill(0))
+    if (searchTable.rows.length === 0) return spans
+    for (let level = 0; level < searchRowHeaderDepth; level += 1) {
+      let start = 0
+      while (start < searchTable.rows.length) {
+        const baseKey = searchTable.rows[start].parts.slice(0, level + 1).join("||")
+        let end = start + 1
+        while (end < searchTable.rows.length) {
+          const nextKey = searchTable.rows[end].parts
+            .slice(0, level + 1)
+            .join("||")
+          if (nextKey !== baseKey) break
+          end += 1
+        }
+        spans[start][level] = end - start
+        start = end
+      }
+    }
+    return spans
+  }, [searchRowHeaderDepth, searchTable.rows])
   const handlePivotRemove = (field: PivotGroupKey, target: "row" | "column") => {
     setConfig((s) => {
       if (target === "row") {
@@ -1762,6 +2062,8 @@ export default function ReportsPage() {
   }
   const pivotFieldLabel = (field: PivotGroupKey) =>
     PIVOT_FIELDS.find((f) => f.id === field)?.label ?? field
+  const searchFieldLabel = (field: PivotGroupKey) =>
+    SEARCH_LAYOUT_FIELDS.find((f) => f.id === field)?.label ?? field
   const handlePivotAssign = (field: PivotGroupKey, target: "row" | "column") => {
     setConfig((s) => {
       const nextRow = s.pivot.rowFields.filter((f) => f !== field)
@@ -1915,10 +2217,172 @@ export default function ReportsPage() {
       data: event.over.data?.current as PivotDragData | undefined,
     }
   }
-
-  const top3 = Object.entries(categories)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 3)
+  const updateSearchFilter = (
+    id: string,
+    patch: Partial<Omit<SearchFilterCondition, "id">>,
+  ) => {
+    setSearchResultExpenseIds(null)
+    setConfig((s) => ({
+      ...s,
+      search: {
+        ...s.search,
+        filters: s.search.filters.map((filter) =>
+          filter.id === id ? { ...filter, ...patch } : filter,
+        ),
+      },
+    }))
+  }
+  const addSearchFilter = () => {
+    setSearchResultExpenseIds(null)
+    setConfig((s) => ({
+      ...s,
+      search: {
+        ...s.search,
+        filters: [...s.search.filters, createSearchFilterCondition()],
+      },
+    }))
+  }
+  const removeSearchFilter = (id: string) => {
+    setSearchResultExpenseIds(null)
+    setConfig((s) => ({
+      ...s,
+      search: {
+        ...s.search,
+        filters: s.search.filters.filter((filter) => filter.id !== id),
+      },
+    }))
+  }
+  const clearSearchFilters = () => {
+    setSearchResultExpenseIds(null)
+    setConfig((s) => ({
+      ...s,
+      search: { ...s.search, filters: [] },
+    }))
+  }
+  const runSearch = () => {
+    if (activeSearchFilterCount === 0) {
+      setSearchResultExpenseIds(null)
+      return
+    }
+    const resultIds = allVariableExpenses
+      .filter((expense) =>
+        searchFiltersMatch(expense, config.search.filters, categoryLabel),
+      )
+      .map((expense) => expense.id)
+    setSearchResultExpenseIds(resultIds)
+  }
+  const handleSearchAssign = (field: PivotGroupKey, target: "row" | "column") => {
+    setConfig((s) => {
+      const nextRow = s.search.rowFields.filter((f) => f !== field)
+      const nextColumn = s.search.columnFields.filter((f) => f !== field)
+      if (target === "row") nextRow.push(field)
+      else nextColumn.push(field)
+      return {
+        ...s,
+        search: {
+          ...s.search,
+          rowFields: nextRow,
+          columnFields: nextColumn,
+        },
+      }
+    })
+  }
+  const handleSearchRemove = (field: PivotGroupKey, target: "row" | "column") => {
+    setConfig((s) => ({
+      ...s,
+      search: {
+        ...s.search,
+        rowFields:
+          target === "row" ? s.search.rowFields.filter((f) => f !== field) : s.search.rowFields,
+        columnFields:
+          target === "column"
+            ? s.search.columnFields.filter((f) => f !== field)
+            : s.search.columnFields,
+      },
+    }))
+  }
+  const handleSearchMove = (
+    field: PivotGroupKey,
+    target: "row" | "column",
+    direction: -1 | 1,
+  ) => {
+    setConfig((s) => {
+      const list = target === "row" ? s.search.rowFields : s.search.columnFields
+      const fromIndex = list.indexOf(field)
+      const toIndex = fromIndex + direction
+      if (fromIndex < 0 || toIndex < 0 || toIndex >= list.length) return s
+      const next = arrayMove(list, fromIndex, toIndex)
+      return {
+        ...s,
+        search: {
+          ...s.search,
+          rowFields: target === "row" ? next : s.search.rowFields,
+          columnFields: target === "column" ? next : s.search.columnFields,
+        },
+      }
+    })
+  }
+  const renderSearchSelectedFields = (
+    fields: PivotGroupKey[],
+    target: "row" | "column",
+    title: string,
+  ) => (
+    <div className="rounded-md border bg-background p-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          {title}
+        </div>
+        <Badge variant="secondary" className="text-[10px]">
+          {fields.length}
+        </Badge>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {fields.length === 0 ? (
+          <div className="text-xs text-muted-foreground">
+            Chưa chọn trường.
+          </div>
+        ) : (
+          fields.map((field, index) => (
+            <div
+              key={`search-${target}-${field}`}
+              className="inline-flex items-center gap-1 rounded-full border bg-muted/30 px-2 py-1 text-xs font-medium"
+            >
+              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-background text-[10px] tabular-nums">
+                {index + 1}
+              </span>
+              <span>{searchFieldLabel(field)}</span>
+              <button
+                type="button"
+                className="rounded-full p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-40"
+                disabled={index === 0}
+                onClick={() => handleSearchMove(field, target, -1)}
+                aria-label="Đưa lên"
+              >
+                <ArrowUp className="h-3 w-3" />
+              </button>
+              <button
+                type="button"
+                className="rounded-full p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-40"
+                disabled={index === fields.length - 1}
+                onClick={() => handleSearchMove(field, target, 1)}
+                aria-label="Đưa xuống"
+              >
+                <ArrowDown className="h-3 w-3" />
+              </button>
+              <button
+                type="button"
+                className="rounded-full p-0.5 text-muted-foreground hover:text-destructive"
+                onClick={() => handleSearchRemove(field, target)}
+                aria-label={`Bỏ ${searchFieldLabel(field)}`}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  )
 
   const smallThreshold =
     budgets.incomeVnd > 0 ? Math.min(50_000, Math.round(budgets.incomeVnd * 0.01)) : 50_000
@@ -3164,6 +3628,30 @@ export default function ReportsPage() {
                 </DndContext>
                 )}
               </div>
+            ) : config.mode === "search" ? (
+              <div className="space-y-3">
+                <div className="rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                  Search Data dùng điều kiện lọc và bố cục bảng ngay trong tab Search.
+                  Cấu hình này độc lập với Pivot.
+                </div>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const defaults = defaultReportsConfig()
+                      setSearchResultExpenseIds(null)
+                      setConfig((s) => ({
+                        ...s,
+                        search: defaults.search,
+                      }))
+                    }}
+                  >
+                    Reset Search Data
+                  </Button>
+                </div>
+              </div>
             ) : (
               <div className="text-sm text-muted-foreground">
                 Chưa có tuỳ chỉnh cho chế độ này.
@@ -3187,13 +3675,15 @@ export default function ReportsPage() {
                       ? "daily"
                       : v === "pivot"
                         ? "pivot"
+                        : v === "search"
+                          ? "search"
                         : "month",
               }))
             }
           >
             <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
               <div className="col-span-2 min-w-0 sm:col-auto">
-                <TabsList className="grid h-9 w-full grid-cols-4 justify-stretch sm:inline-flex sm:h-10 sm:w-max sm:justify-start">
+                <TabsList className="grid h-auto w-full grid-cols-5 justify-stretch sm:inline-flex sm:h-10 sm:w-max sm:justify-start">
                   <TabsTrigger className="px-2 text-xs sm:px-3 sm:text-sm" value="month">
                     Phân bổ
                   </TabsTrigger>
@@ -3205,6 +3695,9 @@ export default function ReportsPage() {
                   </TabsTrigger>
                   <TabsTrigger className="px-2 text-xs sm:px-3 sm:text-sm" value="pivot">
                     Pivot
+                  </TabsTrigger>
+                  <TabsTrigger className="px-2 text-xs sm:px-3 sm:text-sm" value="search">
+                    Search
                   </TabsTrigger>
                 </TabsList>
               </div>
@@ -3270,7 +3763,7 @@ export default function ReportsPage() {
                     <SelectItem value="bar">Cột (Bar)</SelectItem>
                   </SelectContent>
                 </Select>
-              ) : effectivePivotSplitView === "table" ? null : (
+              ) : config.mode === "search" ? null : effectivePivotSplitView === "table" ? null : (
                 <Select
                   value={config.pivot.chartType}
                   onValueChange={(v) =>
@@ -3300,6 +3793,25 @@ export default function ReportsPage() {
                     setConfig((s) => ({
                       ...s,
                       pivot: { ...s.pivot, metric: v as PivotMetric },
+                    }))
+                  }
+                >
+                  <SelectTrigger className="h-9 w-full text-xs sm:w-[190px] sm:text-sm">
+                    <SelectValue placeholder="Chỉ số" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="sum">Tổng chi</SelectItem>
+                    <SelectItem value="count">Số giao dịch</SelectItem>
+                    <SelectItem value="avg">TB/giao dịch</SelectItem>
+                  </SelectContent>
+                </Select>
+              ) : config.mode === "search" ? (
+                <Select
+                  value={config.search.metric}
+                  onValueChange={(v) =>
+                    setConfig((s) => ({
+                      ...s,
+                      search: { ...s.search, metric: v as PivotMetric },
                     }))
                   }
                 >
@@ -4192,6 +4704,392 @@ export default function ReportsPage() {
               </div>
             </TabsContent>
 
+            <TabsContent value="search" className="min-w-0 space-y-3">
+              <div className="grid gap-3 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
+                <Card className="min-w-0">
+                  <CardHeader className="space-y-1 pb-3">
+                    <CardTitle className="text-base">Điều kiện lọc</CardTitle>
+                    <div className="text-xs text-muted-foreground">
+                      Lọc trên toàn bộ dữ liệu chi tiêu. Điều kiện trống sẽ được bỏ qua.
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {config.search.filters.length === 0 ? (
+                      <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+                        Chưa có điều kiện. Nhập ít nhất một điều kiện rồi bấm Search.
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {config.search.filters.map((filter, index) => {
+                          const field = SEARCH_FILTER_FIELDS.find((item) => item.id === filter.field)
+                          return (
+                            <div
+                              key={filter.id}
+                              className="grid gap-2 rounded-md border bg-muted/20 p-2 sm:grid-cols-[84px_minmax(120px,1fr)_112px_minmax(140px,1.3fr)_auto] sm:items-center"
+                            >
+                              {index === 0 ? (
+                                <div className="flex h-9 items-center rounded-md bg-background px-2 text-xs font-semibold text-muted-foreground">
+                                  WHERE
+                                </div>
+                              ) : (
+                                <Select
+                                  value={filter.connector}
+                                  onValueChange={(value) =>
+                                    updateSearchFilter(filter.id, {
+                                      connector: value === "or" ? "or" : "and",
+                                    })
+                                  }
+                                >
+                                  <SelectTrigger className="h-9 text-xs">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="and">{SEARCH_CONNECTOR_LABELS.and}</SelectItem>
+                                    <SelectItem value="or">{SEARCH_CONNECTOR_LABELS.or}</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              )}
+                              <Select
+                                value={filter.field}
+                                onValueChange={(value) =>
+                                  updateSearchFilter(filter.id, {
+                                    field: value as SearchFilterField,
+                                    value: "",
+                                  })
+                                }
+                              >
+                                <SelectTrigger className="h-9 text-xs">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {SEARCH_FILTER_FIELDS.map((item) => (
+                                    <SelectItem key={item.id} value={item.id}>
+                                      {item.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              <Select
+                                value={filter.operator}
+                                onValueChange={(value) =>
+                                  updateSearchFilter(filter.id, {
+                                    operator: value as SearchFilterOperator,
+                                  })
+                                }
+                              >
+                                <SelectTrigger className="h-9 text-xs">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="eq">{SEARCH_OPERATOR_LABELS.eq}</SelectItem>
+                                  <SelectItem value="contains">{SEARCH_OPERATOR_LABELS.contains}</SelectItem>
+                                  <SelectItem value="gt">{SEARCH_OPERATOR_LABELS.gt}</SelectItem>
+                                  <SelectItem value="gte">{SEARCH_OPERATOR_LABELS.gte}</SelectItem>
+                                  <SelectItem value="lt">{SEARCH_OPERATOR_LABELS.lt}</SelectItem>
+                                  <SelectItem value="lte">{SEARCH_OPERATOR_LABELS.lte}</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              {filter.field === "date" ? (
+                                <DatePicker
+                                  value={isIsoDateValue(filter.value) ? filter.value : undefined}
+                                  onChange={(next) =>
+                                    updateSearchFilter(filter.id, { value: next ?? "" })
+                                  }
+                                  placeholder="Chọn ngày"
+                                  allowClear
+                                  className="h-9 text-xs"
+                                />
+                              ) : filter.field === "month" ? (
+                                <MonthPicker
+                                  value={isYearMonthValue(filter.value) ? filter.value : undefined}
+                                  onChange={(next) =>
+                                    updateSearchFilter(filter.id, { value: next })
+                                  }
+                                  placeholder="Chọn tháng"
+                                  className="h-9 text-xs"
+                                />
+                              ) : filter.field === "amountVnd" ? (
+                                <MoneyInput
+                                  value={parseSearchNumber(filter.value) ?? 0}
+                                  onValueChange={(next) =>
+                                    updateSearchFilter(filter.id, {
+                                      value: next > 0 ? String(next) : "",
+                                    })
+                                  }
+                                  placeholder="VD: 100.000"
+                                  className="h-9 text-xs"
+                                />
+                              ) : (
+                                <Input
+                                  className="h-9 text-xs"
+                                  value={filter.value}
+                                  inputMode={filter.field === "week" ? "numeric" : undefined}
+                                  placeholder={field?.hint ?? "Nhập giá trị"}
+                                  onChange={(event) =>
+                                    updateSearchFilter(filter.id, { value: event.target.value })
+                                  }
+                                />
+                              )}
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-9 px-2 text-muted-foreground hover:text-destructive"
+                                onClick={() => removeSearchFilter(filter.id)}
+                                aria-label="Xóa điều kiện"
+                              >
+                                <X className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-xs text-muted-foreground">
+                        {activeSearchFilterCount === 0
+                          ? "Chưa có điều kiện hợp lệ."
+                          : searchResultExpenseIds
+                            ? `${activeSearchFilterCount} điều kiện • ${searchFilteredExpenses.length}/${allVariableExpenses.length} giao dịch khớp`
+                            : `${activeSearchFilterCount} điều kiện sẵn sàng • bấm Search để chạy`}
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          disabled={activeSearchFilterCount === 0}
+                          onClick={runSearch}
+                        >
+                          Search
+                        </Button>
+                        <Button type="button" variant="outline" size="sm" onClick={addSearchFilter}>
+                          Thêm điều kiện
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          disabled={config.search.filters.length === 0}
+                          onClick={clearSearchFilters}
+                        >
+                          Xóa lọc
+                        </Button>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="min-w-0">
+                  <CardHeader className="space-y-1 pb-3">
+                    <CardTitle className="text-base">Bố cục bảng</CardTitle>
+                    <div className="text-xs text-muted-foreground">
+                      Cấu hình hàng/cột riêng cho Search Data, không ảnh hưởng Pivot.
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="rounded-md border bg-background p-3">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Trường dữ liệu
+                      </div>
+                      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                        {SEARCH_LAYOUT_FIELDS.map((field) => {
+                          const inRow = config.search.rowFields.includes(field.id)
+                          const inColumn = config.search.columnFields.includes(field.id)
+                          return (
+                            <div
+                              key={`search-field-${field.id}`}
+                              className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-1 rounded-md border bg-muted/20 px-2 py-1.5"
+                            >
+                              <span className="truncate text-xs font-medium">{field.label}</span>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant={inRow ? "secondary" : "ghost"}
+                                className="h-7 px-2 text-[11px]"
+                                onClick={() => handleSearchAssign(field.id, "row")}
+                              >
+                                Hàng
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant={inColumn ? "secondary" : "ghost"}
+                                className="h-7 px-2 text-[11px]"
+                                onClick={() => handleSearchAssign(field.id, "column")}
+                              >
+                                Cột
+                              </Button>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="grid gap-3">
+                      {renderSearchSelectedFields(config.search.rowFields, "row", "Hàng")}
+                      {renderSearchSelectedFields(config.search.columnFields, "column", "Cột")}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {searchResultExpenseIds !== null ? (
+                <Card className="min-w-0 overflow-hidden">
+                  <CardContent className="min-w-0 space-y-2 p-2 sm:p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-base font-semibold">Kết quả Search Data</div>
+                      <Badge variant="secondary">
+                        {searchFilteredExpenses.length} giao dịch
+                      </Badge>
+                    </div>
+
+                    {searchTable.rows.length === 0 ? (
+                      <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+                        Không có dữ liệu khớp điều kiện lọc.
+                      </div>
+                    ) : (
+                      <div className="relative max-h-[560px] w-full max-w-full overflow-auto overscroll-x-contain rounded-md border border-border/80">
+                        <table className="w-max min-w-full border-separate border-spacing-0 border border-border/80 text-xs sm:text-sm">
+                          <thead className="sticky top-0 z-30 bg-muted text-xs uppercase text-muted-foreground shadow-[0_2px_0_rgba(0,0,0,0.08)]">
+                            {searchColumnHeaderRows.map((headerRow, level) => (
+                              <tr key={`search-head-${level}`} className="border-b border-border/70">
+                                {level === 0
+                                  ? searchRowHeaderLabels.map((label, index) => (
+                                    <th
+                                      key={`search-row-head-${index}`}
+                                      rowSpan={searchColumnHeaderDepth}
+                                      className="sticky top-0 z-40 whitespace-nowrap border-b border-r border-border/70 bg-muted px-2 py-2 text-left font-medium sm:px-3"
+                                      style={{
+                                        left: `${searchRowStickyOffsets[index]}px`,
+                                        minWidth: `${searchRowHeaderColWidth}px`,
+                                        width: `${searchRowHeaderColWidth}px`,
+                                      }}
+                                    >
+                                      <span
+                                        className="block truncate"
+                                        style={{ maxWidth: `${searchRowHeaderLabelWidth}px` }}
+                                        title={label}
+                                      >
+                                        {label}
+                                      </span>
+                                    </th>
+                                  ))
+                                : null}
+                              {headerRow.map((group) => (
+                                <th
+                                  key={group.key}
+                                  colSpan={group.span}
+                                  className="whitespace-nowrap border-b border-r border-border/70 bg-muted px-2 py-2 text-center font-medium sm:px-3"
+                                >
+                                  <span
+                                    className="block truncate"
+                                    style={{ maxWidth: `${searchColumnHeaderLabelWidth}px` }}
+                                    title={group.label}
+                                  >
+                                    {group.label}
+                                  </span>
+                                </th>
+                              ))}
+                              {level === 0 ? (
+                                <th
+                                  rowSpan={searchColumnHeaderDepth}
+                                  className="sticky top-0 z-30 whitespace-nowrap border-b border-r border-border/70 bg-muted px-2 py-2 text-right font-medium sm:px-3"
+                                >
+                                  Tổng
+                                </th>
+                              ) : null}
+                            </tr>
+                          ))}
+                        </thead>
+                        <tbody>
+                          {searchTable.rows.map((row, rowIndex) => (
+                            <tr key={row.key} className="bg-background">
+                              {searchRowHeaderLabels.map((label, level) => {
+                                const span = searchRowSpans[rowIndex]?.[level] ?? 0
+                                if (span === 0) return null
+                                const cellLabel = row.parts[level] ?? label
+                                return (
+                                  <td
+                                    key={`${row.key}-search-row-${level}`}
+                                    rowSpan={span}
+                                    className="sticky z-10 border-b border-r border-border/60 bg-background px-2 py-2 align-top font-medium text-foreground sm:px-3"
+                                    style={{
+                                      left: `${searchRowStickyOffsets[level]}px`,
+                                      minWidth: `${searchRowHeaderColWidth}px`,
+                                      width: `${searchRowHeaderColWidth}px`,
+                                    }}
+                                  >
+                                    <span
+                                      className="block truncate"
+                                      style={{ maxWidth: `${searchRowHeaderLabelWidth}px` }}
+                                      title={cellLabel}
+                                    >
+                                      {cellLabel}
+                                    </span>
+                                  </td>
+                                )
+                              })}
+                              {searchTable.cols.map((col) => (
+                                <td
+                                  key={`${row.key}-${col.key}`}
+                                  className="whitespace-nowrap border-b border-r border-border/60 px-2 py-2 text-right tabular-nums sm:px-3"
+                                >
+                                  {formatPivotValue(
+                                    pivotMetricValue(searchTable.cells[row.key]?.[col.key], config.search.metric),
+                                    config.search.metric,
+                                  )}
+                                </td>
+                              ))}
+                              <td className="whitespace-nowrap border-b border-r border-border/60 px-2 py-2 text-right font-medium tabular-nums sm:px-3">
+                                {formatPivotValue(
+                                  pivotMetricValue(searchTable.rowTotals[row.key], config.search.metric),
+                                  config.search.metric,
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                          <tr className="bg-muted/40">
+                            {searchRowHeaderLabels.map((label, level) => (
+                              <td
+                                key={`search-total-${level}`}
+                                className="sticky z-10 border-b border-r border-border/60 bg-muted/40 px-2 py-2 font-medium sm:px-3"
+                                style={{
+                                  left: `${searchRowStickyOffsets[level]}px`,
+                                  minWidth: `${searchRowHeaderColWidth}px`,
+                                  width: `${searchRowHeaderColWidth}px`,
+                                }}
+                              >
+                                {level === 0 ? "Tổng" : ""}
+                              </td>
+                            ))}
+                            {searchTable.cols.map((col) => (
+                              <td
+                                key={`search-col-total-${col.key}`}
+                                className="whitespace-nowrap border-b border-r border-border/60 px-2 py-2 text-right font-medium tabular-nums sm:px-3"
+                              >
+                                {formatPivotValue(
+                                  pivotMetricValue(searchTable.colTotals[col.key], config.search.metric),
+                                  config.search.metric,
+                                )}
+                              </td>
+                            ))}
+                            <td className="whitespace-nowrap border-b border-r border-border/60 px-2 py-2 text-right font-semibold tabular-nums sm:px-3">
+                              {formatPivotValue(
+                                pivotMetricValue(searchTable.grandTotal, config.search.metric),
+                                config.search.metric,
+                              )}
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </CardContent>
+                </Card>
+              ) : null}
+            </TabsContent>
+
             <TabsContent value="pivot" className="min-w-0 space-y-3">
               <div className={cn("grid min-w-0 gap-4", pivotShowTable && pivotShowChart && "lg:grid-cols-2")}>
                 {pivotShowTable ? (
@@ -4808,38 +5706,6 @@ export default function ReportsPage() {
               </div>
             </TabsContent>
           </Tabs>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Top 3 danh mục</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {top3.length === 0 ? (
-            <div className="text-sm text-muted-foreground">Chưa có dữ liệu.</div>
-          ) : (
-            <div className="grid gap-2">
-              {top3.map(([category, value], idx) => {
-                const label = categoryLabel(category)
-                return (
-                  <LabelValueRow
-                    key={category}
-                    className="text-sm"
-                    label={`${idx + 1}. ${label}`}
-                    labelTitle={`${idx + 1}. ${label}`}
-                    labelClassName="text-foreground font-medium"
-                    value={formatVnd(value)}
-                    valueClassName="text-muted-foreground"
-                  />
-                )
-              })}
-            </div>
-          )}
-          <Separator />
-          <div className="text-xs text-muted-foreground">
-            Lưu ý: Chi phí cố định được cộng vào danh mục tương ứng trong “Chi theo danh mục”.
-          </div>
         </CardContent>
       </Card>
     </div>

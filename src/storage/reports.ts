@@ -2,7 +2,7 @@ import type { ExpenseCategory } from "@/domain/types"
 
 export const REPORTS_CONFIG_STORAGE_KEY = "smartSpend.reports.v1"
 
-export type ReportsMode = "month" | "trend" | "daily" | "pivot"
+export type ReportsMode = "month" | "trend" | "daily" | "pivot" | "search"
 
 export type MonthDataset = "categories" | "buckets"
 export type MonthChartType = "bar" | "pie"
@@ -24,6 +24,7 @@ export type DailySeriesKey = "total" | "needs" | "wants"
 export type PivotGroupKey =
   | "category"
   | "bucket"
+  | "note"
   | "day"
   | "week"
   | "weekday"
@@ -33,9 +34,27 @@ export type PivotGroupKey =
   | "mssImpact"
 export type PivotMetric = "sum" | "count" | "avg"
 export type PivotChartType = "bar" | "line" | "area"
+export type SearchFilterField =
+  | "date"
+  | "month"
+  | "amountVnd"
+  | "category"
+  | "bucket"
+  | "note"
+  | "weekday"
+  | "week"
+export type SearchFilterOperator = "eq" | "contains" | "gt" | "gte" | "lt" | "lte"
+export type SearchFilterConnector = "and" | "or"
+export type SearchFilterCondition = {
+  id: string
+  connector: SearchFilterConnector
+  field: SearchFilterField
+  operator: SearchFilterOperator
+  value: string
+}
 
-export type ReportsConfigV5 = {
-  version: 5
+export type ReportsConfigV6 = {
+  version: 6
   mode: ReportsMode
   month: {
     dataset: MonthDataset
@@ -60,6 +79,12 @@ export type ReportsConfigV5 = {
     visibleSeries: string[]
     colorByAmount: boolean
   }
+  search: {
+    rowFields: PivotGroupKey[]
+    columnFields: PivotGroupKey[]
+    metric: PivotMetric
+    filters: SearchFilterCondition[]
+  }
 }
 
 function safeParseJson(raw: string): unknown {
@@ -78,6 +103,7 @@ function normalizeMode(value: unknown): ReportsMode {
   if (value === "trend") return "trend"
   if (value === "daily") return "daily"
   if (value === "pivot") return "pivot"
+  if (value === "search") return "search"
   return "month"
 }
 
@@ -132,6 +158,7 @@ function normalizeDailySeriesKey(value: unknown): DailySeriesKey | null {
 
 function normalizePivotGroupKey(value: unknown): PivotGroupKey {
   if (value === "bucket") return "bucket"
+  if (value === "note") return "note"
   if (value === "day") return "day"
   if (value === "week") return "week"
   if (value === "weekday") return "weekday"
@@ -154,11 +181,37 @@ function normalizePivotChartType(value: unknown): PivotChartType {
   return "bar"
 }
 
-function normalizePivotFieldList(value: unknown): PivotGroupKey[] {
+function normalizeSearchFilterField(value: unknown): SearchFilterField {
+  if (value === "date") return "date"
+  if (value === "month") return "month"
+  if (value === "amountVnd") return "amountVnd"
+  if (value === "category") return "category"
+  if (value === "bucket") return "bucket"
+  if (value === "note") return "note"
+  if (value === "weekday") return "weekday"
+  if (value === "week") return "week"
+  return "note"
+}
+
+function normalizeSearchFilterOperator(value: unknown): SearchFilterOperator {
+  if (value === "eq") return "eq"
+  if (value === "gt") return "gt"
+  if (value === "gte") return "gte"
+  if (value === "lt") return "lt"
+  if (value === "lte") return "lte"
+  return "contains"
+}
+
+function normalizeSearchFilterConnector(value: unknown): SearchFilterConnector {
+  return value === "or" ? "or" : "and"
+}
+
+function normalizePivotFieldList(value: unknown, allowNote = false): PivotGroupKey[] {
   if (!Array.isArray(value)) return []
   return unique(
     value
       .map(normalizePivotGroupKey)
+      .filter((x) => allowNote || x !== "note")
       .filter((x): x is PivotGroupKey => !!x),
   )
 }
@@ -167,6 +220,21 @@ function normalizeExpenseCategory(value: unknown): ExpenseCategory | null {
   if (typeof value !== "string") return null
   const category = value.trim()
   return category ? category : null
+}
+
+function normalizeSearchFilterCondition(value: unknown): SearchFilterCondition | null {
+  if (!isRecord(value)) return null
+  const id = typeof value.id === "string" && value.id.trim()
+    ? value.id.trim()
+    : `filter-${Math.random().toString(36).slice(2)}`
+  const rawValue = typeof value.value === "string" ? value.value : ""
+  return {
+    id,
+    connector: normalizeSearchFilterConnector(value.connector),
+    field: normalizeSearchFilterField(value.field),
+    operator: normalizeSearchFilterOperator(value.operator),
+    value: rawValue,
+  }
 }
 
 function unique<T>(items: T[]) {
@@ -180,9 +248,9 @@ function unique<T>(items: T[]) {
   return out
 }
 
-export function defaultReportsConfig(): ReportsConfigV5 {
+export function defaultReportsConfig(): ReportsConfigV6 {
   return {
-    version: 5,
+    version: 6,
     mode: "month",
     month: {
       dataset: "categories",
@@ -207,10 +275,16 @@ export function defaultReportsConfig(): ReportsConfigV5 {
       visibleSeries: [],
       colorByAmount: false,
     },
+    search: {
+      rowFields: ["category"],
+      columnFields: ["bucket"],
+      metric: "sum",
+      filters: [],
+    },
   }
 }
 
-export function loadReportsConfig(): ReportsConfigV5 {
+export function loadReportsConfig(): ReportsConfigV6 {
   if (typeof localStorage === "undefined") return defaultReportsConfig()
 
   const raw = localStorage.getItem(REPORTS_CONFIG_STORAGE_KEY)
@@ -221,7 +295,14 @@ export function loadReportsConfig(): ReportsConfigV5 {
 
   const defaults = defaultReportsConfig()
   const version = parsed.version
-  if (version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5) {
+  if (
+    version !== 1 &&
+    version !== 2 &&
+    version !== 3 &&
+    version !== 4 &&
+    version !== 5 &&
+    version !== 6
+  ) {
     return defaultReportsConfig()
   }
 
@@ -230,9 +311,10 @@ export function loadReportsConfig(): ReportsConfigV5 {
   const dailyRaw =
     (version === 2 || version === 3) && isRecord(parsed.daily) ? parsed.daily : {}
   const pivotRaw =
-    (version === 3 || version === 4 || version === 5) && isRecord(parsed.pivot)
+    (version === 3 || version === 4 || version === 5 || version === 6) && isRecord(parsed.pivot)
       ? parsed.pivot
       : {}
+  const searchRaw = version === 6 && isRecord(parsed.search) ? parsed.search : {}
 
   const visibleCategoriesRaw = Array.isArray(monthRaw.visibleCategories)
     ? monthRaw.visibleCategories
@@ -271,15 +353,19 @@ export function loadReportsConfig(): ReportsConfigV5 {
   )
 
   const rowFieldsRaw =
-    version === 4 || version === 5 ? normalizePivotFieldList(pivotRaw.rowFields) : []
+    version === 4 || version === 5 || version === 6
+      ? normalizePivotFieldList(pivotRaw.rowFields)
+      : []
   const columnFieldsRaw =
-    version === 4 || version === 5 ? normalizePivotFieldList(pivotRaw.columnFields) : []
+    version === 4 || version === 5 || version === 6
+      ? normalizePivotFieldList(pivotRaw.columnFields)
+      : []
   const pivotVisibleSeriesRaw =
-    version === 5 && Array.isArray(pivotRaw.visibleSeries)
+    (version === 5 || version === 6) && Array.isArray(pivotRaw.visibleSeries)
       ? pivotRaw.visibleSeries
       : []
   const pivotColorByAmountRaw =
-    version === 5 && typeof pivotRaw.colorByAmount === "boolean"
+    (version === 5 || version === 6) && typeof pivotRaw.colorByAmount === "boolean"
       ? pivotRaw.colorByAmount
       : false
 
@@ -312,10 +398,20 @@ export function loadReportsConfig(): ReportsConfigV5 {
       ? columnFieldsRaw
       : columnGroupLegacy
         ? [columnGroupLegacy]
-        : []
+      : []
+
+  const searchRowFieldsRaw = version === 6 ? normalizePivotFieldList(searchRaw.rowFields, true) : []
+  const searchColumnFieldsRaw = version === 6 ? normalizePivotFieldList(searchRaw.columnFields, true) : []
+  const searchFiltersRaw =
+    version === 6 && Array.isArray(searchRaw.filters) ? searchRaw.filters : []
+  const searchFilters = unique(
+    searchFiltersRaw
+      .map(normalizeSearchFilterCondition)
+      .filter((x): x is SearchFilterCondition => !!x),
+  )
 
   return {
-    version: 5,
+    version: 6,
     mode: normalizeMode(parsed.mode),
     month: {
       dataset: normalizeMonthDataset(monthRaw.dataset),
@@ -345,10 +441,16 @@ export function loadReportsConfig(): ReportsConfigV5 {
       visibleSeries: pivotVisibleSeries,
       colorByAmount: pivotColorByAmountRaw,
     },
+    search: {
+      rowFields: searchRowFieldsRaw.length > 0 ? searchRowFieldsRaw : defaults.search.rowFields,
+      columnFields: searchColumnFieldsRaw,
+      metric: normalizePivotMetric(searchRaw.metric),
+      filters: searchFilters,
+    },
   }
 }
 
-export function saveReportsConfig(config: ReportsConfigV5) {
+export function saveReportsConfig(config: ReportsConfigV6) {
   if (typeof localStorage === "undefined") return
   localStorage.setItem(REPORTS_CONFIG_STORAGE_KEY, JSON.stringify(config))
 }
