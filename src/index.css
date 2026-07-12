@@ -46,77 +46,137 @@
     height: 100dvh;
   }
 
+  /* ── Cốc nước: hạn mức chi trong ngày ────────────────────────────────────
+   * KIẾN TRÚC "MỘT KHỐI NƯỚC": mỗi lớp sóng là MỘT TẤM NƯỚC nguyên khối kéo từ
+   * mặt xuống tận đáy (mask = mép sin ở trên + phần đặc bên dưới), KHÔNG phải
+   * dải trang trí đặt chồng lên thân nước. Hai tấm lệch pha đè lên nhau: bên
+   * dưới vùng đỉnh sóng chúng phủ nhau 100% nên hoà thành MỘT màu đồng nhất —
+   * triệt tiêu lỗi "2 lớp màu chia vạch ngang" (trước đây sóng đặc 92% đắp lên
+   * thân 50%, nhìn như dải nhựa).
+   * - Chiều sâu: một lớp phủ tối dần theo độ sâu (cùng tông, chỉ tối đi) nằm
+   *   TRÊN các tấm nước -> đáy sẫm như nước thật, không đổi sang sắc khác.
+   * - Ánh sáng: vệt sáng trắng mảnh ở mép trên tấm nước, chỉ lộ ra trên ngọn
+   *   sóng (chỗ nước nhô cao nhất bắt sáng) rồi tan dần.
+   * - Sóng vẽ bằng SVG làm `mask` (SVG data-URI không đọc được biến CSS; tô màu
+   *   qua mask thì sóng mới ăn theo theme + trạng thái vượt hạn mức).
+   */
   .expenses-water-card {
+    --water-tint: var(--chart-6);
+    --wave-h: 1rem; /* biên độ vùng đỉnh sóng */
     position: relative;
     overflow: hidden;
     isolation: isolate;
     border-radius: calc(var(--radius) - 4px);
-    border: 1px solid hsl(var(--chart-6) / 0.42);
+    border: 1px solid hsl(var(--water-tint) / 0.42);
     background:
-      linear-gradient(135deg, hsl(var(--chart-6) / 0.12), transparent 48%),
-      linear-gradient(180deg, hsl(var(--chart-6) / 0.08), hsl(var(--chart-6) / 0.03)),
+      linear-gradient(180deg, hsl(var(--water-tint) / 0.07), hsl(var(--water-tint) / 0.02)),
       hsl(var(--card));
-    contain: paint;
   }
 
   .expenses-water-card-danger {
-    border-color: hsl(var(--destructive) / 0.42);
-    background:
-      linear-gradient(135deg, hsl(var(--destructive) / 0.11), transparent 48%),
-      linear-gradient(180deg, hsl(var(--destructive) / 0.08), hsl(var(--destructive) / 0.03)),
-      hsl(var(--card));
+    --water-tint: var(--destructive);
   }
 
-  .expenses-water-level {
+  /* Giá đỡ 2 tấm nước. Cao = mực nước + nửa biên độ: mặt nước lượn QUANH đúng
+   * vạch mực nước (ngọn nhô ~0.5rem lên trên, bụng võng ~0.5rem xuống dưới). */
+  .expenses-water-surface {
     position: absolute;
-    inset: 0 auto 0 0;
-    overflow: hidden;
-    transform: translateZ(0);
-    transition: width 360ms cubic-bezier(0.22, 1, 0.36, 1);
-    will-change: width;
+    left: 0;
+    right: 0;
+    bottom: 0;
     z-index: 0;
-    box-shadow: 0.8rem 0 1.6rem hsl(var(--chart-6) / 0.2);
+    height: calc(var(--water-level, 0%) + var(--wave-h) / 2);
+    pointer-events: none;
+    transition: height 1800ms cubic-bezier(0.33, 1, 0.68, 1);
   }
 
-  .expenses-water-level-ok {
-    background:
-      linear-gradient(90deg, hsl(var(--chart-6) / 0.42), hsl(var(--chart-2) / 0.52)),
-      linear-gradient(180deg, hsl(var(--background) / 0.16), transparent 45%);
-  }
-
-  .expenses-water-level-danger {
-    background:
-      linear-gradient(90deg, hsl(var(--destructive) / 0.34), hsl(var(--destructive) / 0.58)),
-      linear-gradient(180deg, hsl(var(--background) / 0.14), transparent 45%);
-    box-shadow: 0.8rem 0 1.6rem hsl(var(--destructive) / 0.22);
-  }
-
-  .expenses-water-level::before {
-    content: "";
+  .expenses-water-wave {
     position: absolute;
-    inset: -4rem -6rem;
-    opacity: 0.14;
-    transform: translate3d(0, 0, 0);
+    left: 0;
+    bottom: -4px; /* dư ra để cú nhấp nhô dọc không hở đáy */
+    width: 200%;
+    height: calc(100% + 4px);
     will-change: transform;
-    background:
-      radial-gradient(circle at 14% 72%, hsl(var(--background) / 0.72) 0 0.1rem, transparent 0.14rem),
-      radial-gradient(circle at 38% 36%, hsl(var(--background) / 0.42) 0 0.08rem, transparent 0.12rem),
-      radial-gradient(circle at 58% 68%, hsl(var(--background) / 0.5) 0 0.09rem, transparent 0.13rem),
-      radial-gradient(circle at 82% 44%, hsl(var(--background) / 0.58) 0 0.11rem, transparent 0.15rem);
-    background-repeat: repeat;
-    background-size: 6rem 4rem;
-    animation: expenses-water-bubbles 6s linear infinite;
+    /* mask 2 lớp (tự hợp nhất): hàng sin ở mép trên + khối đặc phủ phần còn lại
+     * (chồng 1px để không hở đường chỉ do làm tròn pixel) */
+    -webkit-mask-repeat: repeat-x, no-repeat;
+    mask-repeat: repeat-x, no-repeat;
+    -webkit-mask-size: 8rem var(--wave-h), 100% calc(100% - var(--wave-h) + 1px);
+    mask-size: 8rem var(--wave-h), 100% calc(100% - var(--wave-h) + 1px);
+    -webkit-mask-position: left top, left bottom;
+    mask-position: left top, left bottom;
   }
 
-  .expenses-water-level::after {
+  /* Tấm nước sau: nhạt hơn, chỉ ló ra nơi bụng sóng của tấm trước -> con sóng xa. */
+  .expenses-water-wave-back {
+    background:
+      linear-gradient(180deg, hsl(0 0% 100% / 0.12), hsl(0 0% 100% / 0) 0.9rem),
+      hsl(var(--water-tint) / 0.3);
+    -webkit-mask-image:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 16' preserveAspectRatio='none'%3E%3Cpath d='M0 7 Q32 16 64 7 T128 7 V16 H0 Z' fill='%23000'/%3E%3C/svg%3E"),
+      linear-gradient(#000, #000);
+    mask-image:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 16' preserveAspectRatio='none'%3E%3Cpath d='M0 7 Q32 16 64 7 T128 7 V16 H0 Z' fill='%23000'/%3E%3C/svg%3E"),
+      linear-gradient(#000, #000);
+    animation: expenses-water-wave-back 5.5s linear infinite;
+  }
+
+  /* Tấm nước trước: mang màu chính của khối nước; vệt sáng chỉ hiện trên ngọn sóng. */
+  .expenses-water-wave-front {
+    background:
+      linear-gradient(
+        180deg,
+        hsl(0 0% 100% / 0.3),
+        hsl(0 0% 100% / 0.05) 0.8rem,
+        hsl(0 0% 100% / 0) 1.4rem
+      ),
+      hsl(var(--water-tint) / 0.5);
+    -webkit-mask-image:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 16' preserveAspectRatio='none'%3E%3Cpath d='M0 9 Q32 0 64 9 T128 9 V16 H0 Z' fill='%23000'/%3E%3C/svg%3E"),
+      linear-gradient(#000, #000);
+    mask-image:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 16' preserveAspectRatio='none'%3E%3Cpath d='M0 9 Q32 0 64 9 T128 9 V16 H0 Z' fill='%23000'/%3E%3C/svg%3E"),
+      linear-gradient(#000, #000);
+    animation: expenses-water-wave-front 3.5s linear infinite;
+  }
+
+  /* Lớp chiều sâu + bọt khí: phủ TRÊN các tấm nước, cao đúng bằng mực nước. */
+  .expenses-water-body {
+    position: absolute;
+    inset: auto 0 0 0;
+    z-index: 1;
+    height: var(--water-level, 0%);
+    overflow: hidden;
+    pointer-events: none;
+    /* tối dần theo chiều sâu — cùng tông màu, chỉ giảm sáng */
+    background: linear-gradient(
+      180deg,
+      hsl(224 45% 9% / 0) 0%,
+      hsl(224 45% 9% / 0.14) 45%,
+      hsl(224 45% 9% / 0.4) 100%
+    );
+    transition: height 1800ms cubic-bezier(0.33, 1, 0.68, 1);
+  }
+
+  /* Bọt khí: VÀNH KHUYÊN rỗng ruột (viền sáng + bóng mờ phía trong — bọt thật là
+   * cái vành khúc xạ, không phải chấm đặc). 3 bọt gần (ô 6rem, nổi nhanh, lắc
+   * ngang) + 2 bọt xa (ô 4.5rem, nhỏ mờ, nổi chậm hơn) -> thị sai chiều sâu.
+   * Nổi bằng background-position (không phải transform) để mặt nạ "tan gần mặt
+   * nước" đứng yên theo khối nước: bọt hiện dần từ đáy và vỡ trước khi chạm mặt. */
+  .expenses-water-body::before {
     content: "";
     position: absolute;
     inset: 0;
-    opacity: 0.16;
-    transform: translate3d(0, 0, 0);
-    will-change: transform;
-    background: linear-gradient(105deg, transparent 0 28%, hsl(var(--background) / 0.36) 43%, transparent 58% 100%);
-    animation: expenses-water-shimmer 3.6s ease-in-out infinite;
+    background-image:
+      radial-gradient(circle at 0.9rem 5.2rem, transparent 0.055rem, hsl(224 50% 15% / 0.2) 0.065rem 0.082rem, hsl(0 0% 100% / 0.5) 0.09rem 0.115rem, transparent 0.15rem),
+      radial-gradient(circle at 3.5rem 2.1rem, transparent 0.04rem, hsl(224 50% 15% / 0.16) 0.048rem 0.06rem, hsl(0 0% 100% / 0.38) 0.066rem 0.086rem, transparent 0.115rem),
+      radial-gradient(circle at 5.1rem 3.9rem, transparent 0.048rem, hsl(224 50% 15% / 0.18) 0.056rem 0.072rem, hsl(0 0% 100% / 0.44) 0.078rem 0.1rem, transparent 0.13rem),
+      radial-gradient(circle at 1.5rem 1.1rem, hsl(0 0% 100% / 0.18) 0 0.04rem, transparent 0.08rem),
+      radial-gradient(circle at 3rem 3.5rem, hsl(0 0% 100% / 0.13) 0 0.03rem, transparent 0.06rem);
+    background-size: 6rem 6rem, 6rem 6rem, 6rem 6rem, 4.5rem 4.5rem, 4.5rem 4.5rem;
+    -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 1rem, #000 calc(100% - 0.3rem), transparent);
+    mask-image: linear-gradient(180deg, transparent 0, #000 1rem, #000 calc(100% - 0.3rem), transparent);
+    animation: expenses-water-bubbles 10s linear infinite;
   }
 
   .expenses-water-content {
@@ -127,37 +187,88 @@
       0 0 0.75rem hsl(var(--background) / 0.38);
   }
 
-  @keyframes expenses-water-bubbles {
-    from {
+  /* Trôi ngang đúng 1 chu kỳ mask (8rem) -> vòng lặp liền mạch, không thấy điểm
+   * nối; kèm nhấp nhô dọc ~1px lệch pha giữa 2 tấm -> mặt nước phập phồng thay vì
+   * trượt cứng như tấm nhựa. Mốc 0% và 100% phải cùng toạ độ y để lặp không giật. */
+  @keyframes expenses-water-wave-front {
+    0% {
       transform: translate3d(0, 0, 0);
     }
 
-    to {
-      transform: translate3d(6rem, -4rem, 0);
+    25% {
+      transform: translate3d(-2rem, -0.8px, 0);
     }
-  }
 
-  @keyframes expenses-water-shimmer {
-    0%,
+    50% {
+      transform: translate3d(-4rem, -0.1px, 0);
+    }
+
+    75% {
+      transform: translate3d(-6rem, -1px, 0);
+    }
+
     100% {
-      transform: translate3d(-65%, 0, 0);
-    }
-
-    55% {
-      transform: translate3d(65%, 0, 0);
+      transform: translate3d(-8rem, 0, 0);
     }
   }
 
-  @media (prefers-reduced-motion: reduce) {
-    .expenses-water-level {
-      transition: none;
-      will-change: auto;
+  @keyframes expenses-water-wave-back {
+    0% {
+      transform: translate3d(-8rem, -0.6px, 0);
     }
 
-    .expenses-water-level::before,
-    .expenses-water-level::after {
-      animation-duration: 12s;
-      will-change: auto;
+    25% {
+      transform: translate3d(-6rem, 0, 0);
+    }
+
+    50% {
+      transform: translate3d(-4rem, -1px, 0);
+    }
+
+    75% {
+      transform: translate3d(-2rem, -0.2px, 0);
+    }
+
+    100% {
+      transform: translate3d(0, -0.6px, 0);
+    }
+  }
+
+  /* Bọt nổi + lắc ngang nhẹ. Mốc 100%: x về 0 và y = đúng bội số chiều cao ô
+   * (6rem / 4.5rem) -> lặp liền mạch; 2 nhóm đi quãng đường khác nhau = thị sai. */
+  @keyframes expenses-water-bubbles {
+    0% {
+      background-position: 0 0, 0 0, 0 0, 0 0, 0 0;
+    }
+
+    33% {
+      background-position: 0.22rem -2rem, -0.18rem -2rem, 0.12rem -2rem, -0.09rem -1.5rem, 0.07rem -1.5rem;
+    }
+
+    66% {
+      background-position: -0.16rem -4rem, 0.2rem -4rem, -0.1rem -4rem, 0.08rem -3rem, -0.05rem -3rem;
+    }
+
+    100% {
+      background-position: 0 -6rem, 0 -6rem, 0 -6rem, 0 -4.5rem, 0 -4.5rem;
+    }
+  }
+
+  /* Người dùng bật "giảm chuyển động" (Win10: Settings > Ease of Access > Display
+   * > Show animations) thì LÀM DỊU chứ không tắt hẳn. KHÔNG hạ cấp phần nước
+   * dâng/cạn: đó là chuyển động một lần, cục bộ, và chính là thông tin (chi bao
+   * nhiêu). Chỉ cho các chuyển động lặp vô hạn (sóng, bọt) trôi chậm lại. */
+  @media (prefers-reduced-motion: reduce) {
+    .expenses-water-wave-front {
+      animation-duration: 6s;
+    }
+
+    .expenses-water-wave-back {
+      animation-duration: 9.5s;
+    }
+
+    .expenses-water-body::before {
+      animation-duration: 16s;
     }
   }
 }

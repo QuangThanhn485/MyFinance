@@ -1,4 +1,11 @@
-﻿import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+﻿import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { Controller, useForm } from "react-hook-form"
@@ -1025,6 +1032,8 @@ export default function ExpensesPage() {
                     "expenses-water-card p-3",
                     selectedDayRemainingVnd < 0 && "expenses-water-card-danger",
                   )}
+                  // Mực nước = phần hạn mức đã dùng: càng chi, nước càng dâng.
+                  style={{ "--water-level": `${selectedDayUsedPct}%` } as CSSProperties}
                   role="progressbar"
                   aria-label={dailyAllowanceTitle}
                   aria-valuemin={0}
@@ -1032,16 +1041,11 @@ export default function ExpensesPage() {
                   aria-valuenow={Math.round(selectedDayUsedPct)}
                   aria-valuetext={`Đã dùng ${selectedDayUsedPct.toFixed(0)}%, còn lại ${selectedDayRemainingPct.toFixed(0)}%`}
                 >
-                  <div
-                    className={cn(
-                      "expenses-water-level",
-                      selectedDayRemainingVnd < 0
-                        ? "expenses-water-level-danger"
-                        : "expenses-water-level-ok",
-                    )}
-                    style={{ width: `${selectedDayUsedPct}%` }}
-                  />
-
+                  <div className="expenses-water-body" aria-hidden />
+                  <div className="expenses-water-surface" aria-hidden>
+                    <span className="expenses-water-wave expenses-water-wave-back" />
+                    <span className="expenses-water-wave expenses-water-wave-front" />
+                  </div>
                   <div className="expenses-water-content">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
