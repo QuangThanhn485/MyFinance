@@ -147,6 +147,28 @@ export function computeRemainingDailySpendingCap(input: {
   }
 }
 
+export function computeTodayDailySpendingCap(input: {
+  incomeVnd: number
+  savingsTargetVnd: number
+  monthTotalSpentVnd: number
+  todaySpentVnd: number
+  dayOfMonth: number
+  daysInMonth: number
+}): RemainingDailySpendingCapSnapshot {
+  const dim = normalizeFinanceDaysInMonth(input.daysInMonth)
+  const day = Math.min(dim, normalizeFinanceDay(input.dayOfMonth))
+  const monthTotalSpentVnd = clampMoneyVnd(input.monthTotalSpentVnd)
+  const todaySpentVnd = clampMoneyVnd(input.todaySpentVnd)
+  const spentBeforeTodayVnd = Math.max(0, monthTotalSpentVnd - todaySpentVnd)
+
+  return computeRemainingDailySpendingCap({
+    incomeVnd: input.incomeVnd,
+    savingsTargetVnd: input.savingsTargetVnd,
+    totalSpentVnd: spentBeforeTodayVnd,
+    remainingDaysInMonth: Math.max(1, dim - day + 1),
+  })
+}
+
 function normalizeRemainingBudgetVnd(value: number) {
   if (!Number.isFinite(value)) return 0
   return Math.trunc(value)

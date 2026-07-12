@@ -5,6 +5,7 @@ import {
   computeDailyCapRaisePlanByDays,
   computeRecoveryCaps,
   computeRemainingDailySpendingCap,
+  computeTodayDailySpendingCap,
   computeTodayCaps,
   projectMonthEndFromPace,
   resolveEffectiveDailyTotalCapVnd,
@@ -67,6 +68,29 @@ describe("computeRemainingDailySpendingCap", () => {
     expect(cap.spendingBudgetVnd).toBe(9_000_000)
     expect(cap.totalRemainingVnd).toBe(67_100)
     expect(cap.dailyTotalCapVnd).toBe(67_100)
+  })
+
+  it("keeps today's cap anchored before today's spending is recorded", () => {
+    const todayCap = computeTodayDailySpendingCap({
+      incomeVnd: 10_000_000,
+      savingsTargetVnd: 1_000_000,
+      monthTotalSpentVnd: 3_100_000,
+      todaySpentVnd: 100_000,
+      dayOfMonth: 10,
+      daysInMonth: 30,
+    })
+    const futureCap = computeRemainingDailySpendingCap({
+      incomeVnd: 10_000_000,
+      savingsTargetVnd: 1_000_000,
+      totalSpentVnd: 3_100_000,
+      remainingDaysInMonth: 20,
+    })
+
+    expect(todayCap.totalRemainingVnd).toBe(6_000_000)
+    expect(todayCap.remainingDaysInMonth).toBe(21)
+    expect(todayCap.dailyTotalCapVnd).toBe(285_714)
+    expect(futureCap.dailyTotalCapVnd).toBe(295_000)
+    expect(todayCap.dailyTotalCapVnd).not.toBe(futureCap.dailyTotalCapVnd)
   })
 })
 

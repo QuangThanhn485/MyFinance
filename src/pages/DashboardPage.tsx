@@ -3,6 +3,7 @@ import { Link } from "react-router-dom"
 import { computeBudgets, computeEmergencyFund } from "@/domain/finance/finance"
 import {
   computeRemainingDailySpendingCap,
+  computeTodayDailySpendingCap,
   projectMonthEndFromPace,
   resolveEffectiveDailyTotalCapVnd,
 } from "@/domain/finance/dailySafeCap"
@@ -140,15 +141,29 @@ export default function DashboardPage() {
   })
   const spendingBudgetVnd = remainingDailyCap.spendingBudgetVnd
   const totalRemaining = remainingDailyCap.totalRemainingVnd
-  const shownDailyCap = resolveEffectiveDailyTotalCapVnd({
+  const shownFutureDailyCap = resolveEffectiveDailyTotalCapVnd({
     computedDailyTotalCapVnd: remainingDailyCap.dailyTotalCapVnd,
     appliedDailyTotalCapVnd: caps?.dailyTotalCapVnd,
   })
-  const remainingTodayVnd = shownDailyCap - todaySpent
+  const todayDailyCap = computeTodayDailySpendingCap({
+    incomeVnd: budgets.incomeVnd,
+    savingsTargetVnd: savingsTarget,
+    monthTotalSpentVnd: totals.totalSpent,
+    todaySpentVnd: todaySpent,
+    dayOfMonth: dayContext.dayOfMonth,
+    daysInMonth: dayContext.daysInMonth,
+  })
+  const shownTodayDailyCap = resolveEffectiveDailyTotalCapVnd({
+    computedDailyTotalCapVnd: todayDailyCap.dailyTotalCapVnd,
+    appliedDailyTotalCapVnd: caps?.dailyTotalCapVnd,
+  })
+  const remainingTodayVnd = shownTodayDailyCap - todaySpent
   const todayUsagePct =
-    shownDailyCap > 0 ? clampPct((todaySpent / shownDailyCap) * 100) : todaySpent > 0 ? 100 : 0
+    shownTodayDailyCap > 0 ? clampPct((todaySpent / shownTodayDailyCap) * 100) : todaySpent > 0 ? 100 : 0
   const appliedCapLimiting =
-    caps?.dailyTotalCapVnd != null && caps.dailyTotalCapVnd < remainingDailyCap.dailyTotalCapVnd
+    caps?.dailyTotalCapVnd != null &&
+    (caps.dailyTotalCapVnd < remainingDailyCap.dailyTotalCapVnd ||
+      caps.dailyTotalCapVnd < todayDailyCap.dailyTotalCapVnd)
 
   // Dự báo cuối tháng: ngoại suy nhịp chi thực tế cho những ngày còn lại (KHÔNG coi toàn bộ tiền
   // chưa tiêu là tiết kiệm). Nếu đang chi vượt hạn mức thì dự báo tiết kiệm sẽ tụt theo.
@@ -194,14 +209,14 @@ export default function DashboardPage() {
   const wantsFreezeActive = !!(caps?.wantsFreezeUntil && today <= caps.wantsFreezeUntil)
 
   const dailyStatusTone: Tone =
-    !incomeConfigured || (shownDailyCap <= 0 && totalRemaining <= 0)
+    !incomeConfigured || (shownTodayDailyCap <= 0 && todayDailyCap.totalRemainingVnd <= 0)
       ? "danger"
       : remainingTodayVnd >= 0
         ? "ok"
         : "danger"
   const dailyStatusText = !incomeConfigured
     ? "Chưa thiết lập thu nhập để tính hạn mức."
-    : totalRemaining <= 0 && shownDailyCap <= 0
+    : todayDailyCap.totalRemainingVnd <= 0 && shownTodayDailyCap <= 0
       ? "Đã dùng hết ngân sách chi của tháng."
       : remainingTodayVnd >= 0
         ? `Hôm nay còn có thể chi ${formatVnd(remainingTodayVnd)}.`
@@ -257,7 +272,7 @@ export default function DashboardPage() {
         <MetricCard
           title="Còn được chi hôm nay"
           value={formatVnd(remainingTodayVnd)}
-          subValue={`Hạn mức ${formatVnd(shownDailyCap)}/ngày`}
+          subValue={`Hạn mức hôm nay ${formatVnd(shownTodayDailyCap)}`}
           tone={remainingTodayVnd < 0 ? "danger" : "ok"}
         />
         <MetricCard
@@ -309,8 +324,12 @@ export default function DashboardPage() {
             </div>
             <Progress value={todayUsagePct} />
             <div className="space-y-2 text-sm">
-              <LabelValueRow label="Hạn mức chi mỗi ngày" value={formatVnd(shownDailyCap)} />
-              <LabelValueRow label="Số ngày còn lại trong tháng" value={`${daysRemaining}`} />
+              <LabelValueRow label="Hạn mức hôm nay" value={formatVnd(shownTodayDailyCap)} />
+              <LabelValueRow
+                label={dayContext.dateHasExpense ? "Cap áp dụng từ ngày kế tiếp" : "Cap còn lại/ngày"}
+                value={formatVnd(shownFutureDailyCap)}
+              />
+              <LabelValueRow label="Ngày còn lại để phân bổ tiếp" value={`${daysRemaining}`} />
             </div>
             <div className={cn("text-sm font-medium", toneTextClass(dailyStatusTone))}>
               {dailyStatusText}
