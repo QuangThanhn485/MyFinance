@@ -370,18 +370,21 @@ export default function ExpensesPage() {
     computedDailyTotalCapVnd: remainingDailyCap.dailyTotalCapVnd,
     appliedDailyTotalCapVnd: caps?.dailyTotalCapVnd,
   })
-  // Thanh "Còn lại ngân sách tháng" = tổng tiền còn được chi (I − S − đã chi). Đầu tháng chưa
-  // tiêu gì => còn 100% ngân sách chi (I − S); chi càng nhiều thanh càng vơi. Giữ trong mức này
-  // đồng nghĩa vẫn đạt mục tiêu tiết kiệm. Vượt => 0% + số đỏ.
+  // Thanh "Còn lại ngân sách tháng" dùng base là ngân sách biến đổi có thể chi:
+  // 100% = Thiết yếu (E) + Mong muốn (W), không gồm phí cố định. Phần sáng của
+  // Progress là phần đã chi; số tiền bên phải vẫn là phần còn lại.
+  const monthlyVariableBudgetVnd =
+    budgets.essentialVariableBaselineVnd + budgets.wantsBudgetVnd
+  const monthlyVariableRemainingVnd =
+    monthlyVariableBudgetVnd - monthTotals.variableTotal
+  const budgetProgressRemainingVnd = Math.max(0, monthlyVariableRemainingVnd)
+  const budgetSpentPct =
+    monthlyVariableBudgetVnd > 0
+      ? clampPct((monthTotals.variableTotal / monthlyVariableBudgetVnd) * 100)
+      : 0
   const budgetRemainingPct =
-    remainingDailyCap.spendingBudgetVnd > 0
-      ? Math.max(
-          0,
-          Math.min(
-            100,
-            (remainingDailyCap.totalRemainingVnd / remainingDailyCap.spendingBudgetVnd) * 100,
-          ),
-        )
+    monthlyVariableBudgetVnd > 0
+      ? clampPct((budgetProgressRemainingVnd / monthlyVariableBudgetVnd) * 100)
       : 0
   // Thanh "Ngày đã trôi qua trong tháng" = tổng ngày − số ngày còn lại (theo nghiệp vụ). Vì ngày
   // đã có chi tiêu bị loại khỏi "ngày còn lại", nên khi hôm nay phát sinh chi tiêu thì ngày còn
@@ -1061,21 +1064,11 @@ export default function ExpensesPage() {
                           {formatVnd(selectedDayRemainingVnd)}
                         </div>
                       </div>
-                      <span
-                        className={cn(
-                          "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium",
-                          selectedDayRemainingVnd < 0
-                            ? "bg-destructive text-destructive-foreground"
-                            : "bg-cyan-600 text-white dark:bg-cyan-400 dark:text-cyan-950",
-                        )}
-                      >
-                        Đã dùng {selectedDayUsedPct.toFixed(0)}%
-                      </span>
                     </div>
 
                     <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] font-medium text-foreground/75">
                       <span className="min-w-0 truncate">Hạn mức {formatVnd(shownSelectedDayCapVnd)}</span>
-                      <span className="min-w-0 truncate text-right">Còn lại {selectedDayRemainingPct.toFixed(0)}%</span>
+                      <span className="min-w-0 truncate text-right">{selectedDayUsedPct.toFixed(0)}%</span>
                     </div>
                     {dailyAllowanceWarning ? (
                       <div className="mt-1 text-[11px] font-medium text-destructive">
@@ -1085,15 +1078,18 @@ export default function ExpensesPage() {
                   </div>
                 </div>
 
-                {/* Còn lại ngân sách tháng = tổng tiền còn được chi (I − S − đã chi). Giữ trong
-                    mức này thì vẫn đạt mục tiêu tiết kiệm. Đầu tháng chưa tiêu gì = 100%. */}
+                {/* Còn lại ngân sách tháng = phần E + W chưa dùng; không tính phí cố định. */}
                 <div className="space-y-1.5">
                   <LabelValueRow
                     label="Còn lại ngân sách tháng"
-                    value={formatVnd(remainingDailyCap.totalRemainingVnd)}
-                    valueClassName={cn(remainingDailyCap.totalRemainingVnd < 0 && "text-destructive")}
+                    value={formatVnd(monthlyVariableRemainingVnd)}
+                    valueClassName={cn(monthlyVariableRemainingVnd < 0 && "text-destructive")}
                   />
-                  <Progress value={budgetRemainingPct} />
+                  <Progress
+                    value={budgetSpentPct}
+                    aria-label="Còn lại ngân sách tháng"
+                    aria-valuetext={`Đã chi ${budgetSpentPct.toFixed(0)}%, còn lại ${budgetRemainingPct.toFixed(0)}% ngân sách tháng`}
+                  />
                 </div>
 
                 {/* Ngày đã trôi qua trong tháng — đối chiếu với ngân sách còn lại ở trên. */}
