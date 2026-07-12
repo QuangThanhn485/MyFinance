@@ -3993,7 +3993,7 @@ export default function ReportsPage() {
                                     <th
                                       key={`search-row-head-${index}`}
                                       rowSpan={searchColumnHeaderDepth}
-                                      className="sticky top-0 z-40 whitespace-nowrap border-b border-r border-border/70 bg-muted px-2 py-2 text-left font-medium sm:px-3"
+                                      className="sticky top-0 z-40 whitespace-nowrap border-b border-r border-muted-foreground/25 bg-muted px-2 py-2 text-left font-medium sm:px-3"
                                       style={{
                                         left: `${searchRowStickyOffsets[index]}px`,
                                         minWidth: `${searchRowHeaderColWidth}px`,
@@ -4014,7 +4014,7 @@ export default function ReportsPage() {
                                 <th
                                   key={group.key}
                                   colSpan={group.span}
-                                  className="whitespace-nowrap border-b border-r border-border/70 bg-muted px-2 py-2 text-center font-medium sm:px-3"
+                                  className="whitespace-nowrap border-b border-r border-muted-foreground/25 bg-muted px-2 py-2 text-center font-medium sm:px-3"
                                 >
                                   <span
                                     className="block truncate"
@@ -4028,7 +4028,7 @@ export default function ReportsPage() {
                               {level === 0 ? (
                                 <th
                                   rowSpan={searchColumnHeaderDepth}
-                                  className="sticky top-0 z-30 whitespace-nowrap border-b border-r border-border/70 bg-muted px-2 py-2 text-right font-medium sm:px-3"
+                                  className="sticky top-0 z-30 whitespace-nowrap border-b border-r border-muted-foreground/25 bg-muted px-2 py-2 text-right font-medium sm:px-3"
                                 >
                                   Tổng
                                 </th>
@@ -4148,7 +4148,7 @@ export default function ReportsPage() {
                                       <th
                                         key={`pivot-row-head-${index}`}
                                         rowSpan={pivotColumnHeaderDepth}
-                                        className="sticky top-0 z-40 whitespace-nowrap border-b border-r border-border/70 bg-muted px-2 py-2 text-left font-medium sm:px-3"
+                                        className="sticky top-0 z-40 whitespace-nowrap border-b border-r border-muted-foreground/25 bg-muted px-2 py-2 text-left font-medium sm:px-3"
                                         style={{
                                           left: `${pivotRowStickyOffsets[index]}px`,
                                           minWidth: `${pivotRowHeaderColWidth}px`,
@@ -4187,7 +4187,7 @@ export default function ReportsPage() {
                                       <th
                                         key={group.key}
                                         colSpan={group.span}
-                                        className="whitespace-nowrap border-b border-r border-border/70 bg-muted px-2 py-2 text-center font-medium sm:px-3"
+                                        className="whitespace-nowrap border-b border-r border-muted-foreground/25 bg-muted px-2 py-2 text-center font-medium sm:px-3"
                                       >
                                         <span
                                           className="block truncate"
@@ -4211,7 +4211,7 @@ export default function ReportsPage() {
                                 {level === 0 ? (
                                   <th
                                     rowSpan={pivotColumnHeaderDepth}
-                                    className="sticky top-0 z-30 whitespace-nowrap border-b border-r border-border/70 bg-muted px-2 py-2 text-right font-medium sm:px-3"
+                                    className="sticky top-0 z-30 whitespace-nowrap border-b border-r border-muted-foreground/25 bg-muted px-2 py-2 text-right font-medium sm:px-3"
                                   >
                                     Tổng
                                   </th>
