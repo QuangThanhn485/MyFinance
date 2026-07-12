@@ -53,7 +53,6 @@ import {
 } from "@/domain/finance/budgetHealth"
 import {
   computeRemainingDailySpendingCap,
-  projectMonthEndFromPace,
   resolveEffectiveDailyTotalCapVnd,
 } from "@/domain/finance/dailySafeCap"
 import { Badge } from "@/components/ui/badge"
@@ -151,6 +150,11 @@ function warningDeltaThreshold(warning: BudgetHealthWarning) {
   return Math.max(100_000, Math.round(warning.details.thresholdVnd ?? 0))
 }
 
+function clampPct(value: number) {
+  if (!Number.isFinite(value)) return 0
+  return Math.max(0, Math.min(100, value))
+}
+
 function readCollapsedState(key: string, fallback = false) {
   if (typeof localStorage === "undefined") return fallback
   try {
@@ -207,6 +211,8 @@ export default function ExpensesPage() {
   const [bulkDeleteTemplatesOpen, setBulkDeleteTemplatesOpen] = useState(false)
   const [deleteExpenseId, setDeleteExpenseId] = useState<string | null>(null)
   const [highlightExpenseId, setHighlightExpenseId] = useState<string | null>(null)
+  const today = todayIso()
+  const selectedDateIsToday = selectedDate === today
 
   const categoryOptions = useMemo(() => data.expenseCategories, [data.expenseCategories])
   const categoryLabels = useMemo(
@@ -278,27 +284,24 @@ export default function ExpensesPage() {
   )
   const month = monthFromIsoDate(selectedDate)
   const dayContext = getMonthDayContext(data, selectedDate)
-  const currentMonth = monthFromIsoDate(todayIso())
+  const currentMonth = monthFromIsoDate(today)
   const selectedMonthPast = month < currentMonth
   const selectedMonthLocked = isMonthLocked(data, month)
   const selectedDateReadOnly = selectedMonthLocked
 
-  // Các chỉ số cấp-THÁNG (cap/ngày, ngân sách còn lại, ngày đã trôi qua, dự báo tiết kiệm) phản
+  // Các chỉ số cấp-THÁNG (cap/ngày, ngân sách còn lại, ngày đã trôi qua) phản
   // ánh VỊ TRÍ HIỆN TẠI trong tháng được chọn — KHÔNG phụ thuộc ngày đang xem/nhập:
   //  - Tháng hiện tại: tính theo HÔM NAY.
   //  - Tháng đã qua: coi như đã hết tháng (0 ngày còn lại, đã trôi qua hết tháng).
   //  - Tháng tương lai: chưa bắt đầu (còn nguyên tháng).
   // Ngày còn lại vẫn tự động loại các ngày đã phát sinh chi tiêu (thay cho "khoá ngày").
   const isSelectedCurrentMonth = month === currentMonth
-  const todayContext = getMonthDayContext(data, todayIso())
+  const todayContext = getMonthDayContext(data, today)
   const remainingDaysInMonth = isSelectedCurrentMonth
     ? todayContext.remainingDaysInMonth
     : selectedMonthPast
       ? 0
       : dayContext.daysInMonth
-  const monthRefDayOfMonth = isSelectedCurrentMonth
-    ? todayContext.dayOfMonth
-    : dayContext.daysInMonth
   const monthRefHasExpenseToday = isSelectedCurrentMonth && todayContext.dateHasExpense
   const monthTotals = getMonthTotals(data, month)
 
@@ -384,32 +387,42 @@ export default function ExpensesPage() {
   // Cap đang tính cho ngày kế tiếp (không phải hôm nay) khi hôm nay đã phát sinh chi tiêu.
   const capForNextDay = monthRefHasExpenseToday && remainingDaysInMonth > 0
 
-  // Dự báo tiết kiệm cuối tháng theo nhịp chi thực tế (nhất quán Dashboard/Ngân sách): tháng
-  // hiện tại ngoại suy phần còn lại của tháng, tháng đã qua thì = I − đã chi thực tế.
-  const savingsProjection = projectMonthEndFromPace({
+  const selectedDateToDateTotals = getMonthToDateTotals(data, selectedDate)
+  const selectedDaySpentBeforeDateVnd =
+    monthTotals.fixedCostsTotal +
+    Math.max(0, selectedDateToDateTotals.variableTotalToDateVnd - dailyTotal)
+  const selectedDayDailyCap = computeRemainingDailySpendingCap({
     incomeVnd: budgets.incomeVnd,
-    fixedCostsVnd: monthTotals.fixedCostsTotal,
-    essentialVariableBaselineVnd: budgets.essentialVariableBaselineVnd,
-    variableNeedsToDateVnd: monthTotals.variableNeeds,
-    variableWantsToDateVnd: monthTotals.variableWants,
-    dayOfMonth: monthRefDayOfMonth,
-    daysInMonth: dayContext.daysInMonth,
+    savingsTargetVnd: budgets.savingsTargetVnd,
+    totalSpentVnd: selectedDaySpentBeforeDateVnd,
+    remainingDaysInMonth: Math.max(1, dayContext.daysInMonth - dayContext.dayOfMonth + 1),
   })
-  const projectedSavingsEndMonthVnd = isSelectedCurrentMonth
-    ? savingsProjection.projectedSavingsVnd
-    : Math.trunc(budgets.incomeVnd - monthTotals.totalSpent)
-  const savingsMet = projectedSavingsEndMonthVnd >= budgets.savingsTargetVnd
-  const savingsAboveMss = projectedSavingsEndMonthVnd >= budgets.mssVnd
-  const savingsToneClass = savingsMet
-    ? "text-emerald-700 dark:text-emerald-400"
-    : savingsAboveMss
-      ? "text-amber-600 dark:text-amber-400"
-      : "text-destructive"
-  const savingsVerdict = savingsMet
-    ? "Đang đúng hướng đạt mục tiêu"
-    : savingsAboveMss
-      ? "Có nguy cơ hụt mục tiêu tiết kiệm"
-      : "Dưới mức an toàn tối thiểu (MSS)"
+  const shownSelectedDayCapVnd = resolveEffectiveDailyTotalCapVnd({
+    computedDailyTotalCapVnd: selectedDayDailyCap.dailyTotalCapVnd,
+    appliedDailyTotalCapVnd: caps?.dailyTotalCapVnd,
+  })
+  const selectedDayRemainingVnd = shownSelectedDayCapVnd - dailyTotal
+  const selectedDayRemainingPct =
+    shownSelectedDayCapVnd > 0
+      ? clampPct((Math.max(0, selectedDayRemainingVnd) / shownSelectedDayCapVnd) * 100)
+      : 0
+  const selectedDayUsedPct =
+    shownSelectedDayCapVnd > 0
+      ? clampPct((dailyTotal / shownSelectedDayCapVnd) * 100)
+      : dailyTotal > 0
+        ? 100
+        : 0
+  const dailyAllowanceTitle = selectedDateIsToday
+    ? "Còn được chi hôm nay"
+    : "Còn được chi ngày này"
+  const dailyAllowanceWarning =
+    budgets.incomeVnd <= 0
+      ? "Chưa thiết lập thu nhập để tính hạn mức."
+      : shownSelectedDayCapVnd <= 0 && selectedDayRemainingVnd <= 0
+        ? "Không còn hạn mức khả dụng cho ngày này."
+        : selectedDayRemainingVnd < 0
+          ? `Vượt hạn mức ngày ${formatVnd(Math.abs(selectedDayRemainingVnd))}.`
+          : null
 
   const formSchema = z.object({
     amountVnd: z.coerce.number().int().positive({ message: "Số tiền phải > 0." }),
@@ -876,7 +889,7 @@ export default function ExpensesPage() {
       toast.error(`Tháng ${expenseMonth} đã chốt báo cáo nên không thể xóa.`)
       return
     }
-    if (expense.date === todayIso()) {
+    if (expense.date === today) {
       deleteExpense(expense.id)
       toast.success("Đã xóa.")
       return
@@ -940,7 +953,7 @@ export default function ExpensesPage() {
               onChange={(value) => value && setSelectedDate(value)}
             />
           </div>
-          <Button type="button" variant="secondary" size="sm" onClick={() => setSelectedDate(todayIso())}>
+          <Button type="button" variant="secondary" size="sm" onClick={() => setSelectedDate(today)}>
             Hôm nay
           </Button>
         </div>
@@ -993,7 +1006,7 @@ export default function ExpensesPage() {
               icon={<ChartColumn className="h-4 w-4" />}
               collapsed={statsCollapsed}
               onToggle={() => setStatsCollapsed((prev) => !prev)}
-              summary={`Hôm nay: ${formatVnd(dailyTotal)}`}
+              summary={`${selectedDateIsToday ? "Hôm nay" : "Ngày này"}: ${formatVnd(dailyTotal)}`}
               contentClassName="lg:h-full lg:min-h-0"
             >
               <div className="space-y-3 text-sm lg:h-full lg:overflow-y-auto lg:pr-1">
@@ -1064,22 +1077,65 @@ export default function ExpensesPage() {
                   <Progress value={daysElapsedPct} />
                 </div>
 
-                {/* Tiết kiệm — dự báo cuối tháng (tháng hiện tại) / thực tế (tháng đã qua) */}
-                <div className="rounded-md border bg-muted/30 p-3">
-                  <div className="text-xs text-muted-foreground">
-                    {isSelectedCurrentMonth
-                      ? "Dự báo tiết kiệm cuối tháng"
-                      : "Tiết kiệm thực tế của tháng"}
-                  </div>
+                <div
+                  className={cn(
+                    "expenses-water-card p-3",
+                    selectedDayRemainingVnd < 0 && "expenses-water-card-danger",
+                  )}
+                  role="progressbar"
+                  aria-label={dailyAllowanceTitle}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(selectedDayUsedPct)}
+                  aria-valuetext={`Đã dùng ${selectedDayUsedPct.toFixed(0)}%, còn lại ${selectedDayRemainingPct.toFixed(0)}%`}
+                >
                   <div
                     className={cn(
-                      "mt-0.5 text-lg font-semibold tabular-nums",
-                      savingsToneClass,
+                      "expenses-water-level",
+                      selectedDayRemainingVnd < 0
+                        ? "expenses-water-level-danger"
+                        : "expenses-water-level-ok",
                     )}
-                  >
-                    {formatVnd(projectedSavingsEndMonthVnd)}
+                    style={{ width: `${selectedDayUsedPct}%` }}
+                  />
+
+                  <div className="expenses-water-content">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-xs font-medium text-foreground/80">{dailyAllowanceTitle}</div>
+                        <div
+                          className={cn(
+                            "mt-0.5 break-words text-lg font-semibold tabular-nums text-foreground",
+                            selectedDayRemainingVnd < 0
+                              ? "text-destructive"
+                              : "text-cyan-800 dark:text-cyan-200",
+                          )}
+                        >
+                          {formatVnd(selectedDayRemainingVnd)}
+                        </div>
+                      </div>
+                      <span
+                        className={cn(
+                          "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium",
+                          selectedDayRemainingVnd < 0
+                            ? "bg-destructive text-destructive-foreground"
+                            : "bg-cyan-600 text-white dark:bg-cyan-400 dark:text-cyan-950",
+                        )}
+                      >
+                        Đã dùng {selectedDayUsedPct.toFixed(0)}%
+                      </span>
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] font-medium text-foreground/75">
+                      <span className="min-w-0 truncate">Hạn mức {formatVnd(shownSelectedDayCapVnd)}</span>
+                      <span className="min-w-0 truncate text-right">Còn lại {selectedDayRemainingPct.toFixed(0)}%</span>
+                    </div>
+                    {dailyAllowanceWarning ? (
+                      <div className="mt-1 text-[11px] font-medium text-destructive">
+                        {dailyAllowanceWarning}
+                      </div>
+                    ) : null}
                   </div>
-                  <div className="text-[11px] text-muted-foreground">{savingsVerdict}</div>
                 </div>
               </div>
             </CollapsibleCard>
