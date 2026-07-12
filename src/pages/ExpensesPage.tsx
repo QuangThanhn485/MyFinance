@@ -1020,63 +1020,6 @@ export default function ExpensesPage() {
                   />
                 </div>
 
-                {/* Cap chi mỗi ngày. Khi hôm nay đã ghi chi tiêu, cap chuyển sang áp dụng cho NGÀY
-                    KẾ TIẾP — cả khung đổi sang màu hổ phách + badge có icon để người dùng nhận ra
-                    ngay đây là giới hạn của ngày kế tiếp, không phải hôm nay. */}
-                <div
-                  className={cn(
-                    "rounded-lg border p-3 space-y-2",
-                    capForNextDay
-                      ? "border-amber-500/50 bg-amber-500/10"
-                      : "border-primary/30 bg-primary/5",
-                  )}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-medium text-muted-foreground">
-                      Cap chi mỗi ngày
-                    </span>
-                    {capForNextDay ? (
-                      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500 px-2 py-0.5 text-[11px] font-semibold text-white shadow-sm">
-                        <CalendarClock className="h-3.5 w-3.5" />
-                        Cho ngày kế tiếp
-                      </span>
-                    ) : (
-                      <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-                        Cho hôm nay
-                      </span>
-                    )}
-                  </div>
-                  <div
-                    className={cn(
-                      "break-words text-xl font-semibold tabular-nums sm:text-2xl",
-                      capForNextDay && "text-amber-700 dark:text-amber-400",
-                      shownDailyTotalCapVnd <= 0 && "text-destructive",
-                    )}
-                  >
-                    {formatVnd(shownDailyTotalCapVnd)}
-                  </div>
-                </div>
-
-                {/* Còn lại ngân sách tháng = tổng tiền còn được chi (I − S − đã chi). Giữ trong
-                    mức này thì vẫn đạt mục tiêu tiết kiệm. Đầu tháng chưa tiêu gì = 100%. */}
-                <div className="space-y-1.5">
-                  <LabelValueRow
-                    label="Còn lại ngân sách tháng"
-                    value={formatVnd(remainingDailyCap.totalRemainingVnd)}
-                    valueClassName={cn(remainingDailyCap.totalRemainingVnd < 0 && "text-destructive")}
-                  />
-                  <Progress value={budgetRemainingPct} />
-                </div>
-
-                {/* Ngày đã trôi qua trong tháng — đối chiếu với ngân sách còn lại ở trên. */}
-                <div className="space-y-1.5">
-                  <LabelValueRow
-                    label="Ngày đã trôi qua trong tháng"
-                    value={`${daysElapsedInMonth}/${dayContext.daysInMonth} ngày`}
-                  />
-                  <Progress value={daysElapsedPct} />
-                </div>
-
                 <div
                   className={cn(
                     "expenses-water-card p-3",
@@ -1137,6 +1080,48 @@ export default function ExpensesPage() {
                     ) : null}
                   </div>
                 </div>
+
+                {/* Còn lại ngân sách tháng = tổng tiền còn được chi (I − S − đã chi). Giữ trong
+                    mức này thì vẫn đạt mục tiêu tiết kiệm. Đầu tháng chưa tiêu gì = 100%. */}
+                <div className="space-y-1.5">
+                  <LabelValueRow
+                    label="Còn lại ngân sách tháng"
+                    value={formatVnd(remainingDailyCap.totalRemainingVnd)}
+                    valueClassName={cn(remainingDailyCap.totalRemainingVnd < 0 && "text-destructive")}
+                  />
+                  <Progress value={budgetRemainingPct} />
+                </div>
+
+                {/* Ngày đã trôi qua trong tháng — đối chiếu với ngân sách còn lại ở trên. */}
+                <div className="space-y-1.5">
+                  <LabelValueRow
+                    label="Ngày đã trôi qua trong tháng"
+                    value={`${daysElapsedInMonth}/${dayContext.daysInMonth} ngày`}
+                  />
+                  <Progress value={daysElapsedPct} />
+                </div>
+
+                {capForNextDay ? (
+                  <div className="space-y-2 rounded-lg border border-amber-500/50 bg-amber-500/10 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-medium text-muted-foreground">
+                        Cap chi mỗi ngày
+                      </span>
+                      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500 px-2 py-0.5 text-[11px] font-semibold text-white shadow-sm">
+                        <CalendarClock className="h-3.5 w-3.5" />
+                        Cho ngày kế tiếp
+                      </span>
+                    </div>
+                    <div
+                      className={cn(
+                        "break-words text-xl font-semibold tabular-nums text-amber-700 sm:text-2xl dark:text-amber-400",
+                        shownDailyTotalCapVnd <= 0 && "text-destructive",
+                      )}
+                    >
+                      {formatVnd(shownDailyTotalCapVnd)}
+                    </div>
+                  </div>
+                ) : null}
               </div>
             </CollapsibleCard>
           </div>
