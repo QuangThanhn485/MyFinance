@@ -1,30 +1,12 @@
-import type { ExpenseCategory } from "@/domain/types"
-
 export const REPORTS_CONFIG_STORAGE_KEY = "smartSpend.reports.v1"
 
-export type ReportsMode = "month" | "trend" | "daily" | "pivot" | "search"
-
-export type MonthDataset = "categories" | "buckets"
-export type MonthChartType = "bar" | "pie"
-export type MonthBucketKey = "needs" | "wants" | "saved"
-
-export type TrendChartType = "line" | "area" | "bar"
-export type TrendRangeMonths = 3 | 6 | 12
-export type TrendSeriesKey =
-  | "totalSpent"
-  | "needsSpent"
-  | "wantsSpent"
-  | "fixedCosts"
-  | "variableSpent"
-  | "balance"
-
-export type DailyChartType = "bar" | "line" | "area"
-export type DailySeriesKey = "total" | "needs" | "wants"
+export type ReportsMode = "pivot" | "search"
 
 export type PivotGroupKey =
   | "category"
   | "bucket"
   | "note"
+  | "month"
   | "day"
   | "week"
   | "weekday"
@@ -56,21 +38,6 @@ export type SearchFilterCondition = {
 export type ReportsConfigV6 = {
   version: 6
   mode: ReportsMode
-  month: {
-    dataset: MonthDataset
-    chartType: MonthChartType
-    visibleCategories: ExpenseCategory[]
-    visibleBuckets: MonthBucketKey[]
-  }
-  trend: {
-    rangeMonths: TrendRangeMonths
-    chartType: TrendChartType
-    visibleSeries: TrendSeriesKey[]
-  }
-  daily: {
-    chartType: DailyChartType
-    visibleSeries: DailySeriesKey[]
-  }
   pivot: {
     rowFields: PivotGroupKey[]
     columnFields: PivotGroupKey[]
@@ -100,65 +67,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function normalizeMode(value: unknown): ReportsMode {
-  if (value === "trend") return "trend"
-  if (value === "daily") return "daily"
-  if (value === "pivot") return "pivot"
+  // Config cũ có thể còn lưu "month" / "daily" / "trend" -> các tab đó đã bị bỏ, đưa về Pivot.
   if (value === "search") return "search"
-  return "month"
-}
-
-function normalizeMonthDataset(value: unknown): MonthDataset {
-  return value === "buckets" ? "buckets" : "categories"
-}
-
-function normalizeMonthChartType(value: unknown): MonthChartType {
-  return value === "pie" ? "pie" : "bar"
-}
-
-function normalizeMonthBucketKey(value: unknown): MonthBucketKey | null {
-  if (value === "needs" || value === "wants" || value === "saved") return value
-  return null
-}
-
-function normalizeTrendChartType(value: unknown): TrendChartType {
-  if (value === "area") return "area"
-  if (value === "bar") return "bar"
-  return "line"
-}
-
-function normalizeRangeMonths(value: unknown): TrendRangeMonths {
-  if (value === 3 || value === 6 || value === 12) return value
-  return 6
-}
-
-function normalizeTrendSeriesKey(value: unknown): TrendSeriesKey | null {
-  switch (value) {
-    case "totalSpent":
-    case "needsSpent":
-    case "wantsSpent":
-    case "fixedCosts":
-    case "variableSpent":
-    case "balance":
-      return value
-    default:
-      return null
-  }
-}
-
-function normalizeDailyChartType(value: unknown): DailyChartType {
-  if (value === "line") return "line"
-  if (value === "area") return "area"
-  return "bar"
-}
-
-function normalizeDailySeriesKey(value: unknown): DailySeriesKey | null {
-  if (value === "total" || value === "needs" || value === "wants") return value
-  return null
+  return "pivot"
 }
 
 function normalizePivotGroupKey(value: unknown): PivotGroupKey {
   if (value === "bucket") return "bucket"
   if (value === "note") return "note"
+  if (value === "month") return "month"
   if (value === "day") return "day"
   if (value === "week") return "week"
   if (value === "weekday") return "weekday"
@@ -202,6 +119,30 @@ function normalizeSearchFilterOperator(value: unknown): SearchFilterOperator {
   return "contains"
 }
 
+/**
+ * Toán tử hợp lệ theo từng trường. Các trường chọn từ danh sách (danh mục, bucket, thứ) chỉ
+ * so sánh bằng/chứa — so sánh lớn/nhỏ trên chúng không có ý nghĩa.
+ * Phần tử đầu tiên là toán tử mặc định của trường.
+ */
+export const SEARCH_FIELD_OPERATORS: Record<SearchFilterField, SearchFilterOperator[]> = {
+  date: ["eq", "gt", "gte", "lt", "lte"],
+  month: ["eq", "gt", "gte", "lt", "lte"],
+  amountVnd: ["eq", "gt", "gte", "lt", "lte"],
+  category: ["eq", "contains"],
+  bucket: ["eq"],
+  note: ["contains", "eq"],
+  weekday: ["eq"],
+  week: ["eq", "gt", "gte", "lt", "lte"],
+}
+
+export function resolveSearchFilterOperator(
+  field: SearchFilterField,
+  operator: SearchFilterOperator,
+): SearchFilterOperator {
+  const allowed = SEARCH_FIELD_OPERATORS[field]
+  return allowed.includes(operator) ? operator : allowed[0]
+}
+
 function normalizeSearchFilterConnector(value: unknown): SearchFilterConnector {
   return value === "or" ? "or" : "and"
 }
@@ -216,23 +157,19 @@ function normalizePivotFieldList(value: unknown, allowNote = false): PivotGroupK
   )
 }
 
-function normalizeExpenseCategory(value: unknown): ExpenseCategory | null {
-  if (typeof value !== "string") return null
-  const category = value.trim()
-  return category ? category : null
-}
-
 function normalizeSearchFilterCondition(value: unknown): SearchFilterCondition | null {
   if (!isRecord(value)) return null
   const id = typeof value.id === "string" && value.id.trim()
     ? value.id.trim()
     : `filter-${Math.random().toString(36).slice(2)}`
   const rawValue = typeof value.value === "string" ? value.value : ""
+  const field = normalizeSearchFilterField(value.field)
   return {
     id,
     connector: normalizeSearchFilterConnector(value.connector),
-    field: normalizeSearchFilterField(value.field),
-    operator: normalizeSearchFilterOperator(value.operator),
+    field,
+    // Config cũ có thể lưu toán tử không còn hợp lệ với trường (vd Danh mục + ">").
+    operator: resolveSearchFilterOperator(field, normalizeSearchFilterOperator(value.operator)),
     value: rawValue,
   }
 }
@@ -251,22 +188,7 @@ function unique<T>(items: T[]) {
 export function defaultReportsConfig(): ReportsConfigV6 {
   return {
     version: 6,
-    mode: "month",
-    month: {
-      dataset: "categories",
-      chartType: "bar",
-      visibleCategories: [],
-      visibleBuckets: ["needs", "wants", "saved"],
-    },
-    trend: {
-      rangeMonths: 6,
-      chartType: "line",
-      visibleSeries: ["totalSpent", "needsSpent", "wantsSpent", "balance"],
-    },
-    daily: {
-      chartType: "bar",
-      visibleSeries: ["needs", "wants"],
-    },
+    mode: "pivot",
     pivot: {
       rowFields: ["category"],
       columnFields: ["bucket"],
@@ -306,51 +228,11 @@ export function loadReportsConfig(): ReportsConfigV6 {
     return defaultReportsConfig()
   }
 
-  const monthRaw = isRecord(parsed.month) ? parsed.month : {}
-  const trendRaw = isRecord(parsed.trend) ? parsed.trend : {}
-  const dailyRaw =
-    (version === 2 || version === 3) && isRecord(parsed.daily) ? parsed.daily : {}
   const pivotRaw =
     (version === 3 || version === 4 || version === 5 || version === 6) && isRecord(parsed.pivot)
       ? parsed.pivot
       : {}
   const searchRaw = version === 6 && isRecord(parsed.search) ? parsed.search : {}
-
-  const visibleCategoriesRaw = Array.isArray(monthRaw.visibleCategories)
-    ? monthRaw.visibleCategories
-    : []
-  const visibleCategories = unique(
-    visibleCategoriesRaw
-      .map(normalizeExpenseCategory)
-      .filter((x): x is ExpenseCategory => !!x),
-  )
-
-  const visibleBucketsRaw = Array.isArray(monthRaw.visibleBuckets)
-    ? monthRaw.visibleBuckets
-    : []
-  const visibleBuckets = unique(
-    visibleBucketsRaw
-      .map(normalizeMonthBucketKey)
-      .filter((x): x is MonthBucketKey => !!x),
-  )
-
-  const visibleSeriesRaw = Array.isArray(trendRaw.visibleSeries)
-    ? trendRaw.visibleSeries
-    : []
-  const visibleSeries = unique(
-    visibleSeriesRaw
-      .map(normalizeTrendSeriesKey)
-      .filter((x): x is TrendSeriesKey => !!x),
-  )
-
-  const dailyVisibleSeriesRaw = Array.isArray(dailyRaw.visibleSeries)
-    ? dailyRaw.visibleSeries
-    : []
-  const dailyVisibleSeries = unique(
-    dailyVisibleSeriesRaw
-      .map(normalizeDailySeriesKey)
-      .filter((x): x is DailySeriesKey => !!x),
-  )
 
   const rowFieldsRaw =
     version === 4 || version === 5 || version === 6
@@ -413,26 +295,6 @@ export function loadReportsConfig(): ReportsConfigV6 {
   return {
     version: 6,
     mode: normalizeMode(parsed.mode),
-    month: {
-      dataset: normalizeMonthDataset(monthRaw.dataset),
-      chartType: normalizeMonthChartType(monthRaw.chartType),
-      visibleCategories,
-      visibleBuckets:
-        visibleBuckets.length > 0 ? visibleBuckets : defaults.month.visibleBuckets,
-    },
-    trend: {
-      rangeMonths: normalizeRangeMonths(trendRaw.rangeMonths),
-      chartType: normalizeTrendChartType(trendRaw.chartType),
-      visibleSeries:
-        visibleSeries.length > 0 ? visibleSeries : defaults.trend.visibleSeries,
-    },
-    daily: {
-      chartType: normalizeDailyChartType(dailyRaw.chartType),
-      visibleSeries:
-        dailyVisibleSeries.length > 0
-          ? dailyVisibleSeries
-          : defaults.daily.visibleSeries,
-    },
     pivot: {
       rowFields: pivotRowFields,
       columnFields: pivotColumnFields,

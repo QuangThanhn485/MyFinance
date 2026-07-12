@@ -27,16 +27,11 @@ import {
   Area,
   AreaChart,
   Bar,
-  BarChart,
   CartesianGrid,
-  Cell,
   ComposedChart,
   Legend,
   Line,
   LineChart,
-  Pie,
-  PieChart,
-  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -54,6 +49,7 @@ import {
   Columns2,
   Info,
   MoveRight,
+  Plus,
   SlidersHorizontal,
   Sparkles,
   Table,
@@ -74,7 +70,6 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import DndMultiSelect from "@/components/DndMultiSelect"
 import DateRangePicker, {
   type DateRangePreset,
   type DateRangeValue,
@@ -83,6 +78,7 @@ import DatePicker from "@/components/DatePicker"
 import LabelValueRow from "@/components/LabelValueRow"
 import MoneyInput from "@/components/MoneyInput"
 import MonthPicker from "@/components/MonthPicker"
+import SearchableSelect, { type SearchableSelectOption } from "@/components/SearchableSelect"
 import {
   ChartEmptyState,
   ChartTooltipContent,
@@ -115,9 +111,9 @@ import type { CttmState } from "@/storage/schema"
 import {
   defaultReportsConfig,
   loadReportsConfig,
+  resolveSearchFilterOperator,
   saveReportsConfig,
-  type DailySeriesKey,
-  type MonthBucketKey,
+  SEARCH_FIELD_OPERATORS,
   type PivotChartType,
   type PivotGroupKey,
   type PivotMetric,
@@ -125,7 +121,6 @@ import {
   type SearchFilterConnector,
   type SearchFilterField,
   type SearchFilterOperator,
-  type TrendSeriesKey,
 } from "@/storage/reports"
 
 const CHART_COLORS = [
@@ -166,55 +161,6 @@ function pivotSeriesColor(index: number) {
   return `hsl(${hue.toFixed(1)} ${saturation}% ${lightness}%)`
 }
 
-const MONTH_BUCKET_KEYS: MonthBucketKey[] = ["needs", "wants", "saved"]
-
-const MONTH_BUCKET_LABELS: Record<MonthBucketKey, string> = {
-  needs: "Thiết yếu",
-  wants: "Mong muốn",
-  saved: "Dư (Thu - Chi)",
-}
-
-const TREND_SERIES_KEYS: TrendSeriesKey[] = [
-  "totalSpent",
-  "needsSpent",
-  "wantsSpent",
-  "fixedCosts",
-  "variableSpent",
-  "balance",
-]
-
-const TREND_SERIES_LABELS: Record<TrendSeriesKey, string> = {
-  totalSpent: "Tổng chi",
-  needsSpent: "Thiết yếu",
-  wantsSpent: "Mong muốn",
-  fixedCosts: "Chi phí cố định",
-  variableSpent: "Chi biến đổi",
-  balance: "Dư/Thiếu (Thu - Chi)",
-}
-
-const TREND_SERIES_COLORS: Record<TrendSeriesKey, string> = {
-  totalSpent: CHART_COLORS[0],
-  needsSpent: CHART_COLORS[1],
-  wantsSpent: CHART_COLORS[2],
-  fixedCosts: CHART_COLORS[3],
-  variableSpent: CHART_COLORS[4],
-  balance: CHART_COLORS[5],
-}
-
-const DAILY_SERIES_KEYS: DailySeriesKey[] = ["total", "needs", "wants"]
-
-const DAILY_SERIES_LABELS: Record<DailySeriesKey, string> = {
-  total: "Tổng chi",
-  needs: "Thiết yếu",
-  wants: "Mong muốn",
-}
-
-const DAILY_SERIES_COLORS: Record<DailySeriesKey, string> = {
-  total: CHART_COLORS[0],
-  needs: CHART_COLORS[1],
-  wants: CHART_COLORS[2],
-}
-
 const CLUSTER_TIER_LABELS: Record<ClusterTier, string> = {
   low: "Thấp",
   mid: "Trung bình",
@@ -251,6 +197,7 @@ const SEARCH_LAYOUT_FIELDS: { id: PivotGroupKey; label: string }[] = [
   { id: "weekday", label: "Thứ" },
   { id: "day", label: "Ngày" },
   { id: "week", label: "Tuần" },
+  { id: "month", label: "Tháng" },
   { id: "dailyCap", label: "Cap chi mỗi ngày" },
   { id: "amountRange", label: "Mức chi" },
   { id: "savingsImpact", label: "Ảnh hưởng S" },
@@ -278,10 +225,120 @@ const SEARCH_CONNECTOR_LABELS: Record<SearchFilterConnector, string> = {
   and: "AND",
   or: "OR",
 }
+const SEARCH_CONNECTOR_HINTS: Record<SearchFilterConnector, string> = {
+  and: "Thu hẹp — phải khớp cả nhánh trên lẫn điều kiện dưới",
+  or: "Mở rộng — chỉ cần khớp nhánh trên hoặc điều kiện dưới",
+}
+/** Màu đoạn dây nối trên timeline: AND thu hẹp (xanh), OR mở rộng (hổ phách). */
+const SEARCH_CONNECTOR_RAIL: Record<SearchFilterConnector, string> = {
+  and: "bg-sky-500",
+  or: "bg-amber-500",
+}
+const SEARCH_CONNECTOR_CHIP: Record<SearchFilterConnector, string> = {
+  and: "bg-sky-500 text-white",
+  or: "bg-amber-500 text-white",
+}
+
+function SearchConnectorToggle({
+  value,
+  effective,
+  onChange,
+}: {
+  value: SearchFilterConnector
+  /** false khi toán tử này không được áp dụng (điều kiện rỗng, hoặc là điều kiện hiệu lực đầu tiên). */
+  effective: boolean
+  onChange: (next: SearchFilterConnector) => void
+}) {
+  return (
+    <div className="inline-flex items-center gap-0.5 rounded-full border bg-background p-0.5 shadow-sm">
+      {(["and", "or"] as SearchFilterConnector[]).map((connector) => (
+        <button
+          key={connector}
+          type="button"
+          aria-pressed={value === connector}
+          onClick={() => onChange(connector)}
+          className={cn(
+            "rounded-full px-2.5 py-0.5 text-[11px] font-bold tracking-wide transition",
+            value === connector
+              ? cn(SEARCH_CONNECTOR_CHIP[connector], !effective && "opacity-40")
+              : "text-muted-foreground hover:bg-muted hover:text-foreground",
+          )}
+        >
+          {SEARCH_CONNECTOR_LABELS[connector]}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+type SearchValueLabelResolver = (
+  field: SearchFilterField,
+  value: string,
+) => string | undefined
+
+function describeSearchFilterValue(
+  filter: SearchFilterCondition,
+  resolveLabel?: SearchValueLabelResolver,
+) {
+  const raw = filter.value.trim()
+  if (!raw) return ""
+  // Trường chọn-từ-danh-sách lưu mã (vd "Food") -> diễn giải phải đọc ra nhãn ("Ăn uống").
+  const label = resolveLabel?.(filter.field, raw)
+  if (label) return label
+  if (filter.field === "amountVnd") {
+    const parsed = parseSearchNumber(raw)
+    return parsed === null ? raw : formatVnd(parsed)
+  }
+  if (filter.field === "date" && isIsoDateValue(raw)) return formatDateLabel(raw)
+  if (filter.field === "month" && isYearMonthValue(raw)) return formatMonthLabel(raw)
+  return raw
+}
+
+function describeSearchCondition(
+  filter: SearchFilterCondition,
+  resolveLabel?: SearchValueLabelResolver,
+) {
+  const field = SEARCH_FILTER_FIELDS.find((item) => item.id === filter.field)?.label ?? filter.field
+  const operator = SEARCH_OPERATOR_LABELS[filter.operator].toLowerCase()
+  return `${field} ${operator} ${describeSearchFilterValue(filter, resolveLabel)}`.trim()
+}
+
 const PIVOT_ROW_HEADER_COL_WIDTH = 160
 type PivotDragContainer = "available" | "row" | "column"
 type PivotDragData = { field: PivotGroupKey; container: PivotDragContainer }
 const PIVOT_WEEKDAY_LABELS = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"]
+const WEEKDAY_FULL_LABELS = [
+  "Chủ nhật",
+  "Thứ hai",
+  "Thứ ba",
+  "Thứ tư",
+  "Thứ năm",
+  "Thứ sáu",
+  "Thứ bảy",
+]
+
+// Phải khai báo SAU PIVOT_WEEKDAY_LABELS: const cấp module khởi tạo theo thứ tự (tránh lỗi TDZ).
+const SEARCH_WEEKDAY_OPTIONS: SearchableSelectOption[] = [1, 2, 3, 4, 5, 6, 0].map((day) => ({
+  // Giá trị lưu phải đúng nhãn mà `getSearchFilterValue` sinh ra.
+  value: PIVOT_WEEKDAY_LABELS[day],
+  label: WEEKDAY_FULL_LABELS[day],
+  hint: PIVOT_WEEKDAY_LABELS[day],
+}))
+
+const SEARCH_WEEK_OPTIONS: SearchableSelectOption[] = [1, 2, 3, 4, 5].map((week) => ({
+  value: String(week),
+  label: `Tuần ${week}`,
+  hint: `ngày ${(week - 1) * 7 + 1}–${week === 5 ? 31 : week * 7}`,
+}))
+
+const SEARCH_BUCKET_OPTIONS: SearchableSelectOption[] = (["needs", "wants"] as const).map(
+  (bucket) => ({
+    value: bucket,
+    label: BUCKET_LABELS_VI[bucket],
+    hint: bucket,
+  }),
+)
+
 const PIVOT_AMOUNT_RANGES = [
   { max: 50_000, label: "<= 50k" },
   { max: 200_000, label: "50k-200k" },
@@ -450,12 +507,6 @@ function isSingleWholeMonthRange(range: DateRangeValue) {
   )
 }
 
-function clampRangeToMonth(range: DateRangeValue, month: YearMonth): DateRangeValue {
-  const start = monthStart(month) > range.start ? monthStart(month) : range.start
-  const end = monthEnd(month) < range.end ? monthEnd(month) : range.end
-  return { start, end }
-}
-
 function getExpensesInDateRange(state: CttmState, range: DateRangeValue): Expense[] {
   const out: Expense[] = []
   for (const id of state.entities.expenses.allIds) {
@@ -478,6 +529,9 @@ function normalizeSearchText(value: unknown) {
 
 function parseSearchNumber(value: string) {
   const normalized = value.replace(/[^\d-]/g, "")
+  // Không có chữ số nào -> KHÔNG phải số. Trước đây Number("") = 0 khiến truy vấn chữ
+  // bị so sánh như số 0 (vd `Số tiền > abc` khớp mọi giao dịch dương).
+  if (!/\d/.test(normalized)) return null
   const parsed = Number(normalized)
   return Number.isFinite(parsed) ? parsed : null
 }
@@ -515,44 +569,65 @@ function createSearchFilterCondition(): SearchFilterCondition {
   }
 }
 
+/**
+ * `eqCandidates`: các dạng viết được coi là "bằng" với giá trị của giao dịch.
+ * Cần thiết cho các trường chọn-từ-danh-sách: `text` của chúng là chuỗi ghép (vd "Ăn uống Food")
+ * nên nếu so sánh nguyên chuỗi thì toán tử "Bằng" không bao giờ khớp.
+ */
 function getSearchFilterValue(
   expense: Expense,
   field: SearchFilterField,
   categoryLabel: (category: string) => string,
-) {
+): { text: string; number: number | null; eqCandidates?: string[] } {
   switch (field) {
     case "date":
-      return { raw: expense.date, text: expense.date, number: isoDateSortValue(expense.date) }
+      return { text: expense.date, number: isoDateSortValue(expense.date) }
     case "month": {
       const month = monthFromIsoDate(expense.date)
-      return { raw: month, text: month, number: Number(month.replace("-", "")) }
+      return { text: month, number: Number(month.replace("-", "")) }
     }
     case "amountVnd":
       return {
-        raw: expense.amountVnd,
         text: String(expense.amountVnd),
         number: expense.amountVnd,
       }
     case "category": {
       const label = categoryLabel(expense.category)
-      return { raw: expense.category, text: `${label} ${expense.category}`, number: null }
+      return {
+        text: `${label} ${expense.category}`,
+        number: null,
+        eqCandidates: [expense.category, label],
+      }
     }
     case "bucket": {
       const label = BUCKET_LABELS_VI[expense.bucket]
-      return { raw: expense.bucket, text: `${label} ${expense.bucket}`, number: null }
+      return {
+        text: `${label} ${expense.bucket}`,
+        number: null,
+        eqCandidates: [expense.bucket, label],
+      }
     }
     case "weekday": {
       const day = parseIsoDateLocal(expense.date).getDay()
       const label = PIVOT_WEEKDAY_LABELS[day] ?? ""
-      return { raw: label, text: `${label} ${day}`, number: day === 0 ? 7 : day }
+      // Nhãn "T2" (thứ hai) ứng với getDay() = 1 -> KHÔNG được suy số từ nhãn.
+      return {
+        text: `${label} ${day}`,
+        number: day === 0 ? 7 : day,
+        eqCandidates: [label],
+      }
     }
     case "week": {
       const week = Math.ceil(dayOfMonthFromIsoDate(expense.date) / 7)
-      return { raw: week, text: `Tuần ${week} ${week}`, number: week }
+      return {
+        text: `Tuần ${week} ${week}`,
+        number: week,
+        eqCandidates: [String(week), `Tuần ${week}`],
+      }
     }
     case "note":
     default:
-      return { raw: expense.note ?? "", text: expense.note ?? "", number: null }
+      return { text: expense.note ?? "", number: null }
   }
 }
 
@@ -575,6 +650,11 @@ function searchConditionMatches(
   }
 
   if (condition.operator === "eq") {
+    if (fieldValue.eqCandidates) {
+      return fieldValue.eqCandidates.some(
+        (candidate) => normalizeSearchText(candidate) === rightText,
+      )
+    }
     if (leftNumber !== null && rightNumber !== null) return leftNumber === rightNumber
     return leftText === rightText
   }
@@ -648,35 +728,6 @@ function getDateRangeTotals(state: CttmState, range: DateRangeValue) {
     variableWants,
     totalSpent: fixedCostsTotal + variableTotal,
   }
-}
-
-function getDateRangeCategoryTotals(state: CttmState, range: DateRangeValue) {
-  const result: Record<string, number> = {}
-
-  for (const expense of getExpensesInDateRange(state, range)) {
-    result[expense.category] = (result[expense.category] ?? 0) + expense.amountVnd
-  }
-
-  for (const id of state.entities.fixedCosts.allIds) {
-    const fixedCost = state.entities.fixedCosts.byId[id]
-    if (!fixedCost || !fixedCost.active) continue
-    if (!isWholeMonthInDateRange(fixedCost.month, range)) continue
-    result[fixedCost.category] = (result[fixedCost.category] ?? 0) + fixedCost.amountVnd
-  }
-
-  for (const month of getMonthsInDateRange(range)) {
-    if (!isWholeMonthInDateRange(month, range)) continue
-    const settingsForMonth = getEffectiveSettingsForMonth(state, month)
-    const debtPaymentMonthlyVnd = Math.max(
-      0,
-      Math.trunc(settingsForMonth.debtPaymentMonthlyVnd ?? 0),
-    )
-    if (debtPaymentMonthlyVnd > 0) {
-      result.Bills = (result.Bills ?? 0) + debtPaymentMonthlyVnd
-    }
-  }
-
-  return result
 }
 
 function shortenLabel(label: string, max = 14) {
@@ -858,6 +909,16 @@ function getPivotGroupValue(
         label,
         parts: [label],
         sortValue: note ? label : "zzzz",
+      }
+    }
+    case "month": {
+      const month = monthFromIsoDate(expense.date)
+      return {
+        key: month,
+        label: formatMonthLabel(month),
+        parts: [formatMonthLabel(month)],
+        // Sắp theo số (202601 < 202612), không theo chữ ("01/2026" < "12/2025" là sai).
+        sortValue: Number(month.replace("-", "")),
       }
     }
     case "day": {
@@ -1270,6 +1331,7 @@ function buildPivotTable(
       comparePivotSortValues(a.sortValues ?? [a.sortValue], b.sortValues ?? [b.sortValue]),
     )
   } else if (
+    rowPrimary === "month" ||
     rowPrimary === "day" ||
     rowPrimary === "week" ||
     rowPrimary === "weekday" ||
@@ -1291,6 +1353,7 @@ function buildPivotTable(
   } else if (!colPrimary) {
     colList.sort((a, b) => Number(a.sortValue) - Number(b.sortValue))
   } else if (
+    colPrimary === "month" ||
     colPrimary === "day" ||
     colPrimary === "week" ||
     colPrimary === "weekday" ||
@@ -1316,10 +1379,6 @@ function buildPivotTable(
 export default function ReportsPage() {
   const data = useAppStore((s) => s.data)
   const categoryOptions = useMemo(() => data.expenseCategories, [data.expenseCategories])
-  const categoryIds = useMemo(
-    () => categoryOptions.map((category) => category.id),
-    [categoryOptions],
-  )
   const categoryLabels = useMemo(
     () =>
       Object.fromEntries(
@@ -1386,10 +1445,6 @@ export default function ReportsPage() {
     [data.entities.expenses.allIds, data.entities.expenses.byId],
   )
   const totals = useMemo(() => getDateRangeTotals(data, dateRange), [data, dateRange])
-  const categories = useMemo(
-    () => getDateRangeCategoryTotals(data, dateRange),
-    [data, dateRange],
-  )
   const expenses = useMemo(() => getExpensesInDateRange(data, dateRange), [data, dateRange])
   const referenceMonthTotals = useMemo(() => getMonthTotals(data, month), [data, month])
 
@@ -1413,88 +1468,6 @@ export default function ReportsPage() {
   const saved = isSingleFullMonth ? budgets.incomeVnd - totals.totalSpent : 0
   const savingsRate =
     isSingleFullMonth && budgets.incomeVnd > 0 ? saved / budgets.incomeVnd : 0
-
-  const monthCategoryAutoIds = useMemo(() => {
-    return categoryIds.map((c) => ({
-      id: c,
-      value: categories[c] ?? 0,
-    }))
-      .filter((x) => x.value > 0)
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 6)
-      .map((x) => x.id)
-  }, [categories, categoryIds])
-
-  const selectedCategoryIds =
-    config.month.visibleCategories.length > 0
-      ? config.month.visibleCategories
-      : monthCategoryAutoIds
-
-  const monthCategoryRows = selectedCategoryIds
-    .map((c) => ({
-      id: c,
-      name: categoryLabel(c),
-      value: categories[c] ?? 0,
-    }))
-    .filter((x) => x.value > 0)
-
-  const monthBucketValueByKey: Record<MonthBucketKey, number> = {
-    needs: totals.fixedCostsTotal + totals.variableNeeds,
-    wants: totals.variableWants,
-    saved,
-  }
-
-  const monthBucketRows = config.month.visibleBuckets
-    .map((k) => ({
-      id: k,
-      name: MONTH_BUCKET_LABELS[k],
-      value: monthBucketValueByKey[k],
-    }))
-    .filter((x) => x.value > 0)
-
-  const trendData = useMemo(() => {
-    return monthsInRange.map((m) => {
-      const monthRange = clampRangeToMonth(dateRange, m)
-      const I = getMonthlyIncomeTotalVnd(getEffectiveSettingsForMonth(data, m))
-      const t = getDateRangeTotals(data, monthRange)
-      const balance = I - t.totalSpent
-      return {
-        month: m,
-        totalSpent: t.totalSpent,
-        needsSpent: t.fixedCostsTotal + t.variableNeeds,
-        wantsSpent: t.variableWants,
-        fixedCosts: t.fixedCostsTotal,
-        variableSpent: t.variableTotal,
-        balance,
-      }
-    })
-  }, [data, dateRange, monthsInRange])
-
-  const dailyData = useMemo(() => {
-    const dayCount = getDateRangeDayCount(dateRange)
-    const rows = Array.from({ length: dayCount }, (_, idx) => {
-      const date = addDaysIsoDate(dateRange.start, idx)
-      return {
-        date,
-        day: idx + 1,
-        label: formatDateLabel(date),
-        total: 0,
-        needs: 0,
-        wants: 0,
-      }
-    })
-    const rowByDate = new Map(rows.map((row) => [row.date, row]))
-
-    for (const e of expenses) {
-      const row = rowByDate.get(e.date)
-      if (!row) continue
-      row.total += e.amountVnd
-      if (e.bucket === "needs") row.needs += e.amountVnd
-      else row.wants += e.amountVnd
-    }
-
-    return rows
-  }, [dateRange, expenses])
 
   const baseDailyCapByMonth = useMemo(() => {
     const out: Record<string, number> = {}
@@ -1521,14 +1494,6 @@ export default function ReportsPage() {
 
   const baseDailyCapVnd = baseDailyCapByMonth[month] ?? 0
 
-  const dailyChartData = useMemo(
-    () =>
-      dailyData.map((row) => ({
-        ...row,
-        baseDailyCapVnd: baseDailyCapByMonth[monthFromIsoDate(row.date)] ?? baseDailyCapVnd,
-      })),
-    [dailyData, baseDailyCapByMonth, baseDailyCapVnd],
-  )
   const dailyCapByDateMap = useMemo(() => {
     const map: Record<string, number> = {}
 
@@ -1618,6 +1583,58 @@ export default function ReportsPage() {
     [config.search.filters],
   )
   const activeSearchFilterCount = activeSearchFilters.length
+  /** Trường nào có tập giá trị hữu hạn thì nhập bằng combobox có tìm kiếm, không gõ tay. */
+  const searchValueOptions = useMemo<
+    Partial<Record<SearchFilterField, SearchableSelectOption[]>>
+  >(
+    () => ({
+      category: categoryOptions.map((category) => ({
+        value: category.id,
+        label: category.label,
+        hint: category.id,
+      })),
+      bucket: SEARCH_BUCKET_OPTIONS,
+      weekday: SEARCH_WEEKDAY_OPTIONS,
+      week: SEARCH_WEEK_OPTIONS,
+    }),
+    [categoryOptions],
+  )
+  const resolveSearchValueLabel = (field: SearchFilterField, value: string) =>
+    searchValueOptions[field]?.find((option) => option.value === value)?.label
+  /**
+   * `searchFiltersMatch` chỉ gộp các điều kiện CÓ giá trị, theo thứ tự trái->phải.
+   * Nên toán tử AND/OR của điều kiện hiệu lực ĐẦU TIÊN không bao giờ được dùng.
+   */
+  const firstActiveSearchFilterId = activeSearchFilters[0]?.id ?? null
+  /** Số giao dịch còn khớp sau từng bước của chuỗi -> timeline nhìn ra được phễu lọc. */
+  const searchStepCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    if (activeSearchFilters.length === 0) return counts
+
+    const running = new Array<boolean>(allVariableExpenses.length).fill(false)
+    activeSearchFilters.forEach((filter, index) => {
+      let matchedCount = 0
+      allVariableExpenses.forEach((expense, i) => {
+        const matched = searchConditionMatches(expense, filter, categoryLabel)
+        const next =
+          index === 0
+            ? matched
+            : filter.connector === "or"
+              ? running[i] || matched
+              : running[i] && matched
+        running[i] = next
+        if (next) matchedCount += 1
+      })
+      counts[filter.id] = matchedCount
+    })
+    return counts
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSearchFilters, allVariableExpenses, categoryLabels, categoryOptions])
+  const searchHasMixedConnectors = useMemo(() => {
+    if (activeSearchFilters.length < 3) return false
+    const used = new Set(activeSearchFilters.slice(1).map((filter) => filter.connector))
+    return used.size > 1
+  }, [activeSearchFilters])
   const searchResultExpenseIdSet = useMemo(
     () => (searchResultExpenseIds ? new Set(searchResultExpenseIds) : null),
     [searchResultExpenseIds],
@@ -2411,9 +2428,6 @@ export default function ReportsPage() {
   const deltaPct =
     hasPrev && prevTotals.totalSpent > 0 ? delta / prevTotals.totalSpent : 0
 
-  const showDailyTotal = config.daily.visibleSeries.includes("total")
-  const showDailyNeeds = config.daily.visibleSeries.includes("needs")
-  const showDailyWants = config.daily.visibleSeries.includes("wants")
   const isLegendKeyHidden = (key: string) => hiddenLegendKeys.has(key)
   const toggleLegendKey = (key: string) => {
     setHiddenLegendKeys((prev) => {
@@ -2436,58 +2450,6 @@ export default function ReportsPage() {
       </span>
     )
   }
-  const interactiveLegendProps = {
-    ...chartLegendProps,
-    onClick: (entry: { dataKey?: unknown; value?: unknown }) => {
-      const key = String(entry.dataKey ?? entry.value ?? "")
-      if (!key) return
-      toggleLegendKey(key)
-    },
-    formatter: (value: unknown, entry: { dataKey?: unknown }) => {
-      const key = String(entry.dataKey ?? value ?? "")
-      return renderLegendLabel(String(value), key)
-    },
-  }
-  const monthCategoryChartRows = monthCategoryRows
-    .map((row, index) => ({
-      ...row,
-      legendKey: `month-category:${row.id}`,
-      color: CHART_COLORS[index % CHART_COLORS.length],
-    }))
-    .filter((row) => !isLegendKeyHidden(row.legendKey))
-  const monthCategoryLegendPayload = monthCategoryRows.map((row, index) => ({
-    value: row.name,
-    type: "circle" as const,
-    color: CHART_COLORS[index % CHART_COLORS.length],
-    dataKey: `month-category:${row.id}`,
-  }))
-  const monthBucketChartRows = monthBucketRows
-    .map((row, index) => ({
-      ...row,
-      legendKey: `month-bucket:${row.id}`,
-      color: CHART_COLORS[index % CHART_COLORS.length],
-    }))
-    .filter((row) => !isLegendKeyHidden(row.legendKey))
-  const monthBucketLegendPayload = monthBucketRows.map((row, index) => ({
-    value: row.name,
-    type: "circle" as const,
-    color: CHART_COLORS[index % CHART_COLORS.length],
-    dataKey: `month-bucket:${row.id}`,
-  }))
-  const monthLegendProps = {
-    ...chartLegendProps,
-    onClick: (entry: { dataKey?: unknown; value?: unknown }) => {
-      const key = String(entry.dataKey ?? entry.value ?? "")
-      if (key) toggleLegendKey(key)
-    },
-    formatter: (value: unknown, entry: { dataKey?: unknown }) => {
-      const key = String(entry.dataKey ?? value ?? "")
-      return renderLegendLabel(String(value), key)
-    },
-  }
-
-  const monthTableRows = config.month.dataset === "categories" ? monthCategoryRows : monthBucketRows
-  const monthTableTotal = monthTableRows.reduce((sum, row) => sum + row.value, 0)
   const showChartLegend = !isNarrowViewport
   const formatMoneyAxisTick = (value: unknown) =>
     isNarrowViewport
@@ -2498,14 +2460,6 @@ export default function ReportsPage() {
     : { left: 8, right: 16, top: 8, bottom: 8 }
   const reportChartYAxisWidth = isNarrowViewport ? 48 : 60
   const reportChartTick = { fontSize: isNarrowViewport ? 11 : 12 }
-  const dailyTableSeries =
-    config.daily.visibleSeries.length > 0
-      ? config.daily.visibleSeries
-      : (["total"] as DailySeriesKey[])
-  const trendTableSeries =
-    config.trend.visibleSeries.length > 0
-      ? config.trend.visibleSeries
-      : (["totalSpent"] as TrendSeriesKey[])
 
   const panelBaseClassName =
     "left-0 right-0 bottom-0 top-auto translate-x-0 translate-y-0 w-full max-w-none max-h-[85dvh] rounded-t-xl border-0 border-t p-4 data-[state=open]:[--tw-enter-scale:1] data-[state=closed]:[--tw-exit-scale:1] sm:left-auto sm:right-0 sm:top-0 sm:bottom-auto sm:h-dvh sm:max-h-none sm:rounded-none sm:rounded-l-xl sm:border-l sm:border-t-0 sm:p-6 data-[state=open]:slide-in-from-bottom-2 sm:data-[state=open]:slide-in-from-right-2 data-[state=closed]:slide-out-to-bottom-2 sm:data-[state=closed]:slide-out-to-right-2"
@@ -3188,163 +3142,7 @@ export default function ReportsPage() {
           </DialogHeader>
 
           <div className="space-y-4 text-sm">
-            {config.mode === "month" ? (
-              <div className="space-y-3">
-                <div className="grid gap-2">
-                  <Select
-                    value={config.month.dataset}
-                    onValueChange={(v) =>
-                      setConfig((s) => ({
-                        ...s,
-                        month: {
-                          ...s.month,
-                          dataset: v === "buckets" ? "buckets" : "categories",
-                        },
-                      }))
-                    }
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Chọn dữ liệu" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="categories">Theo danh mục</SelectItem>
-                      <SelectItem value="buckets">Theo bucket</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-xs text-muted-foreground">
-                    Kéo thả để thêm/bớt và sắp xếp thứ tự.
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      const defaults = defaultReportsConfig()
-                      setConfig((s) => ({
-                        ...s,
-                        month: {
-                          ...s.month,
-                          chartType: defaults.month.chartType,
-                          visibleCategories: [],
-                          visibleBuckets: defaults.month.visibleBuckets,
-                        },
-                      }))
-                    }}
-                  >
-                    Reset
-                  </Button>
-                </div>
-
-                {config.month.dataset === "categories" ? (
-                  <DndMultiSelect
-                    allIds={categoryIds}
-                    selectedIds={selectedCategoryIds}
-                    onSelectedIdsChange={(next) =>
-                      setConfig((s) => ({
-                        ...s,
-                        month: { ...s.month, visibleCategories: next },
-                      }))
-                    }
-                    getLabel={categoryLabel}
-                    availableTitle="Danh mục"
-                    selectedTitle={
-                      config.month.visibleCategories.length > 0
-                        ? "Đang hiển thị"
-                        : "Đang hiển thị (tự động: top)"
-                    }
-                  />
-                ) : (
-                  <DndMultiSelect
-                    allIds={MONTH_BUCKET_KEYS}
-                    selectedIds={config.month.visibleBuckets}
-                    onSelectedIdsChange={(next) =>
-                      setConfig((s) => ({
-                        ...s,
-                        month: { ...s.month, visibleBuckets: next },
-                      }))
-                    }
-                    getLabel={(id) => MONTH_BUCKET_LABELS[id]}
-                    availableTitle="Bucket"
-                    selectedTitle="Đang hiển thị"
-                  />
-                )}
-
-                <div className="text-xs text-muted-foreground">
-                  Ghi chú: “Theo danh mục” cộng cả chi phí cố định (vd. Hóa đơn).
-                </div>
-              </div>
-            ) : config.mode === "daily" ? (
-              <div className="space-y-3">
-                <div className="flex items-center justify-end">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      const defaults = defaultReportsConfig()
-                      setConfig((s) => ({ ...s, daily: defaults.daily }))
-                    }}
-                  >
-                    Reset
-                  </Button>
-                </div>
-
-                <div className="text-xs text-muted-foreground">
-                  Theo từng ngày trong khoảng lọc, chỉ tính chi biến đổi đã ghi.
-                </div>
-
-                <DndMultiSelect
-                  allIds={DAILY_SERIES_KEYS}
-                  selectedIds={config.daily.visibleSeries}
-                  onSelectedIdsChange={(next) =>
-                    setConfig((s) => ({
-                      ...s,
-                      daily: { ...s.daily, visibleSeries: next },
-                    }))
-                  }
-                  getLabel={(id) => DAILY_SERIES_LABELS[id]}
-                  availableTitle="Chỉ số"
-                  selectedTitle="Đang hiển thị"
-                />
-              </div>
-            ) : config.mode === "trend" ? (
-              <div className="space-y-3">
-                <div className="rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-                  Xu hướng dùng các tháng nằm trong khoảng lọc: {formatDateRangeLabel(dateRange)}.
-                </div>
-
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-xs text-muted-foreground">
-                    Kéo thả để thêm/bớt và sắp xếp thứ tự.
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      const defaults = defaultReportsConfig()
-                      setConfig((s) => ({ ...s, trend: defaults.trend }))
-                    }}
-                  >
-                    Reset
-                  </Button>
-                </div>
-
-                <DndMultiSelect
-                  allIds={TREND_SERIES_KEYS}
-                  selectedIds={config.trend.visibleSeries}
-                  onSelectedIdsChange={(next) =>
-                    setConfig((s) => ({
-                      ...s,
-                      trend: { ...s.trend, visibleSeries: next },
-                    }))
-                  }
-                  getLabel={(id) => TREND_SERIES_LABELS[id]}
-                  availableTitle="Chỉ số"
-                  selectedTitle="Đang hiển thị"
-                />
-              </div>
-            ) : config.mode === "pivot" ? (
+            {config.mode === "pivot" ? (
               <div className="space-y-3">
                 {isNarrowViewport ? (
                   <div className="space-y-3 rounded-lg border bg-muted/5 p-3">
@@ -3668,31 +3466,13 @@ export default function ReportsPage() {
             onValueChange={(v) =>
               setConfig((s) => ({
                 ...s,
-                mode:
-                  v === "trend"
-                    ? "trend"
-                    : v === "daily"
-                      ? "daily"
-                      : v === "pivot"
-                        ? "pivot"
-                        : v === "search"
-                          ? "search"
-                        : "month",
+                mode: v === "search" ? "search" : "pivot",
               }))
             }
           >
             <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
               <div className="col-span-2 min-w-0 sm:col-auto">
-                <TabsList className="grid h-auto w-full grid-cols-5 justify-stretch sm:inline-flex sm:h-10 sm:w-max sm:justify-start">
-                  <TabsTrigger className="px-2 text-xs sm:px-3 sm:text-sm" value="month">
-                    Phân bổ
-                  </TabsTrigger>
-                  <TabsTrigger className="px-2 text-xs sm:px-3 sm:text-sm" value="daily">
-                    Theo ngày
-                  </TabsTrigger>
-                  <TabsTrigger className="px-2 text-xs sm:px-3 sm:text-sm" value="trend">
-                    Xu hướng
-                  </TabsTrigger>
+                <TabsList className="grid h-auto w-full grid-cols-2 justify-stretch sm:inline-flex sm:h-10 sm:w-max sm:justify-start">
                   <TabsTrigger className="px-2 text-xs sm:px-3 sm:text-sm" value="pivot">
                     Pivot
                   </TabsTrigger>
@@ -3701,69 +3481,7 @@ export default function ReportsPage() {
                   </TabsTrigger>
                 </TabsList>
               </div>
-              {config.mode === "month" ? (
-                <Select
-                  value={config.month.chartType}
-                  onValueChange={(v) =>
-                    setConfig((s) => ({
-                      ...s,
-                      month: { ...s.month, chartType: v === "pie" ? "pie" : "bar" },
-                    }))
-                  }
-                >
-                  <SelectTrigger className="h-9 w-full text-xs sm:w-[170px] sm:text-sm">
-                    <SelectValue placeholder="Biểu đồ" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="bar">Cột (Bar)</SelectItem>
-                    <SelectItem value="pie">Tròn (Pie)</SelectItem>
-                  </SelectContent>
-                </Select>
-              ) : config.mode === "daily" ? (
-                <Select
-                  value={config.daily.chartType}
-                  onValueChange={(v) =>
-                    setConfig((s) => ({
-                      ...s,
-                      daily: {
-                        ...s.daily,
-                        chartType: v === "line" ? "line" : v === "area" ? "area" : "bar",
-                      },
-                    }))
-                  }
-                >
-                  <SelectTrigger className="h-9 w-full text-xs sm:w-[170px] sm:text-sm">
-                    <SelectValue placeholder="Biểu đồ" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="bar">Cột (Bar)</SelectItem>
-                    <SelectItem value="line">Đường (Line)</SelectItem>
-                    <SelectItem value="area">Vùng (Area)</SelectItem>
-                  </SelectContent>
-                </Select>
-              ) : config.mode === "trend" ? (
-                <Select
-                  value={config.trend.chartType}
-                  onValueChange={(v) =>
-                    setConfig((s) => ({
-                      ...s,
-                      trend: {
-                        ...s.trend,
-                        chartType: v === "bar" ? "bar" : v === "area" ? "area" : "line",
-                      },
-                    }))
-                  }
-                >
-                  <SelectTrigger className="h-9 w-full text-xs sm:w-[170px] sm:text-sm">
-                    <SelectValue placeholder="Biểu đồ" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="line">Đường (Line)</SelectItem>
-                    <SelectItem value="area">Vùng (Area)</SelectItem>
-                    <SelectItem value="bar">Cột (Bar)</SelectItem>
-                  </SelectContent>
-                </Select>
-              ) : config.mode === "search" ? null : effectivePivotSplitView === "table" ? null : (
+              {config.mode === "search" ? null : effectivePivotSplitView === "table" ? null : (
                 <Select
                   value={config.pivot.chartType}
                   onValueChange={(v) =>
@@ -3874,979 +3592,298 @@ export default function ReportsPage() {
               </Button>
             </div>
 
-            <TabsContent value="month" className="space-y-3">
-              {/*
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex flex-wrap gap-2">
-                  <Select
-                    value={config.month.dataset}
-                    onValueChange={(v) =>
-                      setConfig((s) => ({
-                        ...s,
-                        month: { ...s.month, dataset: v === "buckets" ? "buckets" : "categories" },
-                      }))
-                    }
-                  >
-                    <SelectTrigger className="w-[220px]">
-                      <SelectValue placeholder="Chọn dữ liệu" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="categories">Theo danh mục</SelectItem>
-                      <SelectItem value="buckets">Theo bucket</SelectItem>
-                    </SelectContent>
-                  </Select>
-
-                  <Select
-                    value={config.month.chartType}
-                    onValueChange={(v) =>
-                      setConfig((s) => ({
-                        ...s,
-                        month: { ...s.month, chartType: v === "pie" ? "pie" : "bar" },
-                      }))
-                    }
-                  >
-                    <SelectTrigger className="w-[180px]">
-                      <SelectValue placeholder="Chọn loại biểu đồ" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="bar">Cột (Bar)</SelectItem>
-                      <SelectItem value="pie">Tròn (Pie)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    const defaults = defaultReportsConfig()
-                    setConfig((s) => ({
-                      ...s,
-                      month: {
-                        ...s.month,
-                        chartType: defaults.month.chartType,
-                        visibleCategories: [],
-                        visibleBuckets: defaults.month.visibleBuckets,
-                      },
-                    }))
-                  }}
-                >
-                  Reset
-                </Button>
-              </div>
-              */}
-
-              {/*
-              {config.month.dataset === "categories" ? (
-                <DndMultiSelect
-                  allIds={categoryIds}
-                  selectedIds={selectedCategoryIds}
-                  onSelectedIdsChange={(next) =>
-                    setConfig((s) => ({
-                      ...s,
-                      month: { ...s.month, visibleCategories: next },
-                    }))
-                  }
-                  getLabel={categoryLabel}
-                  availableTitle="Danh mục"
-                  selectedTitle={
-                    config.month.visibleCategories.length > 0
-                      ? "Đang hiển thị"
-                      : "Đang hiển thị (tự động: top)"
-                  }
-                />
-              ) : (
-                <DndMultiSelect
-                  allIds={MONTH_BUCKET_KEYS}
-                  selectedIds={config.month.visibleBuckets}
-                  onSelectedIdsChange={(next) =>
-                    setConfig((s) => ({
-                      ...s,
-                      month: { ...s.month, visibleBuckets: next },
-                    }))
-                  }
-                  getLabel={(id) => MONTH_BUCKET_LABELS[id]}
-                  availableTitle="Bucket"
-                  selectedTitle="Đang hiển thị"
-                />
-              )}
-              */}
-
-              <div className="grid gap-4 lg:grid-cols-2">
-                <div className="h-[280px] sm:h-[320px]">
-                {config.month.dataset === "categories" ? (
-                  monthCategoryRows.length === 0 ? (
-                    <ChartEmptyState />
-                  ) : (
-                    <ResponsiveContainer width="100%" height="100%">
-                      {config.month.chartType === "pie" ? (
-                        <PieChart>
-                          <Tooltip
-                            cursor={false}
-                            content={<ChartTooltipContent hideLabel />}
-                          />
-                          {showChartLegend ? (
-                            <Legend {...monthLegendProps} payload={monthCategoryLegendPayload} />
-                          ) : null}
-                          <Pie
-                            data={monthCategoryChartRows}
-                            dataKey="value"
-                            nameKey="name"
-                            cx="50%"
-                            cy="50%"
-                            outerRadius={isNarrowViewport ? 86 : 110}
-                            labelLine={false}
-                            label={
-                              isNarrowViewport
-                                ? false
-                                : (p) =>
-                                    `${shortenLabel(String(p.name), 12)} ${(p.percent * 100).toFixed(0)}%`
-                            }
-                          >
-                            {monthCategoryChartRows.map((entry) => (
-                              <Cell
-                                key={entry.legendKey}
-                                fill={entry.color}
-                              />
-                            ))}
-                          </Pie>
-                        </PieChart>
-                      ) : (
-                        <BarChart
-                          data={monthCategoryChartRows}
-                          layout="vertical"
-                          margin={{ left: 8, right: 16, top: 8, bottom: 8 }}
-                        >
-                          <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                          <XAxis type="number" tickFormatter={formatMoneyAxisTick} />
-                          <YAxis
-                            type="category"
-                            dataKey="name"
-                            width={isNarrowViewport ? 88 : 130}
-                            tickFormatter={(v) =>
-                              shortenLabel(String(v), isNarrowViewport ? 10 : 18)
-                            }
-                          />
-                          <Tooltip content={<ChartTooltipContent />} />
-                          {showChartLegend ? (
-                            <Legend {...monthLegendProps} payload={monthCategoryLegendPayload} />
-                          ) : null}
-                          <Bar dataKey="value" name="VND" radius={[0, 6, 6, 0]}>
-                            {monthCategoryChartRows.map((entry) => (
-                              <Cell
-                                key={`bar-${entry.legendKey}`}
-                                fill={entry.color}
-                              />
-                            ))}
-                          </Bar>
-                        </BarChart>
-                      )}
-                    </ResponsiveContainer>
-                  )
-                ) : monthBucketRows.length === 0 ? (
-                  <ChartEmptyState />
-                ) : (
-                  <ResponsiveContainer width="100%" height="100%">
-                    {config.month.chartType === "pie" ? (
-                      <PieChart>
-                        <Tooltip
-                          cursor={false}
-                          content={<ChartTooltipContent hideLabel />}
-                        />
-                        {showChartLegend ? (
-                          <Legend {...monthLegendProps} payload={monthBucketLegendPayload} />
-                        ) : null}
-                        <Pie
-                          data={monthBucketChartRows}
-                          dataKey="value"
-                          nameKey="name"
-                          cx="50%"
-                          cy="50%"
-                          outerRadius={isNarrowViewport ? 86 : 110}
-                          labelLine={false}
-                          label={
-                            isNarrowViewport
-                              ? false
-                              : (p) =>
-                                  `${shortenLabel(String(p.name), 12)} ${(p.percent * 100).toFixed(0)}%`
-                          }
-                        >
-                          {monthBucketChartRows.map((entry) => (
-                            <Cell
-                              key={entry.legendKey}
-                              fill={entry.color}
-                            />
-                          ))}
-                        </Pie>
-                      </PieChart>
-                    ) : (
-                      <BarChart data={monthBucketChartRows} margin={{ left: 8, right: 16 }}>
-                        <CartesianGrid {...chartGridProps} />
-                        <XAxis
-                          dataKey="name"
-                          tickFormatter={(v) =>
-                            shortenLabel(String(v), isNarrowViewport ? 8 : 14)
-                          }
-                        />
-                        <YAxis tickFormatter={formatMoneyAxisTick} />
-                        <Tooltip content={<ChartTooltipContent />} />
-                        {showChartLegend ? (
-                          <Legend {...monthLegendProps} payload={monthBucketLegendPayload} />
-                        ) : null}
-                        <Bar dataKey="value" name="VND" radius={[6, 6, 0, 0]}>
-                          {monthBucketChartRows.map((entry) => (
-                            <Cell
-                              key={`bucket-bar-${entry.legendKey}`}
-                              fill={entry.color}
-                            />
-                          ))}
-                        </Bar>
-                      </BarChart>
-                    )}
-                  </ResponsiveContainer>
-                )}
-                </div>
-
-                <div className="rounded-md border bg-background">
-                  <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
-                    <div className="text-sm font-medium truncate">
-                      {config.month.dataset === "categories" ? "Danh mục" : "Bucket"}
-                    </div>
-                    <Badge variant="secondary" className="whitespace-nowrap">
-                      {monthTableRows.length} mục
-                    </Badge>
-                  </div>
-                  {monthTableRows.length === 0 ? (
-                    <div className="px-3 py-6 text-sm text-muted-foreground">
-                      Chưa có dữ liệu để hiển thị bảng.
-                    </div>
-                  ) : (
-                    <div className="max-h-[320px] overflow-auto">
-                      <table className="min-w-full text-sm">
-                        <thead className="sticky top-0 bg-muted/40">
-                          <tr className="border-b">
-                            <th className="px-3 py-2 text-left font-medium text-muted-foreground truncate">
-                              Tên
-                            </th>
-                            <th className="px-3 py-2 text-right font-medium text-muted-foreground whitespace-nowrap tabular-nums">
-                              Số tiền
-                            </th>
-                            <th className="px-3 py-2 text-right font-medium text-muted-foreground whitespace-nowrap tabular-nums">
-                              Tỷ lệ
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {monthTableRows.map((row) => (
-                            <tr key={row.name} className="border-b last:border-b-0">
-                              <td className="px-3 py-2 truncate" title={row.name}>
-                                {row.name}
-                              </td>
-                              <td className="px-3 py-2 text-right whitespace-nowrap tabular-nums">
-                                {formatVnd(row.value)}
-                              </td>
-                              <td className="px-3 py-2 text-right whitespace-nowrap tabular-nums">
-                                {monthTableTotal > 0
-                                  ? `${Math.round((row.value / monthTableTotal) * 100)}%`
-                                  : "—"}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/*
-              <div className="text-xs text-muted-foreground">
-                Ghi chú: “Chi theo danh mục” đã cộng cả chi phí cố định vào danh mục tương ứng (vd. Hóa đơn).
-              </div>
-              */}
-            </TabsContent>
-
-            <TabsContent value="daily" className="space-y-3">
-              {/*
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex flex-wrap gap-2">
-                  <Select
-                    value={config.daily.chartType}
-                    onValueChange={(v) =>
-                      setConfig((s) => ({
-                        ...s,
-                        daily: {
-                          ...s.daily,
-                          chartType: v === "line" ? "line" : v === "area" ? "area" : "bar",
-                        },
-                      }))
-                    }
-                  >
-                    <SelectTrigger className="w-[180px]">
-                      <SelectValue placeholder="Loại biểu đồ" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="bar">Cột (Bar)</SelectItem>
-                      <SelectItem value="line">Đường (Line)</SelectItem>
-                      <SelectItem value="area">Vùng (Area)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    const defaults = defaultReportsConfig()
-                    setConfig((s) => ({ ...s, daily: defaults.daily }))
-                  }}
-                >
-                  Reset
-                </Button>
-              </div>
-              */}
-
-              <div className="text-xs text-muted-foreground">
-                Chi theo từng ngày (từ đầu tháng), chỉ tính chi biến đổi đã ghi.
-              </div>
-              <div className="text-xs text-muted-foreground">
-                Cap chi mỗi ngày gốc đầu tháng (sau khi trừ chi phí cố định):{" "}
-                <span className="font-semibold text-foreground whitespace-nowrap tabular-nums">
-                  {formatVnd(baseDailyCapVnd)}
-                </span>
-              </div>
-
-              {/*
-              <DndMultiSelect
-                allIds={DAILY_SERIES_KEYS}
-                selectedIds={config.daily.visibleSeries}
-                onSelectedIdsChange={(next) =>
-                  setConfig((s) => ({
-                    ...s,
-                    daily: { ...s.daily, visibleSeries: next },
-                  }))
-                }
-                getLabel={(id) => DAILY_SERIES_LABELS[id]}
-                availableTitle="Chỉ số"
-                selectedTitle="Đang hiển thị"
-              />
-              */}
-
-              <div className="grid gap-4 lg:grid-cols-2">
-                <div className="h-[280px] sm:h-[320px]">
-                {dailyData.every((r) => r.total === 0 && r.needs === 0 && r.wants === 0) ? (
-                  <ChartEmptyState />
-                ) : (
-                  <ResponsiveContainer width="100%" height="100%">
-                    {config.daily.chartType === "bar" ? (
-                      <ComposedChart
-                        data={dailyChartData}
-                        margin={{ left: 8, right: 16, top: 8, bottom: 8 }}
-                      >
-                        <CartesianGrid {...chartGridProps} />
-                        <XAxis dataKey="label" tickFormatter={(v) => String(v)} />
-                        <YAxis tickFormatter={formatMoneyAxisTick} />
-                        <Tooltip
-                          cursor={false}
-                          content={
-                            <ChartTooltipContent
-                              labelFormatter={(v) => String(v)}
-                            />
-                          }
-                        />
-                        {showChartLegend ? <Legend {...interactiveLegendProps} /> : null}
-                        {showDailyNeeds ? (
-                          <Bar
-                            dataKey="needs"
-                            name={DAILY_SERIES_LABELS.needs}
-                            fill={DAILY_SERIES_COLORS.needs}
-                            hide={isLegendKeyHidden("needs")}
-                            stackId={showDailyWants ? "a" : undefined}
-                            radius={[6, 6, 0, 0]}
-                          />
-                        ) : null}
-                        {showDailyWants ? (
-                          <Bar
-                            dataKey="wants"
-                            name={DAILY_SERIES_LABELS.wants}
-                            fill={DAILY_SERIES_COLORS.wants}
-                            hide={isLegendKeyHidden("wants")}
-                            stackId={showDailyNeeds ? "a" : undefined}
-                            radius={[6, 6, 0, 0]}
-                          />
-                        ) : null}
-                        {!showDailyNeeds && !showDailyWants && showDailyTotal ? (
-                          <Bar
-                            dataKey="total"
-                            name={DAILY_SERIES_LABELS.total}
-                            fill={DAILY_SERIES_COLORS.total}
-                            hide={isLegendKeyHidden("total")}
-                            radius={[6, 6, 0, 0]}
-                          />
-                        ) : null}
-                        {showDailyTotal && (showDailyNeeds || showDailyWants) ? (
-                          <Line
-                            dataKey="total"
-                            name={DAILY_SERIES_LABELS.total}
-                            stroke={DAILY_SERIES_COLORS.total}
-                            strokeWidth={2}
-                            dot={false}
-                            hide={isLegendKeyHidden("total")}
-                            type="monotone"
-                          />
-                        ) : null}
-                        {baseDailyCapVnd > 0 ? (
-                          <Line
-                            dataKey="baseDailyCapVnd"
-                            name="Cap chi/ngày gốc"
-                            stroke="hsl(var(--primary))"
-                            strokeWidth={1.75}
-                            strokeDasharray="6 4"
-                            dot={false}
-                            hide={isLegendKeyHidden("baseDailyCapVnd")}
-                            type="linear"
-                            isAnimationActive={false}
-                          />
-                        ) : null}
-                      </ComposedChart>
-                    ) : config.daily.chartType === "area" ? (
-                      <AreaChart
-                        data={dailyChartData}
-                        margin={{ left: 8, right: 16, top: 8, bottom: 8 }}
-                      >
-                        <CartesianGrid {...chartGridProps} />
-                        <XAxis dataKey="label" tickFormatter={(v) => String(v)} />
-                        <YAxis tickFormatter={formatMoneyAxisTick} />
-                        <Tooltip
-                          cursor={false}
-                          content={
-                            <ChartTooltipContent
-                              labelFormatter={(v) => String(v)}
-                            />
-                          }
-                        />
-                        {showChartLegend ? <Legend {...interactiveLegendProps} /> : null}
-                        {config.daily.visibleSeries.map((k) => (
-                          <Area
-                            key={k}
-                            dataKey={k}
-                            name={DAILY_SERIES_LABELS[k]}
-                            stroke={DAILY_SERIES_COLORS[k]}
-                            fill={DAILY_SERIES_COLORS[k]}
-                            fillOpacity={0.18}
-                            hide={isLegendKeyHidden(k)}
-                            type="monotone"
-                          />
-                        ))}
-                        {baseDailyCapVnd > 0 ? (
-                          <Line
-                            dataKey="baseDailyCapVnd"
-                            name="Cap chi/ngày gốc"
-                            stroke="hsl(var(--primary))"
-                            strokeWidth={1.75}
-                            strokeDasharray="6 4"
-                            dot={false}
-                            hide={isLegendKeyHidden("baseDailyCapVnd")}
-                            type="linear"
-                            isAnimationActive={false}
-                          />
-                        ) : null}
-                      </AreaChart>
-                    ) : (
-                      <LineChart
-                        data={dailyChartData}
-                        margin={{ left: 8, right: 16, top: 8, bottom: 8 }}
-                      >
-                        <CartesianGrid {...chartGridProps} />
-                        <XAxis dataKey="label" tickFormatter={(v) => String(v)} />
-                        <YAxis tickFormatter={formatMoneyAxisTick} />
-                        <Tooltip
-                          cursor={false}
-                          content={
-                            <ChartTooltipContent
-                              labelFormatter={(v) => String(v)}
-                            />
-                          }
-                        />
-                        {showChartLegend ? <Legend {...interactiveLegendProps} /> : null}
-                        {config.daily.visibleSeries.map((k) => (
-                          <Line
-                            key={k}
-                            dataKey={k}
-                            name={DAILY_SERIES_LABELS[k]}
-                            stroke={DAILY_SERIES_COLORS[k]}
-                            strokeWidth={2}
-                            dot={false}
-                            hide={isLegendKeyHidden(k)}
-                            type="monotone"
-                          />
-                        ))}
-                        {baseDailyCapVnd > 0 ? (
-                          <Line
-                            dataKey="baseDailyCapVnd"
-                            name="Cap chi/ngày gốc"
-                            stroke="hsl(var(--primary))"
-                            strokeWidth={1.75}
-                            strokeDasharray="6 4"
-                            dot={false}
-                            hide={isLegendKeyHidden("baseDailyCapVnd")}
-                            type="linear"
-                            isAnimationActive={false}
-                          />
-                        ) : null}
-                      </LineChart>
-                    )}
-                  </ResponsiveContainer>
-                )}
-                </div>
-
-                <div className="rounded-md border bg-background">
-                  <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
-                    <div className="text-sm font-medium truncate">Bảng theo ngày</div>
-                    <Badge variant="secondary" className="whitespace-nowrap">
-                      {dailyData.length} ngày
-                    </Badge>
-                  </div>
-                  {dailyData.length === 0 ? (
-                    <div className="px-3 py-6 text-sm text-muted-foreground">
-                      Chưa có dữ liệu để hiển thị bảng.
-                    </div>
-                  ) : (
-                    <div className="max-h-[320px] overflow-auto">
-                      <table className="min-w-full text-sm">
-                        <thead className="sticky top-0 bg-muted/40">
-                          <tr className="border-b">
-                            <th className="px-3 py-2 text-left font-medium text-muted-foreground whitespace-nowrap">
-                              Ngày
-                            </th>
-                            {dailyTableSeries.map((k) => (
-                              <th
-                                key={k}
-                                className="px-3 py-2 text-right font-medium text-muted-foreground whitespace-nowrap tabular-nums"
-                              >
-                                {DAILY_SERIES_LABELS[k]}
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {dailyData.map((row) => (
-                            <tr key={row.date} className="border-b last:border-b-0">
-                              <td className="px-3 py-2 whitespace-nowrap tabular-nums">
-                                {row.label}
-                              </td>
-                              {dailyTableSeries.map((k) => (
-                                <td
-                                  key={k}
-                                  className="px-3 py-2 text-right whitespace-nowrap tabular-nums"
-                                >
-                                  {formatVnd(row[k])}
-                                </td>
-                              ))}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="trend" className="space-y-3">
-              {/*
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex flex-wrap gap-2">
-                  <Select
-                    value={String(config.trend.rangeMonths)}
-                    onValueChange={(v) => {
-                      const n = Number(v)
-                      const next: TrendRangeMonths | null =
-                        n === 3 || n === 6 || n === 12 ? (n as TrendRangeMonths) : null
-                      setConfig((s) => ({
-                        ...s,
-                        trend: {
-                          ...s.trend,
-                          rangeMonths: next ?? s.trend.rangeMonths,
-                        },
-                      }))
-                    }}
-                  >
-                    <SelectTrigger className="w-[220px]">
-                      <SelectValue placeholder="Khoảng thời gian" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="3">3 tháng gần nhất</SelectItem>
-                      <SelectItem value="6">6 tháng gần nhất</SelectItem>
-                      <SelectItem value="12">12 tháng gần nhất</SelectItem>
-                    </SelectContent>
-                  </Select>
-
-                  <Select
-                    value={config.trend.chartType}
-                    onValueChange={(v) =>
-                      setConfig((s) => ({
-                        ...s,
-                        trend: { ...s.trend, chartType: v === "bar" ? "bar" : v === "area" ? "area" : "line" },
-                      }))
-                    }
-                  >
-                    <SelectTrigger className="w-[180px]">
-                      <SelectValue placeholder="Loại biểu đồ" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="line">Đường (Line)</SelectItem>
-                      <SelectItem value="area">Vùng (Area)</SelectItem>
-                      <SelectItem value="bar">Cột (Bar)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    const defaults = defaultReportsConfig()
-                    setConfig((s) => ({
-                      ...s,
-                      trend: defaults.trend,
-                    }))
-                  }}
-                >
-                  Reset
-                </Button>
-              </div>
-              */}
-
-              {/*
-              <DndMultiSelect
-                allIds={TREND_SERIES_KEYS}
-                selectedIds={config.trend.visibleSeries}
-                onSelectedIdsChange={(next) =>
-                  setConfig((s) => ({
-                    ...s,
-                    trend: { ...s.trend, visibleSeries: next },
-                  }))
-                }
-                getLabel={(id) => TREND_SERIES_LABELS[id]}
-                availableTitle="Chỉ số"
-                selectedTitle="Đang hiển thị"
-              />
-              */}
-
-              <div className="grid gap-4 lg:grid-cols-2">
-                <div className="h-[280px] sm:h-[320px]">
-                {trendData.every((r) => r.totalSpent === 0 && r.variableSpent === 0 && r.fixedCosts === 0) ? (
-                  <ChartEmptyState />
-                ) : (
-                  <ResponsiveContainer width="100%" height="100%">
-                    {config.trend.chartType === "bar" ? (
-                      <BarChart data={trendData} margin={{ left: 8, right: 16, top: 8, bottom: 8 }}>
-                        <CartesianGrid {...chartGridProps} />
-                        <XAxis
-                          dataKey="month"
-                          tickFormatter={(v) => formatMonthLabel(v as YearMonth)}
-                        />
-                        <YAxis tickFormatter={formatMoneyAxisTick} />
-                        <Tooltip
-                          content={
-                            <ChartTooltipContent
-                              labelFormatter={(v) => formatMonthLabel(v as YearMonth)}
-                            />
-                          }
-                        />
-                        {showChartLegend ? <Legend {...interactiveLegendProps} /> : null}
-                        {config.trend.visibleSeries.includes("balance") && !isLegendKeyHidden("balance") ? (
-                          <ReferenceLine
-                            y={0}
-                            stroke="hsl(var(--border))"
-                            ifOverflow="extendDomain"
-                          />
-                        ) : null}
-                        {config.trend.visibleSeries.map((k) => (
-                          <Bar
-                            key={k}
-                            dataKey={k}
-                            name={TREND_SERIES_LABELS[k]}
-                            fill={TREND_SERIES_COLORS[k]}
-                            hide={isLegendKeyHidden(k)}
-                            radius={[6, 6, 0, 0]}
-                          />
-                        ))}
-                      </BarChart>
-                    ) : config.trend.chartType === "area" ? (
-                      <AreaChart data={trendData} margin={{ left: 8, right: 16, top: 8, bottom: 8 }}>
-                        <CartesianGrid {...chartGridProps} />
-                        <XAxis
-                          dataKey="month"
-                          tickFormatter={(v) => formatMonthLabel(v as YearMonth)}
-                        />
-                        <YAxis tickFormatter={formatMoneyAxisTick} />
-                        <Tooltip
-                          content={
-                            <ChartTooltipContent
-                              labelFormatter={(v) => formatMonthLabel(v as YearMonth)}
-                            />
-                          }
-                        />
-                        {showChartLegend ? <Legend {...interactiveLegendProps} /> : null}
-                        {config.trend.visibleSeries.includes("balance") && !isLegendKeyHidden("balance") ? (
-                          <ReferenceLine
-                            y={0}
-                            stroke="hsl(var(--border))"
-                            ifOverflow="extendDomain"
-                          />
-                        ) : null}
-                        {config.trend.visibleSeries.map((k) => (
-                          <Area
-                            key={k}
-                            dataKey={k}
-                            name={TREND_SERIES_LABELS[k]}
-                            stroke={TREND_SERIES_COLORS[k]}
-                            fill={TREND_SERIES_COLORS[k]}
-                            fillOpacity={0.18}
-                            hide={isLegendKeyHidden(k)}
-                            type="monotone"
-                          />
-                        ))}
-                      </AreaChart>
-                    ) : (
-                      <LineChart data={trendData} margin={{ left: 8, right: 16, top: 8, bottom: 8 }}>
-                        <CartesianGrid {...chartGridProps} />
-                        <XAxis
-                          dataKey="month"
-                          tickFormatter={(v) => formatMonthLabel(v as YearMonth)}
-                        />
-                        <YAxis tickFormatter={formatMoneyAxisTick} />
-                        <Tooltip
-                          content={
-                            <ChartTooltipContent
-                              labelFormatter={(v) => formatMonthLabel(v as YearMonth)}
-                            />
-                          }
-                        />
-                        {showChartLegend ? <Legend {...interactiveLegendProps} /> : null}
-                        {config.trend.visibleSeries.includes("balance") && !isLegendKeyHidden("balance") ? (
-                          <ReferenceLine
-                            y={0}
-                            stroke="hsl(var(--border))"
-                            ifOverflow="extendDomain"
-                          />
-                        ) : null}
-                        {config.trend.visibleSeries.map((k) => (
-                          <Line
-                            key={k}
-                            dataKey={k}
-                            name={TREND_SERIES_LABELS[k]}
-                            stroke={TREND_SERIES_COLORS[k]}
-                            strokeWidth={2}
-                            dot={false}
-                            hide={isLegendKeyHidden(k)}
-                            type="monotone"
-                          />
-                        ))}
-                      </LineChart>
-                    )}
-                  </ResponsiveContainer>
-                )}
-                </div>
-
-                <div className="rounded-md border bg-background">
-                  <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
-                    <div className="text-sm font-medium truncate">Bảng theo tháng</div>
-                    <Badge variant="secondary" className="whitespace-nowrap">
-                      {trendData.length} tháng
-                    </Badge>
-                  </div>
-                  {trendData.length === 0 ? (
-                    <div className="px-3 py-6 text-sm text-muted-foreground">
-                      Chưa có dữ liệu để hiển thị bảng.
-                    </div>
-                  ) : (
-                    <div className="max-h-[320px] overflow-auto">
-                      <table className="min-w-full text-sm">
-                        <thead className="sticky top-0 bg-muted/40">
-                          <tr className="border-b">
-                            <th className="px-3 py-2 text-left font-medium text-muted-foreground whitespace-nowrap">
-                              Tháng
-                            </th>
-                            {trendTableSeries.map((k) => (
-                              <th
-                                key={k}
-                                className="px-3 py-2 text-right font-medium text-muted-foreground whitespace-nowrap tabular-nums"
-                              >
-                                {TREND_SERIES_LABELS[k]}
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {trendData.map((row) => (
-                            <tr key={row.month} className="border-b last:border-b-0">
-                              <td className="px-3 py-2 whitespace-nowrap">
-                                {formatMonthLabel(row.month)}
-                              </td>
-                              {trendTableSeries.map((k) => (
-                                <td
-                                  key={k}
-                                  className="px-3 py-2 text-right whitespace-nowrap tabular-nums"
-                                >
-                                  {formatVnd(row[k])}
-                                </td>
-                              ))}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </TabsContent>
-
             <TabsContent value="search" className="min-w-0 space-y-3">
               <div className="grid gap-3 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
                 <Card className="min-w-0">
                   <CardHeader className="space-y-1 pb-3">
                     <CardTitle className="text-base">Điều kiện lọc</CardTitle>
                     <div className="text-xs text-muted-foreground">
-                      Lọc trên toàn bộ dữ liệu chi tiêu. Điều kiện trống sẽ được bỏ qua.
+                      Chuỗi lọc chạy lần lượt từ trên xuống. Điều kiện chưa nhập giá trị sẽ bị bỏ qua.
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-3">
                     {config.search.filters.length === 0 ? (
-                      <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
-                        Chưa có điều kiện. Nhập ít nhất một điều kiện rồi bấm Search.
+                      <div className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
+                        Chưa có điều kiện nào.
+                        <div className="mt-2">
+                          <Button type="button" variant="outline" size="sm" onClick={addSearchFilter}>
+                            <Plus className="mr-1 h-4 w-4" />
+                            Thêm điều kiện đầu tiên
+                          </Button>
+                        </div>
                       </div>
                     ) : (
-                      <div className="space-y-2">
+                      <ol className="relative">
+                        {/* Dây timeline chạy dọc phía sau các nút. Vì đây là phần tử absolute nên nó
+                            được vẽ ĐÈ lên các phần tử tĩnh -> các nút/đoạn nối phải có `relative z-10`
+                            để nằm trên dây, nếu không số 1,2,3 sẽ bị đường kẻ cắt ngang. */}
+                        <div
+                          aria-hidden
+                          className="absolute left-4 top-3 bottom-3 w-px bg-border"
+                        />
+
                         {config.search.filters.map((filter, index) => {
                           const field = SEARCH_FILTER_FIELDS.find((item) => item.id === filter.field)
+                          const valueOptions = searchValueOptions[filter.field]
+                          const isActive = filter.value.trim().length > 0
+                          const isFirstActive = filter.id === firstActiveSearchFilterId
+                          // Toán tử chỉ có hiệu lực khi điều kiện này thực sự được gộp vào chuỗi
+                          // và nó không phải mắt xích đầu tiên.
+                          const connectorEffective = isActive && !isFirstActive
+                          const stepCount = searchStepCounts[filter.id]
+
                           return (
-                            <div
-                              key={filter.id}
-                              className="grid gap-2 rounded-md border bg-muted/20 p-2 sm:grid-cols-[84px_minmax(120px,1fr)_112px_minmax(140px,1.3fr)_auto] sm:items-center"
-                            >
-                              {index === 0 ? (
-                                <div className="flex h-9 items-center rounded-md bg-background px-2 text-xs font-semibold text-muted-foreground">
-                                  WHERE
+                            <li key={filter.id}>
+                              {index > 0 ? (
+                                <div className="grid grid-cols-[32px_minmax(0,1fr)] items-center gap-3">
+                                  <div className="flex h-9 justify-center">
+                                    <span
+                                      className={cn(
+                                        "relative z-10 h-full w-[3px] rounded-full",
+                                        connectorEffective
+                                          ? SEARCH_CONNECTOR_RAIL[filter.connector]
+                                          : "bg-border",
+                                      )}
+                                    />
+                                  </div>
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <SearchConnectorToggle
+                                      value={filter.connector}
+                                      effective={connectorEffective}
+                                      onChange={(next) =>
+                                        updateSearchFilter(filter.id, { connector: next })
+                                      }
+                                    />
+                                    <span className="text-[11px] text-muted-foreground">
+                                      {connectorEffective
+                                        ? SEARCH_CONNECTOR_HINTS[filter.connector]
+                                        : !isActive
+                                          ? "Chưa áp dụng — điều kiện bên dưới còn trống"
+                                          : "Chưa áp dụng — đây là mắt xích đầu tiên của chuỗi"}
+                                    </span>
+                                  </div>
                                 </div>
-                              ) : (
-                                <Select
-                                  value={filter.connector}
-                                  onValueChange={(value) =>
-                                    updateSearchFilter(filter.id, {
-                                      connector: value === "or" ? "or" : "and",
-                                    })
-                                  }
+                              ) : null}
+
+                              <div className="grid grid-cols-[32px_minmax(0,1fr)] gap-3 py-1">
+                                <div className="flex justify-center">
+                                  <span
+                                    className={cn(
+                                      "relative z-10 mt-2 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[11px] font-bold tabular-nums",
+                                      isActive
+                                        ? "border-primary bg-primary text-primary-foreground"
+                                        : "border-dashed bg-background text-muted-foreground",
+                                    )}
+                                  >
+                                    {index + 1}
+                                  </span>
+                                </div>
+
+                                <div
+                                  className={cn(
+                                    "min-w-0 rounded-md border bg-muted/20 p-2",
+                                    isFirstActive && "border-primary/40 bg-primary/[0.04]",
+                                    !isActive && "border-dashed",
+                                  )}
                                 >
-                                  <SelectTrigger className="h-9 text-xs">
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="and">{SEARCH_CONNECTOR_LABELS.and}</SelectItem>
-                                    <SelectItem value="or">{SEARCH_CONNECTOR_LABELS.or}</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                              )}
-                              <Select
-                                value={filter.field}
-                                onValueChange={(value) =>
-                                  updateSearchFilter(filter.id, {
-                                    field: value as SearchFilterField,
-                                    value: "",
-                                  })
-                                }
-                              >
-                                <SelectTrigger className="h-9 text-xs">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {SEARCH_FILTER_FIELDS.map((item) => (
-                                    <SelectItem key={item.id} value={item.id}>
-                                      {item.label}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                              <Select
-                                value={filter.operator}
-                                onValueChange={(value) =>
-                                  updateSearchFilter(filter.id, {
-                                    operator: value as SearchFilterOperator,
-                                  })
-                                }
-                              >
-                                <SelectTrigger className="h-9 text-xs">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="eq">{SEARCH_OPERATOR_LABELS.eq}</SelectItem>
-                                  <SelectItem value="contains">{SEARCH_OPERATOR_LABELS.contains}</SelectItem>
-                                  <SelectItem value="gt">{SEARCH_OPERATOR_LABELS.gt}</SelectItem>
-                                  <SelectItem value="gte">{SEARCH_OPERATOR_LABELS.gte}</SelectItem>
-                                  <SelectItem value="lt">{SEARCH_OPERATOR_LABELS.lt}</SelectItem>
-                                  <SelectItem value="lte">{SEARCH_OPERATOR_LABELS.lte}</SelectItem>
-                                </SelectContent>
-                              </Select>
-                              {filter.field === "date" ? (
-                                <DatePicker
-                                  value={isIsoDateValue(filter.value) ? filter.value : undefined}
-                                  onChange={(next) =>
-                                    updateSearchFilter(filter.id, { value: next ?? "" })
-                                  }
-                                  placeholder="Chọn ngày"
-                                  allowClear
-                                  className="h-9 text-xs"
-                                />
-                              ) : filter.field === "month" ? (
-                                <MonthPicker
-                                  value={isYearMonthValue(filter.value) ? filter.value : undefined}
-                                  onChange={(next) =>
-                                    updateSearchFilter(filter.id, { value: next })
-                                  }
-                                  placeholder="Chọn tháng"
-                                  className="h-9 text-xs"
-                                />
-                              ) : filter.field === "amountVnd" ? (
-                                <MoneyInput
-                                  value={parseSearchNumber(filter.value) ?? 0}
-                                  onValueChange={(next) =>
-                                    updateSearchFilter(filter.id, {
-                                      value: next > 0 ? String(next) : "",
-                                    })
-                                  }
-                                  placeholder="VD: 100.000"
-                                  className="h-9 text-xs"
-                                />
-                              ) : (
-                                <Input
-                                  className="h-9 text-xs"
-                                  value={filter.value}
-                                  inputMode={filter.field === "week" ? "numeric" : undefined}
-                                  placeholder={field?.hint ?? "Nhập giá trị"}
-                                  onChange={(event) =>
-                                    updateSearchFilter(filter.id, { value: event.target.value })
-                                  }
-                                />
-                              )}
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                className="h-9 px-2 text-muted-foreground hover:text-destructive"
-                                onClick={() => removeSearchFilter(filter.id)}
-                                aria-label="Xóa điều kiện"
-                              >
-                                <X className="h-4 w-4" />
-                              </Button>
-                            </div>
+                                  <div className="grid gap-2 sm:grid-cols-[minmax(110px,1fr)_104px_minmax(140px,1.4fr)_auto] sm:items-center">
+                                    <Select
+                                      value={filter.field}
+                                      onValueChange={(value) => {
+                                        const nextField = value as SearchFilterField
+                                        updateSearchFilter(filter.id, {
+                                          field: nextField,
+                                          // Toán tử cũ có thể không hợp lệ với trường mới.
+                                          operator: resolveSearchFilterOperator(
+                                            nextField,
+                                            filter.operator,
+                                          ),
+                                          value: "",
+                                        })
+                                      }}
+                                    >
+                                      <SelectTrigger className="h-9 text-xs">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {SEARCH_FILTER_FIELDS.map((item) => (
+                                          <SelectItem key={item.id} value={item.id}>
+                                            {item.label}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                    <Select
+                                      value={filter.operator}
+                                      disabled={SEARCH_FIELD_OPERATORS[filter.field].length < 2}
+                                      onValueChange={(value) =>
+                                        updateSearchFilter(filter.id, {
+                                          operator: value as SearchFilterOperator,
+                                        })
+                                      }
+                                    >
+                                      <SelectTrigger className="h-9 text-xs">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {SEARCH_FIELD_OPERATORS[filter.field].map((operator) => (
+                                          <SelectItem key={operator} value={operator}>
+                                            {SEARCH_OPERATOR_LABELS[operator]}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                    {filter.field === "date" ? (
+                                      <DatePicker
+                                        value={isIsoDateValue(filter.value) ? filter.value : undefined}
+                                        onChange={(next) =>
+                                          updateSearchFilter(filter.id, { value: next ?? "" })
+                                        }
+                                        placeholder="Chọn ngày"
+                                        allowClear
+                                        className="h-9 text-xs"
+                                      />
+                                    ) : filter.field === "month" ? (
+                                      <MonthPicker
+                                        value={isYearMonthValue(filter.value) ? filter.value : undefined}
+                                        onChange={(next) =>
+                                          updateSearchFilter(filter.id, { value: next })
+                                        }
+                                        placeholder="Chọn tháng"
+                                        className="h-9 text-xs"
+                                      />
+                                    ) : filter.field === "amountVnd" ? (
+                                      <MoneyInput
+                                        value={parseSearchNumber(filter.value) ?? 0}
+                                        onValueChange={(next) =>
+                                          updateSearchFilter(filter.id, {
+                                            value: next > 0 ? String(next) : "",
+                                          })
+                                        }
+                                        placeholder="VD: 100.000"
+                                        className="h-9 text-xs"
+                                      />
+                                    ) : valueOptions ? (
+                                      <SearchableSelect
+                                        value={filter.value || undefined}
+                                        onChange={(next) =>
+                                          updateSearchFilter(filter.id, { value: next })
+                                        }
+                                        options={valueOptions}
+                                        placeholder={`Chọn ${(field?.label ?? "giá trị").toLowerCase()}`}
+                                        searchPlaceholder="Gõ để tìm..."
+                                        ariaLabel={`Giá trị ${field?.label ?? ""}`}
+                                        className="h-9 text-xs"
+                                      />
+                                    ) : (
+                                      <Input
+                                        className="h-9 text-xs"
+                                        value={filter.value}
+                                        placeholder={field?.hint ?? "Nhập giá trị"}
+                                        onChange={(event) =>
+                                          updateSearchFilter(filter.id, { value: event.target.value })
+                                        }
+                                      />
+                                    )}
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-9 px-2 text-muted-foreground hover:text-destructive"
+                                      onClick={() => removeSearchFilter(filter.id)}
+                                      aria-label="Xóa điều kiện"
+                                    >
+                                      <X className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+
+                                  <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
+                                    {isFirstActive ? (
+                                      <span className="rounded bg-primary/10 px-1.5 py-0.5 font-semibold uppercase tracking-wide text-primary">
+                                        Bắt đầu chuỗi
+                                      </span>
+                                    ) : null}
+                                    {isActive ? (
+                                      <span className="text-muted-foreground">
+                                        Sau bước này còn{" "}
+                                        <span className="font-semibold tabular-nums text-foreground">
+                                          {stepCount ?? 0}
+                                        </span>
+                                        /{allVariableExpenses.length} giao dịch
+                                      </span>
+                                    ) : (
+                                      <span className="text-muted-foreground">
+                                        Chưa nhập giá trị · điều kiện này bị bỏ qua
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            </li>
                           )
                         })}
-                      </div>
+
+                        {/* Nút kết thúc timeline: nối dài chuỗi lọc. */}
+                        <li className="grid grid-cols-[32px_minmax(0,1fr)] items-center gap-3 pt-1">
+                          <div className="flex justify-center">
+                            <span className="relative z-10 flex h-6 w-6 items-center justify-center rounded-full border border-dashed bg-background text-muted-foreground">
+                              <Plus className="h-3.5 w-3.5" />
+                            </span>
+                          </div>
+                          <div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-8"
+                              onClick={addSearchFilter}
+                            >
+                              Thêm điều kiện
+                            </Button>
+                          </div>
+                        </li>
+                      </ol>
                     )}
 
-                    <div className="flex flex-wrap items-center justify-between gap-2">
+                    {activeSearchFilterCount > 0 ? (
+                      <div className="rounded-md border bg-muted/20 p-2">
+                        <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Diễn giải chuỗi lọc
+                        </div>
+                        <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px]">
+                          {activeSearchFilters.map((filter, index) => (
+                            <span key={filter.id} className="flex items-center gap-1.5">
+                              {index > 0 ? (
+                                <span
+                                  className={cn(
+                                    "rounded px-1.5 py-0.5 text-[10px] font-bold",
+                                    SEARCH_CONNECTOR_CHIP[filter.connector],
+                                  )}
+                                >
+                                  {SEARCH_CONNECTOR_LABELS[filter.connector]}
+                                </span>
+                              ) : null}
+                              <span className="rounded border bg-background px-1.5 py-0.5">
+                                {describeSearchCondition(filter, resolveSearchValueLabel)}
+                              </span>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {searchHasMixedConnectors ? (
+                      <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-[11px] text-amber-800 dark:text-amber-200">
+                        <Info className="mt-px h-3.5 w-3.5 shrink-0" />
+                        <span>
+                          Chuỗi trộn AND và OR được duyệt lần lượt từ trên xuống, AND{" "}
+                          <strong>không</strong> được ưu tiên trước OR. Đọc theo đúng thứ tự các mắt
+                          xích trên timeline.
+                        </span>
+                      </div>
+                    ) : null}
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
                       <div className="text-xs text-muted-foreground">
                         {activeSearchFilterCount === 0
                           ? "Chưa có điều kiện hợp lệ."
@@ -4862,9 +3899,6 @@ export default function ReportsPage() {
                           onClick={runSearch}
                         >
                           Search
-                        </Button>
-                        <Button type="button" variant="outline" size="sm" onClick={addSearchFilter}>
-                          Thêm điều kiện
                         </Button>
                         <Button
                           type="button"
