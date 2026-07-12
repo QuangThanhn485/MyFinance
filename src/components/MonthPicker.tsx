@@ -1,7 +1,9 @@
+import { useMemo } from "react"
 import Flatpickr from "react-flatpickr"
 import { CalendarIcon } from "lucide-react"
 import monthSelectPlugin from "flatpickr/dist/plugins/monthSelect"
 import { Vietnamese } from "flatpickr/dist/l10n/vn"
+import type { Options } from "flatpickr/dist/types/options"
 import { useTheme } from "@/app/theme/ThemeProvider"
 import type { YearMonth } from "@/domain/types"
 import { cn } from "@/lib/utils"
@@ -15,10 +17,10 @@ type MonthPickerProps = {
   placeholder?: string
 }
 
-function parseYearMonthLocal(month: YearMonth): Date {
-  const year = Number(month.slice(0, 4))
-  const m = Number(month.slice(5, 7))
-  return new Date(year, m - 1, 1)
+/** Khớp với `dateFormat: "m/Y"` của monthSelectPlugin. */
+function toDisplayMonth(month?: YearMonth): string {
+  if (!month) return ""
+  return `${month.slice(5, 7)}/${month.slice(0, 4)}`
 }
 
 function formatYearMonth(date: Date): YearMonth {
@@ -35,9 +37,36 @@ export default function MonthPicker({
   placeholder = "Chọn tháng",
   ariaLabel = "Chọn tháng",
 }: MonthPickerProps) {
-  const selected = value ? parseYearMonthLocal(value) : undefined
   const { resolvedTheme } = useTheme()
   const monthSelectTheme = resolvedTheme === "dark" ? "dark" : "light"
+
+  // react-flatpickr render input controlled (<input value={props.value?.toString()} />), nên truyền
+  // Date sẽ đổ Date.toString() tiếng Anh vào ô input mỗi lần re-render. Truyền sẵn chuỗi m/Y.
+  const displayValue = useMemo(() => toDisplayMonth(value), [value])
+
+  // QUAN TRỌNG: `plugins` phải ổn định. Trước đây options (kèm monthSelectPlugin mới) được tạo lại
+  // mỗi render -> react-flatpickr gọi flatpickr.set("plugins", ...) -> redraw() liên tục -> lưới
+  // chọn tháng bị dựng lại/nhấp nháy và lag, chọn xong không dùng lại được.
+  const options = useMemo<Options>(
+    () => ({
+      locale: Vietnamese,
+      plugins: [
+        monthSelectPlugin({
+          shorthand: true,
+          dateFormat: "m/Y",
+          altFormat: "m/Y",
+          theme: monthSelectTheme,
+        }),
+      ],
+      // Input là controlled (React nắm `value`), nên cho gõ tay sẽ bị React ghi đè và react-flatpickr
+      // dựng Date từ chuỗi dở dang. Chỉ chọn bằng lưới tháng.
+      allowInput: false,
+      clickOpens: true,
+      disableMobile: true,
+      position: "auto center",
+    }),
+    [monthSelectTheme],
+  )
 
   return (
     <div
@@ -50,29 +79,20 @@ export default function MonthPicker({
       <CalendarIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground transition-colors group-focus-within:text-foreground" />
       <Flatpickr
         key={monthSelectTheme}
-        value={selected}
+        value={displayValue}
         placeholder={placeholder}
         disabled={disabled}
         aria-label={ariaLabel}
-        options={{
-          locale: Vietnamese,
-          plugins: [
-            monthSelectPlugin({
-              shorthand: true,
-              dateFormat: "m/Y",
-              altFormat: "m/Y",
-              theme: monthSelectTheme,
-            }),
-          ],
-          allowInput: true,
-          clickOpens: true,
-          disableMobile: true,
-          position: "auto center",
+        options={options}
+        onReady={(_dates, _dateStr, instance) => {
+          instance.input.readOnly = true
+          instance.input.setAttribute("inputmode", "none")
+          instance.input.setAttribute("autocomplete", "off")
         }}
         onChange={(dates, _dateStr, instance) => {
           const date = dates?.[0]
           if (!date) {
-            if (selected) instance.setDate(selected, false)
+            if (displayValue) instance.setDate(displayValue, false)
             return
           }
           onChange(formatYearMonth(date))

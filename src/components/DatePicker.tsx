@@ -1,25 +1,46 @@
+import { useMemo } from "react"
 import Flatpickr from "react-flatpickr"
 import { CalendarIcon, X } from "lucide-react"
 import { Vietnamese } from "flatpickr/dist/l10n/vn"
+import type { Options } from "flatpickr/dist/types/options"
 import type { ISODate } from "@/domain/types"
-import { formatIsoDate, parseIsoDateLocal } from "@/lib/date"
+import { formatIsoDate } from "@/lib/date"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+
+/** Khớp với `dateFormat: "d/m/Y"` của flatpickr. */
+function toDisplayDate(value?: ISODate): string {
+  if (!value) return ""
+  return `${value.slice(8, 10)}/${value.slice(5, 7)}/${value.slice(0, 4)}`
+}
 
 type FlatpickrInstanceLike = {
   input: HTMLInputElement
   calendarContainer: HTMLElement
+  /** flatpickr's internal reposition helper (exposed on the instance). */
+  _positionCalendar?: () => void
 }
+
+const MOBILE_CALENDAR_CLASS = "cttm-flatpickr-mobile"
 
 function positionCalendarInMobileViewport(instance: FlatpickrInstanceLike) {
   if (typeof window === "undefined") return
 
   const calendar = instance.calendarContainer
+  if (!calendar) return
+
   if (window.innerWidth >= 640) {
-    calendar.classList.remove("cttm-flatpickr-mobile")
+    // Desktop: flatpickr tự định vị lịch bằng inline `top`/`left` (vì lịch được appendTo body).
+    // TUYỆT ĐỐI không xoá các inline style đó — trước đây nhánh này xoá vô điều kiện, nên mỗi lần
+    // đổi tháng/năm lịch mất vị trí và văng ra ngoài viewport ("biến mất").
+    // Chỉ dọn khi TRƯỚC ĐÓ ta thật sự đã áp style mobile (vd vừa resize từ mobile sang desktop),
+    // rồi để flatpickr tự đặt lại vị trí.
+    if (!calendar.classList.contains(MOBILE_CALENDAR_CLASS)) return
+    calendar.classList.remove(MOBILE_CALENDAR_CLASS)
     ;["position", "left", "right", "top", "transform", "width", "maxWidth"].forEach((prop) => {
       calendar.style.removeProperty(prop)
     })
+    instance._positionCalendar?.()
     return
   }
 
@@ -38,7 +59,7 @@ function positionCalendarInMobileViewport(instance: FlatpickrInstanceLike) {
     if (top > maxTop) top = Math.max(viewportOffsetTop + sideGap, maxTop)
     top = Math.max(viewportOffsetTop + sideGap, top)
 
-    calendar.classList.add("cttm-flatpickr-mobile")
+    calendar.classList.add(MOBILE_CALENDAR_CLASS)
     calendar.style.position = "fixed"
     calendar.style.left = `${Math.round((window.innerWidth - width) / 2)}px`
     calendar.style.right = "auto"
@@ -71,7 +92,28 @@ export default function DatePicker({
   className,
   ariaLabel,
 }: DatePickerProps) {
-  const selected = value ? parseIsoDateLocal(value) : undefined
+  // react-flatpickr render input là CONTROLLED: <input value={props.value?.toString()} />.
+  // Nếu truyền Date, React đổ thẳng Date.toString() ("Tue Dec 01 2026 00:00:00 GMT+0700...") vào ô
+  // input mỗi lần re-render, ghi đè chuỗi flatpickr đã format -> hiện chữ tiếng Anh.
+  // => Truyền sẵn chuỗi đúng định dạng d/m/Y; flatpickr tự parse lại theo `dateFormat`.
+  // Chuỗi "" khi rỗng giữ input luôn ở chế độ controlled và khiến flatpickr clear đúng cách.
+  const displayValue = useMemo(() => toDisplayDate(value), [value])
+
+  // Options cũng phải ổn định: object mới mỗi render khiến react-flatpickr gọi flatpickr.set(...)
+  // và redraw không cần thiết.
+  const options = useMemo<Options>(
+    () => ({
+      locale: Vietnamese,
+      dateFormat: "d/m/Y",
+      allowInput: false,
+      clickOpens: true,
+      disableMobile: true,
+      monthSelectorType: "dropdown",
+      position: "auto center",
+      appendTo: typeof document === "undefined" ? undefined : document.body,
+    }),
+    [],
+  )
 
   return (
     <div
@@ -83,20 +125,11 @@ export default function DatePicker({
     >
       <CalendarIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground transition-colors group-focus-within:text-foreground" />
       <Flatpickr
-        value={selected}
+        value={displayValue}
         placeholder={placeholder}
         disabled={disabled}
         aria-label={ariaLabel ?? placeholder}
-        options={{
-          locale: Vietnamese,
-          dateFormat: "d/m/Y",
-          allowInput: false,
-          clickOpens: true,
-          disableMobile: true,
-          monthSelectorType: "dropdown",
-          position: "auto center",
-          appendTo: typeof document === "undefined" ? undefined : document.body,
-        }}
+        options={options}
         onReady={(_dates, _dateStr, instance) => {
           instance.input.readOnly = true
           instance.input.setAttribute("inputmode", "none")
@@ -115,7 +148,7 @@ export default function DatePicker({
           const date = dates?.[0]
           if (!date) {
             if (allowClear) onChange(undefined)
-            else if (selected) instance.setDate(selected, false)
+            else if (displayValue) instance.setDate(displayValue, false)
             return
           }
           onChange(formatIsoDate(date))
