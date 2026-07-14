@@ -10,7 +10,7 @@ import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { Controller, useForm } from "react-hook-form"
 import { toast } from "sonner"
-import { CalendarClock, ChartColumn, ListChecks, PlusSquare } from "lucide-react"
+import { ArrowDown, ArrowUp, CalendarClock, ChartColumn, ListChecks, PlusSquare } from "lucide-react"
 import { BUCKET_LABELS_VI, getExpenseCategoryLabel, suggestBucketByCategory } from "@/domain/constants"
 import type { BudgetBucket, Expense, ExpenseCategory, ISODate } from "@/domain/types"
 import DatePicker from "@/components/DatePicker"
@@ -28,7 +28,6 @@ import {
 } from "@/components/ui/select"
 import { formatVnd } from "@/lib/currency"
 import {
-  addDaysIsoDate,
   monthFromIsoDate,
   todayIso,
 } from "@/lib/date"
@@ -60,6 +59,7 @@ import {
 } from "@/domain/finance/budgetHealth"
 import {
   computeRemainingDailySpendingCap,
+  computeTodayDailySpendingCap,
   resolveEffectiveDailyTotalCapVnd,
 } from "@/domain/finance/dailySafeCap"
 import { Badge } from "@/components/ui/badge"
@@ -284,11 +284,6 @@ export default function ExpensesPage() {
   )
 
   const dailyTotal = expensesToday.reduce((sum, ex) => sum + ex.amountVnd, 0)
-  const weekDates = Array.from({ length: 7 }, (_, i) => addDaysIsoDate(selectedDate, -i))
-  const weekTotal = weekDates.reduce(
-    (sum, d) => sum + getExpensesByDate(data, d).reduce((s2, ex) => s2 + ex.amountVnd, 0),
-    0,
-  )
   const month = monthFromIsoDate(selectedDate)
   const dayContext = getMonthDayContext(data, selectedDate)
   const currentMonth = monthFromIsoDate(today)
@@ -370,6 +365,23 @@ export default function ExpensesPage() {
     computedDailyTotalCapVnd: remainingDailyCap.dailyTotalCapVnd,
     appliedDailyTotalCapVnd: caps?.dailyTotalCapVnd,
   })
+  const todayTotalForMonthRef = isSelectedCurrentMonth
+    ? getExpensesByDate(data, today).reduce((sum, ex) => sum + ex.amountVnd, 0)
+    : 0
+  const todayDailyCap = computeTodayDailySpendingCap({
+    incomeVnd: budgets.incomeVnd,
+    savingsTargetVnd: budgets.savingsTargetVnd,
+    monthTotalSpentVnd: monthTotals.totalSpent,
+    todaySpentVnd: todayTotalForMonthRef,
+    dayOfMonth: todayContext.dayOfMonth,
+    daysInMonth: todayContext.daysInMonth,
+  })
+  const shownTodayTotalCapVnd = resolveEffectiveDailyTotalCapVnd({
+    computedDailyTotalCapVnd: todayDailyCap.dailyTotalCapVnd,
+    appliedDailyTotalCapVnd: caps?.dailyTotalCapVnd,
+  })
+  const nextDayCapDeltaVnd = shownDailyTotalCapVnd - shownTodayTotalCapVnd
+  const nextDayCapDeltaAbsVnd = Math.abs(nextDayCapDeltaVnd)
   // Thanh "Còn lại ngân sách tháng" dùng base là ngân sách biến đổi có thể chi:
   // 100% = Thiết yếu (E) + Mong muốn (W), không gồm phí cố định. Phần sáng của
   // Progress là phần đã chi; số tiền bên phải vẫn là phần còn lại.
@@ -1020,14 +1032,8 @@ export default function ExpensesPage() {
               contentClassName="lg:h-full lg:min-h-0"
             >
               <div className="space-y-3 text-sm lg:h-full lg:overflow-y-auto lg:pr-1">
-                {/* Nhịp chi gần đây */}
                 <div className="space-y-1.5">
                   <LabelValueRow label="Chi ngày này" value={formatVnd(dailyTotal)} />
-                  <LabelValueRow label="7 ngày gần nhất" value={formatVnd(weekTotal)} />
-                  <LabelValueRow
-                    label="Tháng đến nay (gồm cố định)"
-                    value={formatVnd(monthTotals.totalSpent)}
-                  />
                 </div>
 
                 <div
@@ -1112,13 +1118,37 @@ export default function ExpensesPage() {
                         Cho ngày kế tiếp
                       </span>
                     </div>
-                    <div
-                      className={cn(
-                        "break-words text-xl font-semibold tabular-nums text-amber-700 sm:text-2xl dark:text-amber-400",
-                        shownDailyTotalCapVnd <= 0 && "text-destructive",
-                      )}
-                    >
-                      {formatVnd(shownDailyTotalCapVnd)}
+                    <div className="relative inline-block max-w-full overflow-visible">
+                      <div
+                        className={cn(
+                          "break-words text-xl font-semibold tabular-nums text-amber-700 sm:text-2xl dark:text-amber-400",
+                          shownDailyTotalCapVnd <= 0 && "text-destructive",
+                        )}
+                      >
+                        {formatVnd(shownDailyTotalCapVnd)}
+                      </div>
+                      {nextDayCapDeltaVnd !== 0 ? (
+                        <span
+                          className={cn(
+                            "pointer-events-none absolute left-full top-0 ml-1 inline-flex -translate-y-0.5 items-center gap-0.5 whitespace-nowrap text-[11px] font-semibold tabular-nums leading-none",
+                            nextDayCapDeltaVnd > 0
+                              ? "text-emerald-700 dark:text-emerald-300"
+                              : "text-destructive",
+                          )}
+                          aria-label={
+                            nextDayCapDeltaVnd > 0
+                              ? `Tang ${formatVnd(nextDayCapDeltaAbsVnd)} so voi hom nay`
+                              : `Giam ${formatVnd(nextDayCapDeltaAbsVnd)} so voi hom nay`
+                          }
+                        >
+                          {nextDayCapDeltaVnd > 0 ? (
+                            <ArrowUp className="h-3 w-3" />
+                          ) : (
+                            <ArrowDown className="h-3 w-3" />
+                          )}
+                          <span>{formatVnd(nextDayCapDeltaAbsVnd)}</span>
+                        </span>
+                      ) : null}
                     </div>
                   </div>
                 ) : null}
