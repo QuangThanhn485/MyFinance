@@ -139,6 +139,22 @@ describe("daily cap raise planner", () => {
     expect(plan.feasible).toBe(false)
     expect(plan.maxAchievableDailyCapVnd).toBe(200_000)
   })
+
+  it("raises the cap above 100k after one zero-spend day when 990.5k is spread over 10 days", () => {
+    const plan = computeDailyCapRaisePlanByDays({
+      totalRemainingVnd: 990_500,
+      remainingDaysInMonth: 10,
+      currentDailyCapVnd: 99_050,
+      targetDailyCapVnd: 100_000,
+      planDays: 1,
+    })
+
+    expect(plan.feasible).toBe(true)
+    expect(plan.requiredDailyCeilingVnd).toBe(90_500)
+    expect(plan.remainingDaysAfterPlan).toBe(9)
+    expect(plan.projectedDailyCapAfterPlanVnd).toBe(100_000)
+    expect(plan.maxAchievableDailyCapVnd).toBe(110_055)
+  })
 })
 
 describe("resolveEffectiveDailyTotalCapVnd", () => {

@@ -142,6 +142,17 @@ export default function DailyCapPlannerPage() {
       targetCapVnd,
     ],
   )
+  const zeroSpendToTargetPlan = useMemo(
+    () =>
+      computeDailyCapRaisePlanByCeiling({
+        totalRemainingVnd: remainingCap.totalRemainingVnd,
+        remainingDaysInMonth: dayContext.remainingDaysInMonth,
+        currentDailyCapVnd: shownDailyCapVnd,
+        targetDailyCapVnd: targetCapVnd,
+        dailyCeilingVnd: 0,
+      }),
+    [dayContext.remainingDaysInMonth, remainingCap.totalRemainingVnd, shownDailyCapVnd, targetCapVnd],
+  )
 
   return (
     <div className="space-y-3 sm:space-y-4">
@@ -269,7 +280,19 @@ export default function DailyCapPlannerPage() {
             ) : (
               <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm">
                 Không đạt được {formatVnd(targetCapVnd)} sau {planDays} ngày, kể cả khi chi 0 đ/ngày.
-                Cap tối đa với {planDays} ngày là {formatVnd(byDaysPlan.maxAchievableDailyCapVnd)}.
+                Cap tối đa sau {planDays} ngày là {formatVnd(byDaysPlan.maxAchievableDailyCapVnd)}.
+                {byDaysPlan.remainingDaysAfterPlan > 0 ? (
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    Phép tính: {formatVnd(byDaysPlan.totalRemainingVnd)} / {byDaysPlan.remainingDaysAfterPlan} ngày còn lại = {formatVnd(byDaysPlan.maxAchievableDailyCapVnd)}.
+                  </div>
+                ) : null}
+                {zeroSpendToTargetPlan.feasible &&
+                zeroSpendToTargetPlan.daysNeeded !== null &&
+                zeroSpendToTargetPlan.daysNeeded > planDays ? (
+                  <div className="mt-2 font-medium">
+                    Nếu chi 0 đ/ngày, cần ít nhất {zeroSpendToTargetPlan.daysNeeded} ngày để đạt {formatVnd(targetCapVnd)}.
+                  </div>
+                ) : null}
               </div>
             )}
           </CardContent>
