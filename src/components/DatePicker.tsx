@@ -8,6 +8,11 @@ import { formatIsoDate } from "@/lib/date"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 
+const VIETNAMESE_DATE_PICKER_LOCALE = {
+  ...Vietnamese,
+  firstDayOfWeek: 1,
+}
+
 /** Khớp với `dateFormat: "d/m/Y"` của flatpickr. */
 function toDisplayDate(value?: ISODate): string {
   if (!value) return ""
@@ -103,7 +108,7 @@ export default function DatePicker({
   // và redraw không cần thiết.
   const options = useMemo<Options>(
     () => ({
-      locale: Vietnamese,
+      locale: VIETNAMESE_DATE_PICKER_LOCALE,
       dateFormat: "d/m/Y",
       allowInput: false,
       clickOpens: true,
