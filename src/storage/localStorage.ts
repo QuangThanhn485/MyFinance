@@ -1,5 +1,5 @@
 import { rebuildExpenseIndexesFromEntities } from "@/storage/indexes"
-import type { FixedCost, Settings, YearMonth } from "@/domain/types"
+import type { AccountBalanceReconciliation, FixedCost, Settings, YearMonth } from "@/domain/types"
 import {
   createInitialState,
   SCHEMA_VERSION,
@@ -112,6 +112,25 @@ export function loadCttmStateFromKey(storageKey: string): CttmState {
     }
   }
 
+  const reconciliationsRaw = isRecord((state as any).accountBalanceReconciliationsByMonth)
+    ? ((state as any).accountBalanceReconciliationsByMonth as Record<string, unknown>)
+    : {}
+  const normalizedReconciliations: Record<string, AccountBalanceReconciliation> = {}
+  for (const [month, value] of Object.entries(reconciliationsRaw)) {
+    if (!isRecord(value)) continue
+    const actualBalanceVnd = coerceNumber(value.actualBalanceVnd, -1)
+    const incomeReceivedVnd = coerceNumber(value.incomeReceivedVnd, -1)
+    const asOfDate = coerceString(value.asOfDate, "")
+    if (actualBalanceVnd < 0 || incomeReceivedVnd < 0 || !/^\d{4}-\d{2}-\d{2}$/.test(asOfDate)) continue
+    normalizedReconciliations[month] = {
+      month: month as YearMonth,
+      asOfDate: asOfDate as AccountBalanceReconciliation["asOfDate"],
+      actualBalanceVnd: Math.trunc(actualBalanceVnd),
+      incomeReceivedVnd: Math.trunc(incomeReceivedVnd),
+      updatedAt: coerceString(value.updatedAt, now),
+    }
+  }
+
   const next: CttmState = {
     ...empty,
     ...state,
@@ -143,16 +162,17 @@ export function loadCttmStateFromKey(storageKey: string): CttmState {
       : {},
     capsByMonth: isRecord(state.capsByMonth) ? (state.capsByMonth as any) : {},
     monthLocksByMonth: normalizedMonthLocks,
+    accountBalanceReconciliationsByMonth: normalizedReconciliations,
     indexes: empty.indexes,
   }
 
   for (const id of next.entities.fixedCosts.allIds) {
     const fc = next.entities.fixedCosts.byId[id] as FixedCost | undefined
     if (!fc) continue
-    if (fc.month) continue
     next.entities.fixedCosts.byId[id] = {
       ...fc,
-      month: toYearMonthFromDateTime(fc.createdAt, fallbackMonth),
+      month: fc.month || toYearMonthFromDateTime(fc.createdAt, fallbackMonth),
+      paidAmountVnd: Math.max(0, Math.trunc(fc.paidAmountVnd ?? 0)),
     }
   }
 

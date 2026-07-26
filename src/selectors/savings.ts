@@ -1,7 +1,7 @@
 import type { SavingsFund, SavingsTransaction, YearMonth } from "@/domain/types"
 import { getEffectiveSettingsForMonth, getMonthlyIncomeTotalVnd } from "@/domain/finance/monthLock"
 import { monthFromIsoDate } from "@/lib/date"
-import { getMonthTotals } from "@/selectors/expenses"
+import { getFixedCostPaymentSummary, getMonthTotals } from "@/selectors/expenses"
 import type { CttmState } from "@/storage/schema"
 
 export function getSavingsTransactionsByMonth(
@@ -46,7 +46,11 @@ export function getActualMonthlySavingsVnd(state: CttmState, month: YearMonth) {
   const settings = getEffectiveSettingsForMonth(state, month)
   const incomeVnd = getMonthlyIncomeTotalVnd(settings)
   const totals = getMonthTotals(state, month)
-  return Math.max(0, Math.trunc(incomeVnd - totals.totalSpent))
+  const fixedCostPayments = getFixedCostPaymentSummary(state, month)
+  return Math.max(
+    0,
+    Math.trunc(incomeVnd - totals.totalSpent - fixedCostPayments.overPlanVnd),
+  )
 }
 
 export function getNextMonthEmergencyOpeningBalance(state: CttmState, previousMonth: YearMonth) {

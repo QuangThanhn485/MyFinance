@@ -4,7 +4,7 @@ import { CalendarIcon, X } from "lucide-react"
 import { Vietnamese } from "flatpickr/dist/l10n/vn"
 import type { Options } from "flatpickr/dist/types/options"
 import type { ISODate } from "@/domain/types"
-import { formatIsoDate } from "@/lib/date"
+import { formatIsoDate, parseIsoDateLocal } from "@/lib/date"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 
@@ -86,6 +86,8 @@ type DatePickerProps = {
   allowClear?: boolean
   className?: string
   ariaLabel?: string
+  minDate?: ISODate
+  maxDate?: ISODate
 }
 
 export default function DatePicker({
@@ -96,6 +98,8 @@ export default function DatePicker({
   allowClear,
   className,
   ariaLabel,
+  minDate,
+  maxDate,
 }: DatePickerProps) {
   // react-flatpickr render input là CONTROLLED: <input value={props.value?.toString()} />.
   // Nếu truyền Date, React đổ thẳng Date.toString() ("Tue Dec 01 2026 00:00:00 GMT+0700...") vào ô
@@ -116,8 +120,10 @@ export default function DatePicker({
       monthSelectorType: "dropdown",
       position: "auto center",
       appendTo: typeof document === "undefined" ? undefined : document.body,
+      minDate: minDate ? parseIsoDateLocal(minDate) : undefined,
+      maxDate: maxDate ? parseIsoDateLocal(maxDate) : undefined,
     }),
-    [],
+    [maxDate, minDate],
   )
 
   return (

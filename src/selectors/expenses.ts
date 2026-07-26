@@ -68,6 +68,33 @@ export function getMonthTotals(state: CttmState, month: YearMonth) {
   }
 }
 
+export function getFixedCostPaymentSummary(state: CttmState, month: YearMonth) {
+  const settingsForMonth = getEffectiveSettingsForMonth(state, month)
+  let plannedVnd = 0
+  let paidVnd = 0
+
+  for (const id of state.entities.fixedCosts.allIds) {
+    const fixedCost = state.entities.fixedCosts.byId[id]
+    if (!fixedCost || !fixedCost.active || fixedCost.month !== month) continue
+    plannedVnd += Math.max(0, Math.trunc(fixedCost.amountVnd))
+    paidVnd += Math.max(0, Math.trunc(fixedCost.paidAmountVnd ?? 0))
+  }
+
+  const debtPlannedVnd = Math.max(0, Math.trunc(settingsForMonth.debtPaymentMonthlyVnd ?? 0))
+  const debtPaidVnd = Math.max(0, Math.trunc(settingsForMonth.debtPaymentPaidVnd ?? 0))
+  plannedVnd += debtPlannedVnd
+  paidVnd += debtPaidVnd
+
+  return {
+    plannedVnd,
+    paidVnd,
+    remainingVnd: plannedVnd - paidVnd,
+    overPlanVnd: Math.max(0, paidVnd - plannedVnd),
+    debtPlannedVnd,
+    debtPaidVnd,
+  }
+}
+
 export function getMonthToDateTotals(state: CttmState, date: ISODate) {
   const month = date.slice(0, 7) as YearMonth
   const ids = state.indexes.expensesByMonth[month] ?? []

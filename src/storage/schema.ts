@@ -1,4 +1,5 @@
 import type {
+  AccountBalanceReconciliation,
   BudgetAdjustment,
   Expense,
   ExpenseCategoryConfig,
@@ -58,6 +59,7 @@ export interface CttmState {
   budgetAdjustmentsByMonth: Record<string, BudgetAdjustment>
   capsByMonth: Record<string, SpendingCaps>
   monthLocksByMonth: Record<string, MonthLockSnapshot>
+  accountBalanceReconciliationsByMonth: Record<string, AccountBalanceReconciliation>
 }
 
 export function createEmptyExpenseIndexes(): ExpenseIndexes {
@@ -79,6 +81,7 @@ export function createDefaultSettings(): Settings {
     extraIncomeMonthlyVnd: 0,
     paydayDayOfMonth: 1,
     debtPaymentMonthlyVnd: 0,
+    debtPaymentPaidVnd: 0,
     budgetRule: { type: "50_30_20" },
     emergencyFundTargetMonths: 6,
     emergencyFundCurrentVnd: 0,
@@ -106,5 +109,6 @@ export function createInitialState(nowIso: string): CttmState {
     budgetAdjustmentsByMonth: {},
     capsByMonth: {},
     monthLocksByMonth: {},
+    accountBalanceReconciliationsByMonth: {},
   }
 }

@@ -2,9 +2,11 @@
 import {
   ArrowDownCircle,
   ArrowUpCircle,
+  CheckCheck,
   ChevronLeft,
   ChevronRight,
   Lock,
+  Pencil,
   Plus,
   Trash2,
   WalletCards,
@@ -14,7 +16,6 @@ import { Controller, useForm } from "react-hook-form"
 import { z } from "zod"
 import { toast } from "sonner"
 import DatePicker from "@/components/DatePicker"
-import { getExpenseCategoryLabel } from "@/domain/constants"
 import {
   getEffectiveSettingsForMonth,
   isMonthLocked,
@@ -143,6 +144,22 @@ export default function SettingsPage() {
         .filter((fc): fc is NonNullable<typeof fc> => !!fc && fc.month === selectedMonth),
     [data, selectedMonth],
   )
+  const fixedCostsSummary = useMemo(
+    () =>
+      fixedCosts.reduce(
+        (summary, fixedCost) => {
+          if (!fixedCost.active) return summary
+          const plannedVnd = Math.max(0, Math.trunc(fixedCost.amountVnd))
+          const paidVnd = Math.max(0, Math.trunc(fixedCost.paidAmountVnd ?? 0))
+          return {
+            plannedVnd: summary.plannedVnd + plannedVnd,
+            paidVnd: summary.paidVnd + paidVnd,
+          }
+        },
+        { plannedVnd: 0, paidVnd: 0 },
+      ),
+    [fixedCosts],
+  )
   const latestFixedCostMonth = useMemo<YearMonth | null>(() => {
     const hasByMonth = new Set<YearMonth>()
     for (const id of data.entities.fixedCosts.allIds) {
@@ -178,6 +195,7 @@ export default function SettingsPage() {
       extraIncomeMonthlyVnd: z.coerce.number().int().nonnegative(),
       paydayDayOfMonth: z.coerce.number().int().min(1).max(31),
       debtPaymentMonthlyVnd: z.coerce.number().int().nonnegative(),
+      debtPaymentPaidVnd: z.coerce.number().int().nonnegative(),
       emergencyFundTargetMonths: z.coerce.number().int().min(0).max(60),
       emergencyFundCurrentVnd: z.coerce.number().int().nonnegative(),
       essentialVariableBaselineVnd: z.coerce.number().int().nonnegative(),
@@ -206,6 +224,7 @@ export default function SettingsPage() {
       extraIncomeMonthlyVnd: settingsForMonth.extraIncomeMonthlyVnd ?? 0,
       paydayDayOfMonth: settingsForMonth.paydayDayOfMonth,
       debtPaymentMonthlyVnd,
+      debtPaymentPaidVnd: Math.max(0, Math.trunc(settingsForMonth.debtPaymentPaidVnd ?? 0)),
       emergencyFundTargetMonths: settingsForMonth.emergencyFundTargetMonths,
       emergencyFundCurrentVnd: settingsForMonth.emergencyFundCurrentVnd,
       essentialVariableBaselineVnd: settingsForMonth.essentialVariableBaselineVnd,
@@ -226,16 +245,7 @@ export default function SettingsPage() {
   }, [defaultFormValues, form, selectedMonth])
 
   const categoryOptions = useMemo(() => data.expenseCategories, [data.expenseCategories])
-  const categoryLabels = useMemo(
-    () =>
-      Object.fromEntries(
-        categoryOptions.map((category) => [category.id, category.label]),
-      ) as Record<string, string>,
-    [categoryOptions],
-  )
   const defaultCategory = categoryOptions[0]?.id ?? "Other"
-  const categoryLabel = (category: ExpenseCategory) =>
-    categoryLabels[category] ?? getExpenseCategoryLabel(category, categoryOptions)
 
   const [newFcName, setNewFcName] = useState("")
   const [newFcAmountVnd, setNewFcAmountVnd] = useState(0)
@@ -489,7 +499,7 @@ export default function SettingsPage() {
         </p>
       </div>
 
-      <div className="grid gap-3 sm:gap-4 lg:h-[calc(100dvh-8rem)] lg:min-h-0 lg:grid-cols-[280px_minmax(0,1fr)_minmax(0,1fr)] lg:items-start">
+      <div className="grid gap-3 sm:gap-4 lg:grid-cols-[260px_minmax(0,1fr)] lg:items-start xl:h-[calc(100dvh-8rem)] xl:min-h-0 xl:grid-cols-[260px_minmax(0,1fr)_minmax(360px,0.9fr)]">
         <div className="space-y-3 sm:space-y-4">
           <Card>
             <CardHeader className="pb-3">
@@ -577,6 +587,7 @@ export default function SettingsPage() {
                     extraIncomeMonthlyVnd: values.extraIncomeMonthlyVnd,
                     paydayDayOfMonth: values.paydayDayOfMonth,
                     debtPaymentMonthlyVnd: values.debtPaymentMonthlyVnd,
+                    debtPaymentPaidVnd: values.debtPaymentPaidVnd,
                     emergencyFundTargetMonths: values.emergencyFundTargetMonths,
                     emergencyFundCurrentVnd: values.emergencyFundCurrentVnd,
                     essentialVariableBaselineVnd: values.essentialVariableBaselineVnd,
@@ -610,16 +621,26 @@ export default function SettingsPage() {
                 </div>
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-3 sm:grid-cols-3">
                 <div className="grid gap-2">
                   <Label>Ngày nhận lương (1-31)</Label>
                   <Input inputMode="numeric" {...form.register("paydayDayOfMonth")} />
                 </div>
                 <div className="grid gap-2">
-                  <Label>Trả nợ hàng tháng (VND)</Label>
+                  <Label>Trả nợ kế hoạch (VND)</Label>
                   <Controller
                     control={form.control}
                     name="debtPaymentMonthlyVnd"
+                    render={({ field }) => (
+                      <MoneyInput value={Number(field.value) || 0} onValueChange={field.onChange} placeholder="Ví dụ: 800.000" />
+                    )}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label>Trả nợ đã chi (VND)</Label>
+                  <Controller
+                    control={form.control}
+                    name="debtPaymentPaidVnd"
                     render={({ field }) => (
                       <MoneyInput value={Number(field.value) || 0} onValueChange={field.onChange} placeholder="Ví dụ: 800.000" />
                     )}
@@ -784,7 +805,7 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
 
-        <Card className="lg:flex lg:h-[calc(100dvh-8rem)] lg:min-h-0 lg:flex-col lg:overflow-hidden">
+        <Card id="fixed-costs" className="scroll-mt-4 lg:col-span-2 xl:col-span-1 xl:flex xl:h-[calc(100dvh-8rem)] xl:min-h-0 xl:flex-col xl:overflow-hidden">
           <CardHeader className="pb-2">
             <CardTitle className="flex flex-wrap items-center justify-between gap-2">
               <span>Chi phí cố định • {selectedMonth}</span>
@@ -802,10 +823,39 @@ export default function SettingsPage() {
               </div>
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3 p-2 sm:p-3 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
-            <div className="flex flex-col gap-2 pr-1 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
+          <CardContent className="space-y-3 p-2 sm:p-3 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
+            <div className="grid grid-cols-3 divide-x overflow-hidden rounded-md border bg-muted/20 text-center text-xs">
+              <div className="min-w-0 px-1.5 py-2">
+                <div className="text-muted-foreground">Kế hoạch</div>
+                <div className="mt-0.5 truncate font-semibold tabular-nums" title={formatVnd(fixedCostsSummary.plannedVnd)}>
+                  {formatVnd(fixedCostsSummary.plannedVnd)}
+                </div>
+              </div>
+              <div className="min-w-0 px-1.5 py-2">
+                <div className="text-muted-foreground">Đã chi</div>
+                <div className="mt-0.5 truncate font-semibold tabular-nums" title={formatVnd(fixedCostsSummary.paidVnd)}>
+                  {formatVnd(fixedCostsSummary.paidVnd)}
+                </div>
+              </div>
+              <div className="min-w-0 px-1.5 py-2">
+                <div className="text-muted-foreground">
+                  {fixedCostsSummary.paidVnd > fixedCostsSummary.plannedVnd ? "Vượt" : "Còn lại"}
+                </div>
+                <div
+                  className={cn(
+                    "mt-0.5 truncate font-semibold tabular-nums",
+                    fixedCostsSummary.paidVnd > fixedCostsSummary.plannedVnd && "text-destructive",
+                  )}
+                  title={formatVnd(Math.abs(fixedCostsSummary.plannedVnd - fixedCostsSummary.paidVnd))}
+                >
+                  {formatVnd(Math.abs(fixedCostsSummary.plannedVnd - fixedCostsSummary.paidVnd))}
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-2 pr-1 lg:grid-cols-2 xl:min-h-0 xl:flex-1 xl:grid-cols-1 xl:overflow-y-auto">
               {fixedCosts.length === 0 ? (
-                <div className="space-y-3 rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+                <div className="space-y-3 rounded-md border border-dashed p-3 text-sm text-muted-foreground lg:col-span-2 xl:col-span-1">
                   <div>Tháng này chưa có chi phí cố định.</div>
                   <div className="flex flex-wrap gap-2">
                     <Button
@@ -830,61 +880,115 @@ export default function SettingsPage() {
                   </div>
                 </div>
               ) : (
-                fixedCosts.map((fc) => (
-                  <div key={fc.id} className="rounded-md border p-2.5">
-                    <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_160px_auto] lg:items-center">
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold leading-5" title={fc.name}>{fc.name}</div>
-                        <div className="truncate text-sm leading-5 text-muted-foreground" title={`${formatVnd(fc.amountVnd)} • ${categoryLabel(fc.category)}`}>
-                          {formatVnd(fc.amountVnd)} • {categoryLabel(fc.category)}
+                fixedCosts.map((fc) => {
+                  const paidAmountVnd = Math.max(0, Math.trunc(fc.paidAmountVnd ?? 0))
+                  const remainingVnd = fc.amountVnd - paidAmountVnd
+
+                  return (
+                    <div
+                      key={fc.id}
+                      className={cn(
+                        "min-w-0 rounded-md border bg-background p-2.5",
+                        !fc.active && "bg-muted/20 opacity-70",
+                      )}
+                    >
+                    <div className="grid gap-2">
+                      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm font-semibold leading-5" title={fc.name}>{fc.name}</div>
+                          <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-xs leading-5 text-muted-foreground">
+                            <span>Kế hoạch {formatVnd(fc.amountVnd)}</span>
+                            <span
+                              className={cn(remainingVnd < 0 && "font-medium text-destructive")}
+                            >
+                              {remainingVnd < 0
+                                ? `Vượt ${formatVnd(Math.abs(remainingVnd))}`
+                                : `Còn ${formatVnd(remainingVnd)}`}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-end gap-0.5">
+                          <Switch
+                            checked={fc.active}
+                            aria-label={`${fc.active ? "Tắt" : "Bật"} ${fc.name}`}
+                            title={fc.active ? "Đang hoạt động" : "Đang tắt"}
+                            onCheckedChange={(checked) => updateFixedCost(fc.id, { active: checked })}
+                          />
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                            title="Sửa số tiền kế hoạch"
+                            aria-label={`Sửa số tiền kế hoạch của ${fc.name}`}
+                            onClick={() => {
+                              setEditingAmountId(fc.id)
+                              setEditingAmountVnd(fc.amountVnd)
+                            }}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                            title="Xoá khoản cố định"
+                            aria-label={`Xoá ${fc.name}`}
+                            onClick={() => {
+                              deleteFixedCost(fc.id)
+                              toast.success("Đã xoá.")
+                            }}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
                         </div>
                       </div>
-                      <div className="w-full lg:order-2">
-                        <Select
-                          value={fc.category}
-                          onValueChange={(v) => updateFixedCost(fc.id, { category: v as ExpenseCategory })}
-                        >
-                          <SelectTrigger className="h-9 text-sm">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {categoryOptions.map((c) => (
-                              <SelectItem key={c.id} value={c.id}>{c.label}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="flex flex-wrap items-center justify-end gap-1.5 lg:order-3">
-                        <Switch
-                          checked={fc.active}
-                          onCheckedChange={(checked) => updateFixedCost(fc.id, { active: checked })}
-                        />
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-9 px-3 text-sm"
-                          onClick={() => {
-                            setEditingAmountId(fc.id)
-                            setEditingAmountVnd(fc.amountVnd)
-                          }}
-                        >
-                          Sửa số tiền
-                        </Button>
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          className="h-9 px-3 text-sm"
-                          onClick={() => {
-                            deleteFixedCost(fc.id)
-                            toast.success("Đã xoá.")
-                          }}
-                        >
-                          Xoá
-                        </Button>
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <div className="grid gap-1">
+                          <Label className="text-xs text-muted-foreground">Danh mục</Label>
+                          <Select
+                            value={fc.category}
+                            onValueChange={(v) => updateFixedCost(fc.id, { category: v as ExpenseCategory })}
+                          >
+                            <SelectTrigger className="h-9 text-sm">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {categoryOptions.map((c) => (
+                                <SelectItem key={c.id} value={c.id}>{c.label}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="grid gap-1">
+                          <div className="flex min-h-6 items-center justify-between gap-2">
+                            <Label className="text-xs text-muted-foreground">Số tiền đã chi</Label>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                              title="Điền đủ số tiền kế hoạch"
+                              aria-label={`Điền đủ ${formatVnd(fc.amountVnd)} cho ${fc.name}`}
+                              disabled={paidAmountVnd === fc.amountVnd}
+                              onClick={() => updateFixedCost(fc.id, { paidAmountVnd: fc.amountVnd })}
+                            >
+                              <CheckCheck className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                          <MoneyInput
+                            className="h-9"
+                            value={paidAmountVnd}
+                            onValueChange={(value) => updateFixedCost(fc.id, { paidAmountVnd: value })}
+                            placeholder="0"
+                          />
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))
+                    </div>
+                  )
+                })
               )}
             </div>
           </CardContent>

@@ -31,6 +31,7 @@ export interface FixedCost {
   month: YearMonth
   name: string
   amountVnd: number
+  paidAmountVnd: number
   category: ExpenseCategory
   active: boolean
   createdAt: string
@@ -74,12 +75,21 @@ export interface Settings {
   extraIncomeMonthlyVnd: number
   paydayDayOfMonth: number
   debtPaymentMonthlyVnd: number
+  debtPaymentPaidVnd: number
   budgetRule: BudgetRule
   emergencyFundTargetMonths: number
   emergencyFundCurrentVnd: number
   actualSavingsBalanceVnd: number
   essentialVariableBaselineVnd: number
   customSavingsGoalVnd?: number | null
+}
+
+export interface AccountBalanceReconciliation {
+  month: YearMonth
+  asOfDate: ISODate
+  actualBalanceVnd: number
+  incomeReceivedVnd: number
+  updatedAt: string
 }
 
 export interface BudgetAdjustment {

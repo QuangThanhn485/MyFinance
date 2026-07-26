@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom"
 import AppLayout from "@/app/layout/AppLayout"
 import AdvisorPage from "@/pages/AdvisorPage"
+import BalanceReconciliationPage from "@/pages/BalanceReconciliationPage"
 import BudgetsPage from "@/pages/BudgetsPage"
 import CategoriesPage from "@/pages/CategoriesPage"
 import DailyCapPlannerPage from "@/pages/DailyCapPlannerPage"
@@ -19,6 +20,7 @@ export default function App() {
         <Route path="/expenses" element={<ExpensesPage />} />
         <Route path="/budgets" element={<BudgetsPage />} />
         <Route path="/advisor" element={<AdvisorPage />} />
+        <Route path="/balance-reconciliation" element={<BalanceReconciliationPage />} />
         <Route path="/reports" element={<ReportsPage />} />
         <Route path="/daily-cap-planner" element={<DailyCapPlannerPage />} />
         <Route path="/settings" element={<SettingsPage />} />

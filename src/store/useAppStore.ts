@@ -2,6 +2,7 @@
 import { create } from "zustand"
 import { subscribeWithSelector } from "zustand/middleware"
 import type {
+  AccountBalanceReconciliation,
   BudgetBucket,
   Expense,
   ExpenseCategory,
@@ -95,7 +96,7 @@ type Actions = {
   }) => string
   updateFixedCost: (
     id: string,
-    patch: Partial<Pick<FixedCost, "month" | "name" | "amountVnd" | "category" | "active">>,
+    patch: Partial<Pick<FixedCost, "month" | "name" | "amountVnd" | "paidAmountVnd" | "category" | "active">>,
   ) => void
   deleteFixedCost: (id: string) => void
 
@@ -121,6 +122,8 @@ type Actions = {
     date: ISODate
   }) => string
   deleteSavingsTransaction: (id: string) => void
+
+  saveAccountBalanceReconciliation: (input: Omit<AccountBalanceReconciliation, "updatedAt">) => void
 
   addPurchasePlan: (input: {
     name: string
@@ -227,6 +230,7 @@ function ensureMonthConfigurationFromPrevious(
   const inheritedSettings = {
     ...cloneSettings(getEffectiveSettingsForMonth(state, prevMonth)),
     emergencyFundCurrentVnd: getNextMonthEmergencyOpeningBalance(state, prevMonth),
+    debtPaymentPaidVnd: 0,
   }
   const nextSettingsByMonth = {
     ...state.settingsByMonth,
@@ -252,6 +256,7 @@ function ensureMonthConfigurationFromPrevious(
         ...fixedCost,
         id: newId,
         month: targetMonth,
+        paidAmountVnd: 0,
         createdAt: now,
         updatedAt: now,
       }
@@ -308,6 +313,7 @@ function isDefaultSettings(settings: Settings): boolean {
     (settings.extraIncomeMonthlyVnd ?? 0) === 0 &&
     settings.paydayDayOfMonth === 1 &&
     settings.debtPaymentMonthlyVnd === 0 &&
+    (settings.debtPaymentPaidVnd ?? 0) === 0 &&
     settings.budgetRule?.type === "50_30_20" &&
     settings.emergencyFundTargetMonths === 6 &&
     settings.emergencyFundCurrentVnd === 0 &&
@@ -322,7 +328,9 @@ function isSeedableEmptyState(state: CttmState): boolean {
     state.entities.expenses.allIds.length === 0 &&
     state.entities.fixedCosts.allIds.length === 0 &&
     state.entities.purchasePlans.allIds.length === 0 &&
+    state.entities.savingsTransactions.allIds.length === 0 &&
     Object.keys(state.settingsByMonth).length === 0 &&
+    Object.keys(state.accountBalanceReconciliationsByMonth).length === 0 &&
     Object.keys(state.budgetAdjustmentsByMonth).length === 0 &&
     Object.keys(state.capsByMonth).length === 0 &&
     isDefaultSettings(state.settings)
@@ -351,6 +359,7 @@ function buildDemoSeedState(now: string): CttmState {
     extraIncomeMonthlyVnd: 0,
     paydayDayOfMonth: 1,
     debtPaymentMonthlyVnd: 800000,
+    debtPaymentPaidVnd: 0,
     budgetRule: { type: "50_30_20" },
     emergencyFundTargetMonths: 6,
     emergencyFundCurrentVnd: 10000000,
@@ -364,6 +373,7 @@ function buildDemoSeedState(now: string): CttmState {
       month,
       name: "Tiá»n nhÃ ",
       amountVnd: 5000000,
+      paidAmountVnd: 0,
       category: "Bills",
       active: true,
       createdAt: now,
@@ -374,6 +384,7 @@ function buildDemoSeedState(now: string): CttmState {
       month,
       name: "Äiá»‡n/nÆ°á»›c/internet",
       amountVnd: 1200000,
+      paidAmountVnd: 0,
       category: "Bills",
       active: true,
       createdAt: now,
@@ -384,6 +395,7 @@ function buildDemoSeedState(now: string): CttmState {
       month,
       name: "Báº£o hiá»ƒm",
       amountVnd: 600000,
+      paidAmountVnd: 0,
       category: "Bills",
       active: true,
       createdAt: now,
@@ -707,6 +719,7 @@ export const useAppStore = create<AppStore>()(
           month,
           name,
           amountVnd,
+          paidAmountVnd: 0,
           category: category ?? "Bills",
           active: true,
           createdAt: now,
@@ -932,6 +945,24 @@ export const useAppStore = create<AppStore>()(
             }),
           }
         })
+      },
+
+      saveAccountBalanceReconciliation: ({ month, asOfDate, actualBalanceVnd, incomeReceivedVnd }) => {
+        set((s) => ({
+          data: touch({
+            ...s.data,
+            accountBalanceReconciliationsByMonth: {
+              ...s.data.accountBalanceReconciliationsByMonth,
+              [month]: {
+                month,
+                asOfDate,
+                actualBalanceVnd: Math.max(0, Math.trunc(actualBalanceVnd)),
+                incomeReceivedVnd: Math.max(0, Math.trunc(incomeReceivedVnd)),
+                updatedAt: nowIso(),
+              },
+            },
+          }),
+        }))
       },
 
       addPurchasePlan: ({
