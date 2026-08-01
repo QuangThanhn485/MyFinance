@@ -1,9 +1,11 @@
 import type { BudgetBucket, ISODate, YearMonth } from "@/domain/types"
+import type { MonthEndProjection } from "@/domain/finance/dailySafeCap"
 import {
   clampMoneyVnd,
   computeDebtToIncome,
   computeMinimumSafetySavings,
 } from "@/domain/finance/finance"
+import { projectMonthEndFromPace } from "@/domain/finance/dailySafeCap"
 import { formatVnd } from "@/lib/currency"
 import { addDaysIsoDate } from "@/lib/date"
 
@@ -153,6 +155,7 @@ export function evaluateOverspending(input: {
     emergencyFundCurrentVnd: number
     emergencyFundTargetMonths: number
   }
+  monthEndProjection?: MonthEndProjection
 }): OverspendingResult | null {
   const day = Math.max(1, Math.trunc(input.dayOfMonth))
   const daysInMonth = Math.max(1, Math.trunc(input.daysInMonth))
@@ -168,17 +171,18 @@ export function evaluateOverspending(input: {
 
   const MSS = computeMinimumSafetySavings(I)
   const essentialBaselineVnd = Math.max(0, input.budgets.needsBudgetVnd - fixedCostsVnd)
-  const needsPace = variableNeeds / day
-  const wantsPace = variableWants / day
-  const projectedNeedsEndMonthVnd = Math.max(
-    essentialBaselineVnd,
-    Math.round(needsPace * daysInMonth),
-  )
-  const projectedWantsEndMonthVnd = Math.round(wantsPace * daysInMonth)
-  const projectedEndMonthVariableSpendVnd =
-    projectedNeedsEndMonthVnd + projectedWantsEndMonthVnd
-  const projectedEndMonthBalanceVnd =
-    I - (fixedCostsVnd + projectedEndMonthVariableSpendVnd)
+  const projection = input.monthEndProjection ?? projectMonthEndFromPace({
+    incomeVnd: I,
+    fixedCostsVnd,
+    essentialVariableBaselineVnd: essentialBaselineVnd,
+    variableNeedsToDateVnd: variableNeeds,
+    variableWantsToDateVnd: variableWants,
+    dayOfMonth: day,
+    daysInMonth,
+  })
+  const projectedWantsEndMonthVnd = projection.projectedWantsVnd
+  const projectedEndMonthVariableSpendVnd = projection.projectedVariableVnd
+  const projectedEndMonthBalanceVnd = projection.projectedSavingsVnd
   const mssDeficitVnd = Math.max(0, MSS - projectedEndMonthBalanceVnd)
   if (mssDeficitVnd <= 0) return null
 

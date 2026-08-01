@@ -12,6 +12,7 @@ import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { getExpenseCategoryLabel } from "@/domain/constants"
+import { projectMonthEndFromData } from "@/domain/finance/monthEndForecast"
 import { computeBudgets } from "@/domain/finance/finance"
 import {
   getEffectiveBudgetAdjustmentForMonth,
@@ -21,15 +22,10 @@ import {
 } from "@/domain/finance/monthLock"
 import type { YearMonth } from "@/domain/types"
 import { formatVnd } from "@/lib/currency"
-import {
-  daysInMonth,
-  monthFromIsoDate,
-  todayIso,
-} from "@/lib/date"
+import { monthFromIsoDate, todayIso } from "@/lib/date"
 import { getCategoryTotals, getMonthTotals } from "@/selectors/expenses"
 import { cn } from "@/lib/utils"
 import { useAppStore } from "@/store/useAppStore"
-import { getMonthDayContext } from "@/storage/dayLock"
 
 const BUDGETS_COMPACT_KEY = "smartSpend.ui.budgetsCompact.v1"
 
@@ -579,6 +575,8 @@ function LeftDrawer({
   projectedSavingsVnd,
   projectedNeedsEndMonthVnd,
   projectedWantsEndMonthVnd,
+  projectedUntrackedVnd,
+  fixedCostOverPlanVnd,
   expectedVariableRemainingVnd,
   topCategories,
 }: {
@@ -602,6 +600,8 @@ function LeftDrawer({
   projectedSavingsVnd: number
   projectedNeedsEndMonthVnd: number
   projectedWantsEndMonthVnd: number
+  projectedUntrackedVnd: number
+  fixedCostOverPlanVnd: number
   expectedVariableRemainingVnd: number
   topCategories: Array<{ category: string; label: string; totalVnd: number }>
 }) {
@@ -709,13 +709,29 @@ function LeftDrawer({
                       label="Mong muốn dự kiến (W)"
                       value={formatVnd(projectedWantsEndMonthVnd)}
                     />
+                    {projectedUntrackedVnd > 0 ? (
+                      <LabelValueRow
+                        className="text-xs"
+                        label="Thiếu hụt từ đối soát"
+                        value={formatVnd(projectedUntrackedVnd)}
+                        valueClassName="text-destructive"
+                      />
+                    ) : null}
+                    {fixedCostOverPlanVnd > 0 ? (
+                      <LabelValueRow
+                        className="text-xs"
+                        label="Cố định vượt kế hoạch"
+                        value={formatVnd(fixedCostOverPlanVnd)}
+                        valueClassName="text-destructive"
+                      />
+                    ) : null}
                     <LabelValueRow
                       className="text-xs"
                       label="Biến đổi còn lại dự kiến"
                       value={formatVnd(expectedVariableRemainingVnd)}
                     />
                     <div className="text-muted-foreground">
-                      Dự báo là ước tính theo nhịp hiện tại, không phải tiền có thể chi ngay.
+                      Ước tính thống kê, không phải hạn mức có thể chi ngay.
                     </div>
                   </div>
                 </div>
@@ -884,29 +900,24 @@ export default function BudgetsPage() {
 
   const now = todayIso()
   const currentMonth = monthFromIsoDate(now)
-  const currentDayContext = getMonthDayContext(data, now)
-  const dim = daysInMonth(month)
-  const dom =
-    month === currentMonth ? currentDayContext.dayOfMonth : month < currentMonth ? dim : 1
   const isCurrentMonth = month === currentMonth
-  const needsPace = dom > 0 ? totals.variableNeeds / dom : 0
-  const wantsPace = dom > 0 ? totals.variableWants / dom : 0
-
-  const projectedNeedsEndMonthVnd = isCurrentMonth
-    ? Math.max(budgets.essentialVariableBaselineVnd, Math.round(needsPace * dim))
-    : totals.variableNeeds
-  const projectedWantsEndMonthVnd = isCurrentMonth
-    ? Math.round(wantsPace * dim)
-    : totals.variableWants
-  const projectedVariableEndMonthVnd =
-    projectedNeedsEndMonthVnd + projectedWantsEndMonthVnd
+  const currentMonthProjection = isCurrentMonth
+    ? projectMonthEndFromData({ state: data, date: now })
+    : null
+  const projectedNeedsEndMonthVnd =
+    currentMonthProjection?.projectedNeedsVnd ?? totals.variableNeeds
+  const projectedWantsEndMonthVnd =
+    currentMonthProjection?.projectedWantsVnd ?? totals.variableWants
+  const projectedUntrackedVnd = currentMonthProjection?.projectedUntrackedVnd ?? 0
+  const fixedCostOverPlanVnd = currentMonthProjection?.fixedCostOverPlanVnd ?? 0
   const expectedVariableRemainingVnd = Math.max(
     0,
-    projectedVariableEndMonthVnd - totals.variableTotal,
+    projectedNeedsEndMonthVnd - totals.variableNeeds +
+      projectedWantsEndMonthVnd - totals.variableWants,
   )
-  const projectedSavingsVnd = Math.trunc(
-    budgets.incomeVnd - totals.fixedCostsTotal - projectedVariableEndMonthVnd,
-  )
+  const projectedSavingsVnd =
+    currentMonthProjection?.projectedSavingsVnd ??
+    Math.trunc(budgets.incomeVnd - totals.fixedCostsTotal - totals.variableTotal)
 
   const essentialProgress =
     budgets.essentialVariableBaselineVnd > 0
@@ -934,13 +945,7 @@ export default function BudgetsPage() {
           )}) được ưu tiên, chiếm phần lớn ngân sách còn lại sau Cố định + Thiết yếu. Muốn Mong muốn nhiều hơn, hãy giảm mục tiêu tiết kiệm trong Cài đặt.`
         : undefined
 
-  // Card "Tiết kiệm" phản ánh DỰ BÁO tiết kiệm cuối tháng theo nhịp chi thực tế — giống
-  // "Triển vọng tháng này" của Dashboard. projectedSavingsVnd đã tự xử lý theo tháng:
-  //   · Tháng hiện tại: ngoại suy phần còn lại của tháng theo nhịp chi (không coi toàn bộ tiền
-  //     chưa tiêu là tiết kiệm).
-  //   · Tháng đã qua: = I − đã chi thực tế (dùng chi thực, không ép sàn E) nên tháng đã đạt
-  //     mục tiêu vẫn hiển thị đúng là đạt.
-  // Verdict 3 mức theo mục tiêu S và ngưỡng an toàn MSS (khớp Dashboard).
+  // Card Tiết kiệm dùng cùng engine dự báo thích ứng với Dashboard; tháng đã qua dùng số thực tế.
   const savingsForecastVnd = projectedSavingsVnd
   const savingsMet = savingsForecastVnd >= budgets.savingsTargetVnd
   const savingsAboveMss = savingsForecastVnd >= budgets.mssVnd
@@ -1082,7 +1087,7 @@ export default function BudgetsPage() {
         />
         <CategoryCard
           title="Tiết kiệm"
-          subtitle={isCurrentMonth ? "S — dự báo cuối tháng theo nhịp chi" : "S — tiết kiệm thực tế"}
+          subtitle={isCurrentMonth ? "S — dự báo thích ứng cuối tháng" : "S — tiết kiệm thực tế"}
           planLabel="Mục tiêu S"
           planVnd={budgets.savingsTargetVnd}
           actualLabel={isCurrentMonth ? "Dự báo cuối tháng" : "Tiết kiệm thực tế"}
@@ -1122,6 +1127,8 @@ export default function BudgetsPage() {
         projectedSavingsVnd={projectedSavingsVnd}
         projectedNeedsEndMonthVnd={projectedNeedsEndMonthVnd}
         projectedWantsEndMonthVnd={projectedWantsEndMonthVnd}
+        projectedUntrackedVnd={projectedUntrackedVnd}
+        fixedCostOverPlanVnd={fixedCostOverPlanVnd}
         expectedVariableRemainingVnd={expectedVariableRemainingVnd}
         topCategories={topCategories}
       />

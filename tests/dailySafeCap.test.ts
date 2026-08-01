@@ -253,4 +253,22 @@ describe("projectMonthEndFromPace", () => {
     expect(p.projectedVariableVnd).toBe(10_000_000)
     expect(p.projectedSavingsVnd).toBe(5_000_000)
   })
+
+  it("uses actual spending on the last day instead of padding needs to the baseline", () => {
+    const p = projectMonthEndFromPace({
+      incomeVnd: 12_000_000,
+      fixedCostsVnd: 4_000_000,
+      essentialVariableBaselineVnd: 3_000_000,
+      variableNeedsToDateVnd: 2_900_000,
+      variableWantsToDateVnd: 1_219_500,
+      dayOfMonth: 31,
+      daysInMonth: 31,
+    })
+
+    expect(p.projectedNeedsVnd).toBe(2_900_000)
+    expect(p.projectedWantsVnd).toBe(1_219_500)
+    expect(p.projectedVariableVnd).toBe(4_119_500)
+    expect(p.projectedTotalSpendVnd).toBe(8_119_500)
+    expect(p.projectedSavingsVnd).toBe(3_880_500)
+  })
 })

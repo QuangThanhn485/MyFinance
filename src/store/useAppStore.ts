@@ -18,6 +18,7 @@ import type {
 import { suggestBucketByCategory } from "@/domain/constants"
 import { computeBudgets } from "@/domain/finance/finance"
 import { computeRemainingDailySpendingCap } from "@/domain/finance/dailySafeCap"
+import { projectMonthEndFromData } from "@/domain/finance/monthEndForecast"
 import type { OverspendingResult, RecoveryOption } from "@/domain/finance/rescue"
 import { evaluateOverspending } from "@/domain/finance/rescue"
 import { computeEmergencyFund } from "@/domain/finance/finance"
@@ -33,6 +34,7 @@ import { formatVnd } from "@/lib/currency"
 import { getMonthTotals } from "@/selectors/expenses"
 import {
   getEffectiveEmergencyFundBalance,
+  getLegacyNextMonthEmergencyOpeningBalance,
   getNextMonthEmergencyOpeningBalance,
 } from "@/selectors/savings"
 import {
@@ -197,7 +199,10 @@ function cloneSettings(settings: Settings): Settings {
 function ensureMonthConfigurationFromPrevious(
   state: CttmState,
   targetMonth: YearMonth,
-  options: { refreshEmergencyOpening?: boolean } = {},
+  options: {
+    refreshEmergencyOpening?: boolean
+    repairLegacyEmergencyOpening?: boolean
+  } = {},
 ): CttmState {
   const now = nowIso()
   const prevMonth = previousMonth(targetMonth)
@@ -208,9 +213,22 @@ function ensureMonthConfigurationFromPrevious(
   })
 
   if (hasTargetSettings) {
-    if (!options.refreshEmergencyOpening || state.monthLocksByMonth[targetMonth]) return state
+    if (
+      (!options.refreshEmergencyOpening && !options.repairLegacyEmergencyOpening) ||
+      state.monthLocksByMonth[targetMonth]
+    ) {
+      return state
+    }
 
     const currentSettings = state.settingsByMonth[targetMonth]
+    if (
+      options.repairLegacyEmergencyOpening &&
+      !options.refreshEmergencyOpening &&
+      currentSettings.emergencyFundCurrentVnd !==
+        getLegacyNextMonthEmergencyOpeningBalance(state, prevMonth)
+    ) {
+      return state
+    }
     const expectedOpeningVnd = getNextMonthEmergencyOpeningBalance(state, prevMonth)
     if (currentSettings.emergencyFundCurrentVnd === expectedOpeningVnd) return state
 
@@ -603,6 +621,7 @@ export const useAppStore = create<AppStore>()(
         set((s) => ({
           data: ensureMonthConfigurationFromPrevious(s.data, month, {
             refreshEmergencyOpening: month > currentMonth,
+            repairLegacyEmergencyOpening: month === currentMonth,
           }),
         }))
       },
@@ -844,6 +863,7 @@ export const useAppStore = create<AppStore>()(
             emergencyFundCurrentVnd: emergency.currentVnd,
             emergencyFundTargetMonths: settingsForMonth.emergencyFundTargetMonths,
           },
+          monthEndProjection: projectMonthEndFromData({ state, date }),
         })
 
         if (result) {

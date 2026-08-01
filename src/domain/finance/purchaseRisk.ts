@@ -4,6 +4,7 @@ import {
   computeDebtToIncome,
   computeEmergencyFund,
 } from "@/domain/finance/finance"
+import { projectMonthEndFromData } from "@/domain/finance/monthEndForecast"
 import {
   getEffectiveBudgetAdjustmentForMonth,
   getEffectiveCapsForMonth,
@@ -200,21 +201,12 @@ export function analyzePurchaseRisk(input: PurchaseRiskInput): PurchaseRiskResul
     toDate.variableTotalToDateVnd - plannedVariableToDateVnd,
   )
 
-  const variableNeedsPaceVnd = toDate.variableNeedsToDateVnd / day
-  const variableWantsPaceVnd = toDate.variableWantsToDateVnd / day
-  const projectedNeedsEndMonthVnd = Math.max(
-    budgets.essentialVariableBaselineVnd,
-    Math.round(variableNeedsPaceVnd * dim),
-  )
-  const projectedWantsEndMonthVnd = Math.max(
-    totals.variableWants,
-    Math.round(variableWantsPaceVnd * dim),
-  )
-  const projectedEndMonthBalanceBeforeVnd =
-    budgets.incomeVnd -
-    totals.fixedCostsTotal -
-    projectedNeedsEndMonthVnd -
-    projectedWantsEndMonthVnd
+  const monthEndProjection = projectMonthEndFromData({
+    state,
+    date: today,
+    excludePurchasePlanId: purchase.id,
+  })
+  const projectedEndMonthBalanceBeforeVnd = monthEndProjection.projectedSavingsVnd
   const projectedEndMonthBalanceAfterPurchaseVnd =
     projectedEndMonthBalanceBeforeVnd - price
 

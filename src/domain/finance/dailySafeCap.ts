@@ -18,7 +18,8 @@ export type MonthEndProjection = {
  * những ngày còn lại — không coi toàn bộ tiền chưa tiêu là tiết kiệm.
  *
  * - Biến đổi Thiết yếu/Mong muốn được ngoại suy theo nhịp: đã chi / ngày đã qua × số ngày trong tháng.
- * - Thiết yếu được đặt sàn ở baseline E (bạn vẫn phải chi thiết yếu cho phần còn lại của tháng).
+ * - Trước ngày cuối tháng, Thiết yếu được đặt sàn ở baseline E vì vẫn còn phần tháng phải chi.
+ * - Tại ngày cuối tháng, kết quả là số thực tế; không tự tạo thêm khoản chi chưa phát sinh.
  * - Chi phí cố định (F) không ngoại suy vì là khoản cố định của cả tháng.
  */
 export function projectMonthEndFromPace(input: {
@@ -40,8 +41,11 @@ export function projectMonthEndFromPace(input: {
 
   const needsPace = dom > 0 ? needs / dom : 0
   const wantsPace = dom > 0 ? wants / dom : 0
-  const projectedNeedsVnd = Math.max(baseline, Math.round(needsPace * dim))
-  const projectedWantsVnd = Math.round(wantsPace * dim)
+  const monthComplete = dom === dim
+  const projectedNeedsVnd = monthComplete
+    ? needs
+    : Math.max(baseline, Math.round(needsPace * dim))
+  const projectedWantsVnd = monthComplete ? wants : Math.round(wantsPace * dim)
   const projectedVariableVnd = projectedNeedsVnd + projectedWantsVnd
   const projectedTotalSpendVnd = fixed + projectedVariableVnd
   const projectedSavingsVnd = Math.trunc(income - projectedTotalSpendVnd)

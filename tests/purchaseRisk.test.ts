@@ -153,4 +153,40 @@ describe("analyzePurchaseRisk", () => {
     expect(result.riskScore).toBeLessThan(35)
     expect(result.snapshot.emergencyCoverageMonths).toBeGreaterThanOrEqual(3)
   })
+
+  it("uses actual month-end spending without padding needs to the baseline", () => {
+    const state = stateForMonth("2026-04")
+    state.settingsByMonth["2026-04"] = {
+      ...state.settingsByMonth["2026-04"],
+      debtPaymentMonthlyVnd: 0,
+    }
+    addFixedCost(state, { id: "rent", month: "2026-04", amountVnd: 4_000_000 })
+    addExpense(state, {
+      id: "needs-final",
+      date: "2026-04-30",
+      amountVnd: 2_900_000,
+      bucket: "needs",
+    })
+    addExpense(state, {
+      id: "wants-final",
+      date: "2026-04-30",
+      amountVnd: 1_219_500,
+      bucket: "wants",
+    })
+
+    const result = analyzePurchaseRisk({
+      state,
+      today: "2026-04-30",
+      purchase: {
+        name: "Final-day purchase",
+        priceVnd: 100_000,
+        bucket: "wants",
+        priority: "low",
+        forced: false,
+      },
+    })
+
+    expect(result.snapshot.projectedEndMonthBalanceBeforeVnd).toBe(3_880_500)
+    expect(result.snapshot.projectedEndMonthBalanceAfterPurchaseVnd).toBe(3_780_500)
+  })
 })

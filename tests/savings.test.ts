@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest"
 import type { CttmState } from "@/storage/schema"
 import { createInitialState } from "@/storage/schema"
 import {
+  getActualMonthlySavingsVnd,
   getEffectiveEmergencyFundBalance,
+  getMonthlySavingsRolloverContributionVnd,
   getNextMonthEmergencyOpeningBalance,
 } from "@/selectors/savings"
 
@@ -64,6 +66,61 @@ describe("emergency fund savings ledger", () => {
     const state = baseState()
 
     expect(getEffectiveEmergencyFundBalance(state, "2026-04")).toBe(700_000)
-    expect(getNextMonthEmergencyOpeningBalance(state, "2026-04")).toBe(6_700_000)
+    expect(getActualMonthlySavingsVnd(state, "2026-04")).toBe(6_000_000)
+    expect(getMonthlySavingsRolloverContributionVnd(state, "2026-04")).toBe(5_800_000)
+    expect(getNextMonthEmergencyOpeningBalance(state, "2026-04")).toBe(6_500_000)
+  })
+
+  it("deducts a saved reconciliation deficit before rolling savings forward", () => {
+    const state = baseState()
+    state.accountBalanceReconciliationsByMonth["2026-04"] = {
+      month: "2026-04",
+      asOfDate: "2026-04-30",
+      actualBalanceVnd: 6_200_000,
+      incomeReceivedVnd: 10_000_000,
+      updatedAt: "2026-04-30T12:00:00.000Z",
+    }
+
+    expect(getActualMonthlySavingsVnd(state, "2026-04")).toBe(5_500_000)
+    expect(getMonthlySavingsRolloverContributionVnd(state, "2026-04")).toBe(5_300_000)
+    expect(getNextMonthEmergencyOpeningBalance(state, "2026-04")).toBe(6_000_000)
+  })
+
+  it("does not add a fund deposit twice when carrying the balance to next month", () => {
+    const state = createInitialState("2026-07-31T12:00:00.000Z")
+    state.settingsByMonth["2026-07"] = {
+      ...state.settings,
+      monthlyIncomeVnd: 10_000_000,
+      emergencyFundCurrentVnd: 15_779_711,
+    }
+    state.entities.expenses.byId.july = {
+      id: "july",
+      amountVnd: 4_308_500,
+      category: "Food",
+      bucket: "needs",
+      note: "",
+      date: "2026-07-31",
+      createdAt: "2026-07-31T00:00:00.000Z",
+      updatedAt: "2026-07-31T00:00:00.000Z",
+    }
+    state.entities.expenses.allIds.push("july")
+    state.indexes.expensesByMonth["2026-07"] = ["july"]
+    state.entities.savingsTransactions.byId.deposit = {
+      id: "deposit",
+      fund: "emergency",
+      type: "deposit",
+      amountVnd: 1_811_000,
+      reason: "Nạp lại quỹ",
+      note: "",
+      date: "2026-07-31",
+      createdAt: "2026-07-31T00:00:00.000Z",
+      updatedAt: "2026-07-31T00:00:00.000Z",
+    }
+    state.entities.savingsTransactions.allIds.push("deposit")
+
+    expect(getEffectiveEmergencyFundBalance(state, "2026-07")).toBe(17_590_711)
+    expect(getActualMonthlySavingsVnd(state, "2026-07")).toBe(5_691_500)
+    expect(getMonthlySavingsRolloverContributionVnd(state, "2026-07")).toBe(3_880_500)
+    expect(getNextMonthEmergencyOpeningBalance(state, "2026-07")).toBe(21_471_211)
   })
 })

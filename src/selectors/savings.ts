@@ -1,6 +1,7 @@
 import type { SavingsFund, SavingsTransaction, YearMonth } from "@/domain/types"
 import { getEffectiveSettingsForMonth, getMonthlyIncomeTotalVnd } from "@/domain/finance/monthLock"
 import { monthFromIsoDate } from "@/lib/date"
+import { getSavedReconciliationDeficitVnd } from "@/selectors/accountReconciliation"
 import { getFixedCostPaymentSummary, getMonthTotals } from "@/selectors/expenses"
 import type { CttmState } from "@/storage/schema"
 
@@ -47,12 +48,45 @@ export function getActualMonthlySavingsVnd(state: CttmState, month: YearMonth) {
   const incomeVnd = getMonthlyIncomeTotalVnd(settings)
   const totals = getMonthTotals(state, month)
   const fixedCostPayments = getFixedCostPaymentSummary(state, month)
+  const reconciliationDeficitVnd = getSavedReconciliationDeficitVnd(state, month)
   return Math.max(
     0,
-    Math.trunc(incomeVnd - totals.totalSpent - fixedCostPayments.overPlanVnd),
+    Math.trunc(
+      incomeVnd -
+        totals.totalSpent -
+        fixedCostPayments.overPlanVnd -
+        reconciliationDeficitVnd,
+    ),
   )
 }
 
+export function getMonthlySavingsRolloverContributionVnd(
+  state: CttmState,
+  month: YearMonth,
+) {
+  const emergency = getEmergencyFundMonthSummary(state, month)
+  return Math.max(0, getActualMonthlySavingsVnd(state, month) - emergency.depositedVnd)
+}
+
 export function getNextMonthEmergencyOpeningBalance(state: CttmState, previousMonth: YearMonth) {
-  return getEffectiveEmergencyFundBalance(state, previousMonth) + getActualMonthlySavingsVnd(state, previousMonth)
+  return (
+    getEffectiveEmergencyFundBalance(state, previousMonth) +
+    getMonthlySavingsRolloverContributionVnd(state, previousMonth)
+  )
+}
+
+/** Previous formula retained only to repair month settings generated before the rollover fix. */
+export function getLegacyNextMonthEmergencyOpeningBalance(
+  state: CttmState,
+  previousMonth: YearMonth,
+) {
+  const settings = getEffectiveSettingsForMonth(state, previousMonth)
+  const incomeVnd = getMonthlyIncomeTotalVnd(settings)
+  const totals = getMonthTotals(state, previousMonth)
+  const fixedCostPayments = getFixedCostPaymentSummary(state, previousMonth)
+  const legacySavingsVnd = Math.max(
+    0,
+    Math.trunc(incomeVnd - totals.totalSpent - fixedCostPayments.overPlanVnd),
+  )
+  return getEffectiveEmergencyFundBalance(state, previousMonth) + legacySavingsVnd
 }

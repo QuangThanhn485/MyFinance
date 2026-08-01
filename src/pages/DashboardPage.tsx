@@ -4,9 +4,9 @@ import { computeBudgets, computeEmergencyFund } from "@/domain/finance/finance"
 import {
   computeRemainingDailySpendingCap,
   computeTodayDailySpendingCap,
-  projectMonthEndFromPace,
   resolveEffectiveDailyTotalCapVnd,
 } from "@/domain/finance/dailySafeCap"
+import { projectMonthEndFromData } from "@/domain/finance/monthEndForecast"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import LabelValueRow from "@/components/LabelValueRow"
@@ -165,17 +165,7 @@ export default function DashboardPage() {
     (caps.dailyTotalCapVnd < remainingDailyCap.dailyTotalCapVnd ||
       caps.dailyTotalCapVnd < todayDailyCap.dailyTotalCapVnd)
 
-  // Dự báo cuối tháng: ngoại suy nhịp chi thực tế cho những ngày còn lại (KHÔNG coi toàn bộ tiền
-  // chưa tiêu là tiết kiệm). Nếu đang chi vượt hạn mức thì dự báo tiết kiệm sẽ tụt theo.
-  const projection = projectMonthEndFromPace({
-    incomeVnd: budgets.incomeVnd,
-    fixedCostsVnd: totals.fixedCostsTotal,
-    essentialVariableBaselineVnd: budgets.essentialVariableBaselineVnd,
-    variableNeedsToDateVnd: totals.variableNeeds,
-    variableWantsToDateVnd: totals.variableWants,
-    dayOfMonth: dayContext.dayOfMonth,
-    daysInMonth: dayContext.daysInMonth,
-  })
+  const projection = projectMonthEndFromData({ state: data, date: today })
   const projectedSavingsEndMonthVnd = projection.projectedSavingsVnd
   const projectedTotalSpendVnd = projection.projectedTotalSpendVnd
   const savingsGoalPct =
@@ -357,7 +347,7 @@ export default function DashboardPage() {
               <LabelValueRow
                 className="text-sm"
                 label="So với mục tiêu tiết kiệm"
-                value={`${savingsGoalPct.toFixed(0)}%`}
+                value={`${savingsGoalPct.toLocaleString("vi-VN", { maximumFractionDigits: 1 })}%`}
                 valueClassName={cn(toneTextClass(monthTone))}
               />
               <Progress value={savingsGoalPct} />
