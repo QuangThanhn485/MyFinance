@@ -34,6 +34,18 @@ export type StorageComparison = {
   relation: "same" | "local-newer" | "remote-newer" | "diverged" | "remote-empty"
 }
 
+export type BootSyncAction = "none" | "upload-local" | "download-remote" | "resolve-conflict"
+
+export function getBootSyncAction(comparison: StorageComparison): BootSyncAction {
+  if (!comparison.remoteHasData || comparison.relation === "remote-empty") {
+    return "upload-local"
+  }
+  if (comparison.relation === "same") return "none"
+  if (comparison.relation === "local-newer") return "upload-local"
+  if (comparison.relation === "remote-newer") return "download-remote"
+  return "resolve-conflict"
+}
+
 export const DATA_SOURCE_CONFIG_KEY = "smartSpend.storage.config.v1"
 export const DATA_SOURCE_LOCAL_META_KEY = "smartSpend.storage.localMeta.v1"
 export const DATA_SOURCE_LAST_SYNC_KEY = "smartSpend.storage.lastSync.v1"

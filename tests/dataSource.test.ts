@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
   cleanupUpstashLegacyKeys,
   downloadUpstashToLocal,
+  getBootSyncAction,
   getRemoteManifest,
   parseUpstashConfigInput,
   uploadLocalToUpstash,
@@ -66,6 +67,50 @@ describe("data source config parsing", () => {
       url: "https://example.upstash.io",
       token: "token-value",
     })
+  })
+
+  it("chooses the safe boot action from local and remote revisions", () => {
+    const manifest = {
+      schemaVersion: 1 as const,
+      revision: 100,
+      updatedAt: 100,
+      keyCount: 1,
+      keys: ["cttm_v1"],
+      checksum: "checksum",
+    }
+
+    expect(
+      getBootSyncAction({
+        local: { ...manifest, revision: 101 },
+        remote: manifest,
+        remoteHasData: true,
+        relation: "local-newer",
+      }),
+    ).toBe("upload-local")
+    expect(
+      getBootSyncAction({
+        local: manifest,
+        remote: { ...manifest, revision: 101 },
+        remoteHasData: true,
+        relation: "remote-newer",
+      }),
+    ).toBe("download-remote")
+    expect(
+      getBootSyncAction({
+        local: manifest,
+        remote: manifest,
+        remoteHasData: true,
+        relation: "same",
+      }),
+    ).toBe("none")
+    expect(
+      getBootSyncAction({
+        local: manifest,
+        remote: manifest,
+        remoteHasData: true,
+        relation: "diverged",
+      }),
+    ).toBe("resolve-conflict")
   })
 
   it("accepts .env style Upstash values", () => {

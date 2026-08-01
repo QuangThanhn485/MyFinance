@@ -28,6 +28,7 @@ import {
   cleanupUpstashLegacyKeys,
   compareLocalAndRemote,
   downloadUpstashToLocal,
+  getBootSyncAction,
   getDataSourceConfig,
   getStorageErrorMessage,
   parseUpstashConfigInput,
@@ -39,7 +40,7 @@ import {
 
 type PendingDecision =
   | {
-      kind: "activate-local-remote-newer"
+      kind: "activate-local-remote-newer" | "boot-diverged"
       comparison: StorageComparison
       upstash: UpstashConfig
     }
@@ -291,19 +292,29 @@ export function DataSourceProvider({ children }: { children: React.ReactNode }) 
         const nextComparison = await compareLocalAndRemote(current.upstash)
         if (cancelled) return
         setComparison(nextComparison)
+        const action = getBootSyncAction(nextComparison)
 
-        if (!nextComparison.remoteHasData) {
+        if (action === "upload-local") {
           await uploadLocalToUpstash(current.upstash)
           if (!cancelled) setBootChecking(false)
           return
         }
 
-        if (nextComparison.relation === "same") {
+        if (action === "none") {
           setBootChecking(false)
           return
         }
 
-        await downloadAndReload(current.upstash)
+        if (action === "download-remote") {
+          await downloadAndReload(current.upstash)
+          return
+        }
+
+        setPendingDecision({
+          kind: "boot-diverged",
+          comparison: nextComparison,
+          upstash: current.upstash,
+        })
       } catch (error) {
         if (!cancelled) {
           toast.error(getStorageErrorMessage(error, "Không thể kiểm tra Upstash Redis."))
@@ -421,6 +432,17 @@ function getDecisionCopy(decision: PendingDecision) {
       description: "",
       keepLocal: "Giữ local",
       uploadLocal: "Tải local lên Redis",
+      downloadRemote: "Tải Redis về local",
+    }
+  }
+
+  if (decision.kind === "boot-diverged") {
+    return {
+      title: "Dữ liệu local và Redis khác nhau",
+      description:
+        "Hai nguồn có cùng phiên bản nhưng nội dung khác nhau. Hãy chọn nguồn cần giữ để tránh ghi đè dữ liệu ngoài ý muốn.",
+      keepLocal: "Dùng localStorage",
+      uploadLocal: "Ghi local lên Redis",
       downloadRemote: "Tải Redis về local",
     }
   }
