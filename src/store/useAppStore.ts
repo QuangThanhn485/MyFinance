@@ -34,7 +34,6 @@ import { formatVnd } from "@/lib/currency"
 import { getMonthTotals } from "@/selectors/expenses"
 import {
   getEffectiveEmergencyFundBalance,
-  getLegacyNextMonthEmergencyOpeningBalance,
   getNextMonthEmergencyOpeningBalance,
 } from "@/selectors/savings"
 import {
@@ -221,16 +220,26 @@ function ensureMonthConfigurationFromPrevious(
     }
 
     const currentSettings = state.settingsByMonth[targetMonth]
+    const openingSource = state.emergencyFundOpeningSourcesByMonth[targetMonth]
+    if (openingSource === "manual") return state
+    const hasPreviousConfiguration =
+      !!state.settingsByMonth[prevMonth] || !!state.monthLocksByMonth[prevMonth]
     if (
       options.repairLegacyEmergencyOpening &&
       !options.refreshEmergencyOpening &&
-      currentSettings.emergencyFundCurrentVnd !==
-        getLegacyNextMonthEmergencyOpeningBalance(state, prevMonth)
+      openingSource === undefined &&
+      !hasPreviousConfiguration
     ) {
       return state
     }
+
     const expectedOpeningVnd = getNextMonthEmergencyOpeningBalance(state, prevMonth)
-    if (currentSettings.emergencyFundCurrentVnd === expectedOpeningVnd) return state
+    if (
+      currentSettings.emergencyFundCurrentVnd === expectedOpeningVnd &&
+      openingSource === "auto"
+    ) {
+      return state
+    }
 
     return touch({
       ...state,
@@ -240,6 +249,10 @@ function ensureMonthConfigurationFromPrevious(
           ...currentSettings,
           emergencyFundCurrentVnd: expectedOpeningVnd,
         },
+      },
+      emergencyFundOpeningSourcesByMonth: {
+        ...state.emergencyFundOpeningSourcesByMonth,
+        [targetMonth]: "auto",
       },
     })
   }
@@ -254,11 +267,16 @@ function ensureMonthConfigurationFromPrevious(
     ...state.settingsByMonth,
     [targetMonth]: inheritedSettings,
   }
+  const nextOpeningSources = {
+    ...state.emergencyFundOpeningSourcesByMonth,
+    [targetMonth]: "auto" as const,
+  }
 
   if (hasTargetFixedCosts) {
     return touch({
       ...state,
       settingsByMonth: nextSettingsByMonth,
+      emergencyFundOpeningSourcesByMonth: nextOpeningSources,
     })
   }
 
@@ -292,6 +310,7 @@ function ensureMonthConfigurationFromPrevious(
   return touch({
     ...state,
     settingsByMonth: nextSettingsByMonth,
+    emergencyFundOpeningSourcesByMonth: nextOpeningSources,
     entities: {
       ...state.entities,
       fixedCosts: nextFixedCosts,
@@ -300,7 +319,9 @@ function ensureMonthConfigurationFromPrevious(
 }
 
 function ensureCurrentMonthConfigurationFromPrevious(state: CttmState): CttmState {
-  return ensureMonthConfigurationFromPrevious(state, monthFromIsoDate(todayIso()))
+  return ensureMonthConfigurationFromPrevious(state, monthFromIsoDate(todayIso()), {
+    repairLegacyEmergencyOpening: true,
+  })
 }
 
 function autoClosePreviousMonthIfNeeded(state: CttmState): CttmState {
@@ -594,6 +615,10 @@ export const useAppStore = create<AppStore>()(
           const current = getEffectiveSettingsForMonth(s.data, month)
           const nextSettings = { ...current, ...patch }
           const existingLock = s.data.monthLocksByMonth[month]
+          const hasOpeningPatch = Object.prototype.hasOwnProperty.call(
+            patch,
+            "emergencyFundCurrentVnd",
+          )
           const nextMonthLocks = existingLock
             ? {
                 ...s.data.monthLocksByMonth,
@@ -612,6 +637,12 @@ export const useAppStore = create<AppStore>()(
                 [month]: nextSettings,
               },
               monthLocksByMonth: nextMonthLocks,
+              emergencyFundOpeningSourcesByMonth: hasOpeningPatch
+                ? {
+                    ...s.data.emergencyFundOpeningSourcesByMonth,
+                    [month]: "manual",
+                  }
+                : s.data.emergencyFundOpeningSourcesByMonth,
             }),
           }
         })

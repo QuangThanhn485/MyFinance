@@ -131,6 +131,14 @@ export function loadCttmStateFromKey(storageKey: string): CttmState {
     }
   }
 
+  const openingSourcesRaw = isRecord((state as any).emergencyFundOpeningSourcesByMonth)
+    ? ((state as any).emergencyFundOpeningSourcesByMonth as Record<string, unknown>)
+    : {}
+  const normalizedOpeningSources: CttmState["emergencyFundOpeningSourcesByMonth"] = {}
+  for (const [month, source] of Object.entries(openingSourcesRaw)) {
+    if (source === "auto" || source === "manual") normalizedOpeningSources[month] = source
+  }
+
   const next: CttmState = {
     ...empty,
     ...state,
@@ -163,6 +171,7 @@ export function loadCttmStateFromKey(storageKey: string): CttmState {
     capsByMonth: isRecord(state.capsByMonth) ? (state.capsByMonth as any) : {},
     monthLocksByMonth: normalizedMonthLocks,
     accountBalanceReconciliationsByMonth: normalizedReconciliations,
+    emergencyFundOpeningSourcesByMonth: normalizedOpeningSources,
     indexes: empty.indexes,
   }
 

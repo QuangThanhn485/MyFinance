@@ -60,6 +60,7 @@ export interface CttmState {
   capsByMonth: Record<string, SpendingCaps>
   monthLocksByMonth: Record<string, MonthLockSnapshot>
   accountBalanceReconciliationsByMonth: Record<string, AccountBalanceReconciliation>
+  emergencyFundOpeningSourcesByMonth: Record<string, "auto" | "manual">
 }
 
 export function createEmptyExpenseIndexes(): ExpenseIndexes {
@@ -110,5 +111,6 @@ export function createInitialState(nowIso: string): CttmState {
     capsByMonth: {},
     monthLocksByMonth: {},
     accountBalanceReconciliationsByMonth: {},
+    emergencyFundOpeningSourcesByMonth: {},
   }
 }

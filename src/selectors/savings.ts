@@ -74,19 +74,3 @@ export function getNextMonthEmergencyOpeningBalance(state: CttmState, previousMo
     getMonthlySavingsRolloverContributionVnd(state, previousMonth)
   )
 }
-
-/** Previous formula retained only to repair month settings generated before the rollover fix. */
-export function getLegacyNextMonthEmergencyOpeningBalance(
-  state: CttmState,
-  previousMonth: YearMonth,
-) {
-  const settings = getEffectiveSettingsForMonth(state, previousMonth)
-  const incomeVnd = getMonthlyIncomeTotalVnd(settings)
-  const totals = getMonthTotals(state, previousMonth)
-  const fixedCostPayments = getFixedCostPaymentSummary(state, previousMonth)
-  const legacySavingsVnd = Math.max(
-    0,
-    Math.trunc(incomeVnd - totals.totalSpent - fixedCostPayments.overPlanVnd),
-  )
-  return getEffectiveEmergencyFundBalance(state, previousMonth) + legacySavingsVnd
-}
