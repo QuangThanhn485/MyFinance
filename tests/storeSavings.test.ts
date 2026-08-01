@@ -119,6 +119,13 @@ describe("future emergency opening balance", () => {
       updatedAt: "2026-07-31T00:00:00.000Z",
     }
     state.entities.savingsTransactions.allIds.push("deposit")
+    state.accountBalanceReconciliationsByMonth["2026-07"] = {
+      month: "2026-07",
+      asOfDate: "2026-07-31",
+      actualBalanceVnd: 0,
+      incomeReceivedVnd: 10_000_000,
+      updatedAt: "2026-07-31T12:00:00.000Z",
+    }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
 
     const { useAppStore } = await import("@/store/useAppStore")
@@ -159,6 +166,24 @@ describe("future emergency opening balance", () => {
     ).toBe(6_000_000)
   })
 
+  it("repairs a stale opening equal to the previous fund balance even if it was marked manual", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-05-01T12:00:00.000Z"))
+    const state = stateWithStaleFutureOpening()
+    state.settingsByMonth["2026-05"].emergencyFundCurrentVnd = 700_000
+    state.emergencyFundOpeningSourcesByMonth["2026-05"] = "manual"
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+
+    const { useAppStore } = await import("@/store/useAppStore")
+
+    expect(
+      useAppStore.getState().data.settingsByMonth["2026-05"].emergencyFundCurrentVnd,
+    ).toBe(6_000_000)
+    expect(
+      useAppStore.getState().data.emergencyFundOpeningSourcesByMonth["2026-05"],
+    ).toBe("auto")
+  })
+
   it("does not overwrite a current-month opening that was edited manually", async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date("2026-05-01T12:00:00.000Z"))
@@ -174,5 +199,28 @@ describe("future emergency opening balance", () => {
     expect(
       useAppStore.getState().data.settingsByMonth["2026-05"].emergencyFundCurrentVnd,
     ).toBe(5_900_000)
+  })
+
+  it("does not mark an unchanged opening as manual when saving the full settings form", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-05-01T12:00:00.000Z"))
+    const state = stateWithStaleFutureOpening()
+    state.settingsByMonth["2026-05"].emergencyFundCurrentVnd = 6_000_000
+    state.emergencyFundOpeningSourcesByMonth["2026-05"] = "auto"
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+
+    const { useAppStore } = await import("@/store/useAppStore")
+    const settings = useAppStore.getState().data.settingsByMonth["2026-05"]
+    useAppStore.getState().actions.setSettingsForMonth({
+      month: "2026-05",
+      patch: {
+        ...settings,
+        monthlyIncomeVnd: settings.monthlyIncomeVnd + 100_000,
+      },
+    })
+
+    expect(
+      useAppStore.getState().data.emergencyFundOpeningSourcesByMonth["2026-05"],
+    ).toBe("auto")
   })
 })

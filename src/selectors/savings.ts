@@ -1,7 +1,6 @@
 import type { SavingsFund, SavingsTransaction, YearMonth } from "@/domain/types"
 import { getEffectiveSettingsForMonth, getMonthlyIncomeTotalVnd } from "@/domain/finance/monthLock"
 import { monthFromIsoDate } from "@/lib/date"
-import { getSavedReconciliationDeficitVnd } from "@/selectors/accountReconciliation"
 import { getFixedCostPaymentSummary, getMonthTotals } from "@/selectors/expenses"
 import type { CttmState } from "@/storage/schema"
 
@@ -48,15 +47,9 @@ export function getActualMonthlySavingsVnd(state: CttmState, month: YearMonth) {
   const incomeVnd = getMonthlyIncomeTotalVnd(settings)
   const totals = getMonthTotals(state, month)
   const fixedCostPayments = getFixedCostPaymentSummary(state, month)
-  const reconciliationDeficitVnd = getSavedReconciliationDeficitVnd(state, month)
   return Math.max(
     0,
-    Math.trunc(
-      incomeVnd -
-        totals.totalSpent -
-        fixedCostPayments.overPlanVnd -
-        reconciliationDeficitVnd,
-    ),
+    Math.trunc(incomeVnd - totals.totalSpent - fixedCostPayments.overPlanVnd),
   )
 }
 

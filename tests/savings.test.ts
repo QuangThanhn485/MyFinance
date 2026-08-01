@@ -71,7 +71,7 @@ describe("emergency fund savings ledger", () => {
     expect(getNextMonthEmergencyOpeningBalance(state, "2026-04")).toBe(6_500_000)
   })
 
-  it("deducts a saved reconciliation deficit before rolling savings forward", () => {
+  it("does not turn a diagnostic reconciliation difference into an expense", () => {
     const state = baseState()
     state.accountBalanceReconciliationsByMonth["2026-04"] = {
       month: "2026-04",
@@ -81,9 +81,9 @@ describe("emergency fund savings ledger", () => {
       updatedAt: "2026-04-30T12:00:00.000Z",
     }
 
-    expect(getActualMonthlySavingsVnd(state, "2026-04")).toBe(5_500_000)
-    expect(getMonthlySavingsRolloverContributionVnd(state, "2026-04")).toBe(5_300_000)
-    expect(getNextMonthEmergencyOpeningBalance(state, "2026-04")).toBe(6_000_000)
+    expect(getActualMonthlySavingsVnd(state, "2026-04")).toBe(6_000_000)
+    expect(getMonthlySavingsRolloverContributionVnd(state, "2026-04")).toBe(5_800_000)
+    expect(getNextMonthEmergencyOpeningBalance(state, "2026-04")).toBe(6_500_000)
   })
 
   it("does not add a fund deposit twice when carrying the balance to next month", () => {

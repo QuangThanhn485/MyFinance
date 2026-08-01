@@ -221,7 +221,10 @@ function ensureMonthConfigurationFromPrevious(
 
     const currentSettings = state.settingsByMonth[targetMonth]
     const openingSource = state.emergencyFundOpeningSourcesByMonth[targetMonth]
-    if (openingSource === "manual") return state
+    const previousEffectiveBalanceVnd = getEffectiveEmergencyFundBalance(state, prevMonth)
+    const isStaleUnchangedOpening =
+      currentSettings.emergencyFundCurrentVnd === previousEffectiveBalanceVnd
+    if (openingSource === "manual" && !isStaleUnchangedOpening) return state
     const hasPreviousConfiguration =
       !!state.settingsByMonth[prevMonth] || !!state.monthLocksByMonth[prevMonth]
     if (
@@ -619,6 +622,10 @@ export const useAppStore = create<AppStore>()(
             patch,
             "emergencyFundCurrentVnd",
           )
+          const openingChanged =
+            hasOpeningPatch &&
+            Math.max(0, Math.trunc(patch.emergencyFundCurrentVnd ?? 0)) !==
+              Math.max(0, Math.trunc(current.emergencyFundCurrentVnd ?? 0))
           const nextMonthLocks = existingLock
             ? {
                 ...s.data.monthLocksByMonth,
@@ -637,7 +644,7 @@ export const useAppStore = create<AppStore>()(
                 [month]: nextSettings,
               },
               monthLocksByMonth: nextMonthLocks,
-              emergencyFundOpeningSourcesByMonth: hasOpeningPatch
+              emergencyFundOpeningSourcesByMonth: openingChanged
                 ? {
                     ...s.data.emergencyFundOpeningSourcesByMonth,
                     [month]: "manual",
