@@ -57,8 +57,7 @@ export function getMonthlySavingsRolloverContributionVnd(
   state: CttmState,
   month: YearMonth,
 ) {
-  const emergency = getEmergencyFundMonthSummary(state, month)
-  return Math.max(0, getActualMonthlySavingsVnd(state, month) - emergency.depositedVnd)
+  return getActualMonthlySavingsVnd(state, month)
 }
 
 export function getNextMonthEmergencyOpeningBalance(state: CttmState, previousMonth: YearMonth) {

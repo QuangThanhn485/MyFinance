@@ -67,8 +67,8 @@ describe("emergency fund savings ledger", () => {
 
     expect(getEffectiveEmergencyFundBalance(state, "2026-04")).toBe(700_000)
     expect(getActualMonthlySavingsVnd(state, "2026-04")).toBe(6_000_000)
-    expect(getMonthlySavingsRolloverContributionVnd(state, "2026-04")).toBe(5_800_000)
-    expect(getNextMonthEmergencyOpeningBalance(state, "2026-04")).toBe(6_500_000)
+    expect(getMonthlySavingsRolloverContributionVnd(state, "2026-04")).toBe(6_000_000)
+    expect(getNextMonthEmergencyOpeningBalance(state, "2026-04")).toBe(6_700_000)
   })
 
   it("does not turn a diagnostic reconciliation difference into an expense", () => {
@@ -82,20 +82,20 @@ describe("emergency fund savings ledger", () => {
     }
 
     expect(getActualMonthlySavingsVnd(state, "2026-04")).toBe(6_000_000)
-    expect(getMonthlySavingsRolloverContributionVnd(state, "2026-04")).toBe(5_800_000)
-    expect(getNextMonthEmergencyOpeningBalance(state, "2026-04")).toBe(6_500_000)
+    expect(getMonthlySavingsRolloverContributionVnd(state, "2026-04")).toBe(6_000_000)
+    expect(getNextMonthEmergencyOpeningBalance(state, "2026-04")).toBe(6_700_000)
   })
 
-  it("does not add a fund deposit twice when carrying the balance to next month", () => {
+  it("carries the ending fund and actual monthly savings as independent balances", () => {
     const state = createInitialState("2026-07-31T12:00:00.000Z")
     state.settingsByMonth["2026-07"] = {
       ...state.settings,
-      monthlyIncomeVnd: 10_000_000,
-      emergencyFundCurrentVnd: 15_779_711,
+      monthlyIncomeVnd: 14_000_000,
+      emergencyFundCurrentVnd: 12_825_711,
     }
     state.entities.expenses.byId.july = {
       id: "july",
-      amountVnd: 4_308_500,
+      amountVnd: 3_181_000,
       category: "Food",
       bucket: "needs",
       note: "",
@@ -105,22 +105,45 @@ describe("emergency fund savings ledger", () => {
     }
     state.entities.expenses.allIds.push("july")
     state.indexes.expensesByMonth["2026-07"] = ["july"]
+    state.entities.fixedCosts.byId.fixed = {
+      id: "fixed",
+      month: "2026-07",
+      name: "Chi phí cố định",
+      amountVnd: 6_838_500,
+      paidAmountVnd: 6_838_500,
+      category: "Bills",
+      active: true,
+      createdAt: "2026-07-01T00:00:00.000Z",
+      updatedAt: "2026-07-31T00:00:00.000Z",
+    }
+    state.entities.fixedCosts.allIds.push("fixed")
     state.entities.savingsTransactions.byId.deposit = {
       id: "deposit",
       fund: "emergency",
       type: "deposit",
-      amountVnd: 1_811_000,
+      amountVnd: 7_277_000,
       reason: "Nạp lại quỹ",
+      note: "",
+      date: "2026-07-01",
+      createdAt: "2026-07-01T00:00:00.000Z",
+      updatedAt: "2026-07-01T00:00:00.000Z",
+    }
+    state.entities.savingsTransactions.byId.withdraw = {
+      id: "withdraw",
+      fund: "emergency",
+      type: "withdraw",
+      amountVnd: 2_512_000,
+      reason: "Khẩn cấp",
       note: "",
       date: "2026-07-31",
       createdAt: "2026-07-31T00:00:00.000Z",
       updatedAt: "2026-07-31T00:00:00.000Z",
     }
-    state.entities.savingsTransactions.allIds.push("deposit")
+    state.entities.savingsTransactions.allIds.push("deposit", "withdraw")
 
     expect(getEffectiveEmergencyFundBalance(state, "2026-07")).toBe(17_590_711)
-    expect(getActualMonthlySavingsVnd(state, "2026-07")).toBe(5_691_500)
-    expect(getMonthlySavingsRolloverContributionVnd(state, "2026-07")).toBe(3_880_500)
-    expect(getNextMonthEmergencyOpeningBalance(state, "2026-07")).toBe(21_471_211)
+    expect(getActualMonthlySavingsVnd(state, "2026-07")).toBe(3_980_500)
+    expect(getMonthlySavingsRolloverContributionVnd(state, "2026-07")).toBe(3_980_500)
+    expect(getNextMonthEmergencyOpeningBalance(state, "2026-07")).toBe(21_571_211)
   })
 })

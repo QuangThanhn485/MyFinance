@@ -545,13 +545,17 @@ const initialWorkspace: WorkspaceId = "real"
 if (persistedWorkspace !== "real") {
   saveWorkspaceId("real")
 }
+const initialStorageKey = getStorageKeyForWorkspace(initialWorkspace)
+const loadedInitialData = loadCttmStateFromKey(initialStorageKey)
+const initialData = autoClosePreviousMonthIfNeeded(loadedInitialData)
+if (initialData !== loadedInitialData) {
+  saveCttmState(initialStorageKey, initialData)
+}
 
 export const useAppStore = create<AppStore>()(
   subscribeWithSelector((set, get) => ({
     workspace: initialWorkspace,
-    data: autoClosePreviousMonthIfNeeded(
-      loadCttmStateFromKey(getStorageKeyForWorkspace(initialWorkspace)),
-    ),
+    data: initialData,
     ui: { overspending: null, forcedPurchaseRescue: null },
     actions: {
       setWorkspace: (workspace) => {
