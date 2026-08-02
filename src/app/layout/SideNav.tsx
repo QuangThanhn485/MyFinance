@@ -93,7 +93,7 @@ const NAV_TREE: NavNode[] = [
       {
         id: "daily-cap-planner",
         type: "leaf",
-        label: "Nâng cap ngày",
+        label: "Dự báo cap ngày",
         to: "/daily-cap-planner",
         icon: TrendingUp,
       },

@@ -13,7 +13,7 @@ const ROUTE_TITLES: Record<string, string> = {
   "/budgets": "Ngân sách",
   "/advisor": "Tư vấn mua sắm",
   "/reports": "Báo cáo",
-  "/daily-cap-planner": "Phân tích nâng cap ngày",
+  "/daily-cap-planner": "Dự báo cap ngày",
   "/balance-reconciliation": "Đối soát số dư",
   "/settings": "Cài đặt",
   "/categories": "Danh mục",

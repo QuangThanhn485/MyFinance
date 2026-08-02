@@ -125,6 +125,25 @@ export type DailyCapRaiseByCeilingPlan = {
   maxAchievableDailyCapVnd: number
 }
 
+export type ExtraSavingsDailyPlan = {
+  feasible: boolean
+  totalRemainingVnd: number
+  remainingDaysInMonth: number
+  planDays: number
+  remainingDaysAfterPlan: number
+  baseDailyCapVnd: number
+  targetExtraSavingsVnd: number
+  maxExtraSavingsVnd: number
+  shortfallVnd: number
+  currentSurplusAgainstBaseVnd: number
+  requiredDailyCeilingVnd: number
+  dailyReductionFromBaseVnd: number
+  dailyIncreaseFromBaseVnd: number
+  allowedSpendVnd: number
+  projectedRemainingAfterPlanVnd: number
+  projectedExtraSavingsVnd: number
+}
+
 export function computeRemainingDailySpendingCap(input: {
   incomeVnd: number
   savingsTargetVnd: number
@@ -333,6 +352,66 @@ export function computeDailyCapRaisePlanByCeiling(input: {
     projectedRemainingAfterPlanVnd: 0,
     projectedDailyCapAfterPlanVnd: 0,
     maxAchievableDailyCapVnd: bestCap,
+  }
+}
+
+export function computeExtraSavingsDailyPlan(input: {
+  totalRemainingVnd: number
+  remainingDaysInMonth: number
+  planDays: number
+  baseDailyCapVnd: number
+  targetExtraSavingsVnd: number
+}): ExtraSavingsDailyPlan {
+  const totalRemainingVnd = normalizeRemainingBudgetVnd(input.totalRemainingVnd)
+  const remainingDaysInMonth = Math.max(0, Math.trunc(input.remainingDaysInMonth))
+  const planDays = Math.min(
+    remainingDaysInMonth,
+    Math.max(0, Math.trunc(input.planDays)),
+  )
+  const remainingDaysAfterPlan = Math.max(0, remainingDaysInMonth - planDays)
+  const baseDailyCapVnd = clampMoneyVnd(input.baseDailyCapVnd)
+  const targetExtraSavingsVnd = clampMoneyVnd(input.targetExtraSavingsVnd)
+  const currentSurplusAgainstBaseVnd =
+    totalRemainingVnd - baseDailyCapVnd * remainingDaysInMonth
+  const maxExtraSavingsRawVnd =
+    currentSurplusAgainstBaseVnd + baseDailyCapVnd * planDays
+  const maxExtraSavingsVnd = Math.max(0, maxExtraSavingsRawVnd)
+  const feasible =
+    (planDays > 0 || currentSurplusAgainstBaseVnd >= targetExtraSavingsVnd) &&
+    maxExtraSavingsRawVnd >= targetExtraSavingsVnd
+  const spendableDuringPlanVnd = feasible
+    ? Math.max(0, maxExtraSavingsRawVnd - targetExtraSavingsVnd)
+    : 0
+  const requiredDailyCeilingVnd =
+    feasible && planDays > 0
+      ? Math.floor(spendableDuringPlanVnd / planDays)
+      : 0
+  const allowedSpendVnd = requiredDailyCeilingVnd * planDays
+  const projectedRemainingAfterPlanVnd = totalRemainingVnd - allowedSpendVnd
+  const projectedExtraSavingsVnd = feasible
+    ? Math.max(
+        0,
+        projectedRemainingAfterPlanVnd - baseDailyCapVnd * remainingDaysAfterPlan,
+      )
+    : maxExtraSavingsVnd
+
+  return {
+    feasible,
+    totalRemainingVnd,
+    remainingDaysInMonth,
+    planDays,
+    remainingDaysAfterPlan,
+    baseDailyCapVnd,
+    targetExtraSavingsVnd,
+    maxExtraSavingsVnd,
+    shortfallVnd: Math.max(0, targetExtraSavingsVnd - maxExtraSavingsRawVnd),
+    currentSurplusAgainstBaseVnd,
+    requiredDailyCeilingVnd,
+    dailyReductionFromBaseVnd: Math.max(0, baseDailyCapVnd - requiredDailyCeilingVnd),
+    dailyIncreaseFromBaseVnd: Math.max(0, requiredDailyCeilingVnd - baseDailyCapVnd),
+    allowedSpendVnd,
+    projectedRemainingAfterPlanVnd,
+    projectedExtraSavingsVnd,
   }
 }
 

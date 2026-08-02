@@ -33,7 +33,7 @@ const PRIMARY_NAV_ITEMS: MobileNavItem[] = [
 
 const MORE_NAV_ITEMS: MobileNavItem[] = [
   { label: "Tư vấn mua sắm", to: "/advisor", icon: ShoppingCart },
-  { label: "Nâng cap ngày", to: "/daily-cap-planner", icon: TrendingUp },
+  { label: "Dự báo cap ngày", to: "/daily-cap-planner", icon: TrendingUp },
   { label: "Đối soát số dư", to: "/balance-reconciliation", icon: Scale },
   { label: "Cài đặt", to: "/settings", icon: Settings },
   { label: "Danh mục", to: "/categories", icon: Tags },

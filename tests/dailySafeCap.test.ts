@@ -3,6 +3,7 @@ import {
   computePaceSurplus,
   computeDailyCapRaisePlanByCeiling,
   computeDailyCapRaisePlanByDays,
+  computeExtraSavingsDailyPlan,
   computeRecoveryCaps,
   computeRemainingDailySpendingCap,
   computeTodayDailySpendingCap,
@@ -154,6 +155,69 @@ describe("daily cap raise planner", () => {
     expect(plan.remainingDaysAfterPlan).toBe(9)
     expect(plan.projectedDailyCapAfterPlanVnd).toBe(100_000)
     expect(plan.maxAchievableDailyCapVnd).toBe(110_055)
+  })
+
+  it("computes a daily ceiling that preserves an extra savings target", () => {
+    const plan = computeExtraSavingsDailyPlan({
+      totalRemainingVnd: 2_000_000,
+      remainingDaysInMonth: 20,
+      planDays: 10,
+      baseDailyCapVnd: 100_000,
+      targetExtraSavingsVnd: 400_000,
+    })
+
+    expect(plan.feasible).toBe(true)
+    expect(plan.requiredDailyCeilingVnd).toBe(60_000)
+    expect(plan.dailyReductionFromBaseVnd).toBe(40_000)
+    expect(plan.allowedSpendVnd).toBe(600_000)
+    expect(plan.projectedRemainingAfterPlanVnd).toBe(1_400_000)
+    expect(plan.remainingDaysAfterPlan).toBe(10)
+    expect(plan.projectedExtraSavingsVnd).toBe(400_000)
+  })
+
+  it("counts surplus already accumulated against the base daily cap", () => {
+    const plan = computeExtraSavingsDailyPlan({
+      totalRemainingVnd: 2_400_000,
+      remainingDaysInMonth: 20,
+      planDays: 10,
+      baseDailyCapVnd: 100_000,
+      targetExtraSavingsVnd: 200_000,
+    })
+
+    expect(plan.feasible).toBe(true)
+    expect(plan.currentSurplusAgainstBaseVnd).toBe(400_000)
+    expect(plan.requiredDailyCeilingVnd).toBe(120_000)
+    expect(plan.dailyIncreaseFromBaseVnd).toBe(20_000)
+    expect(plan.projectedExtraSavingsVnd).toBe(200_000)
+  })
+
+  it("reports the shortfall when the requested extra savings exceeds the remaining budget", () => {
+    const plan = computeExtraSavingsDailyPlan({
+      totalRemainingVnd: 2_000_000,
+      remainingDaysInMonth: 20,
+      planDays: 20,
+      baseDailyCapVnd: 100_000,
+      targetExtraSavingsVnd: 2_100_000,
+    })
+
+    expect(plan.feasible).toBe(false)
+    expect(plan.maxExtraSavingsVnd).toBe(2_000_000)
+    expect(plan.shortfallVnd).toBe(100_000)
+    expect(plan.requiredDailyCeilingVnd).toBe(0)
+  })
+
+  it("rejects a savings target that cannot be reached within the selected days", () => {
+    const plan = computeExtraSavingsDailyPlan({
+      totalRemainingVnd: 2_000_000,
+      remainingDaysInMonth: 20,
+      planDays: 3,
+      baseDailyCapVnd: 100_000,
+      targetExtraSavingsVnd: 400_000,
+    })
+
+    expect(plan.feasible).toBe(false)
+    expect(plan.maxExtraSavingsVnd).toBe(300_000)
+    expect(plan.shortfallVnd).toBe(100_000)
   })
 })
 
