@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  computeAccumulatedExtraSavingsVnd,
   computePaceSurplus,
   computeDailyCapRaisePlanByCeiling,
   computeDailyCapRaisePlanByDays,
@@ -11,6 +12,63 @@ import {
   projectMonthEndFromPace,
   resolveEffectiveDailyTotalCapVnd,
 } from "@/domain/finance/dailySafeCap"
+
+describe("accumulated extra savings against the original daily cap", () => {
+  it("is the exact amount spendable before the next cap returns to base", () => {
+    const extraSavingsVnd = computeAccumulatedExtraSavingsVnd({
+      monthlyVariableBudgetVnd: 3_100_000,
+      variableSpentVnd: 160_000,
+      daysInMonth: 31,
+      remainingDaysInMonth: 29,
+    })
+
+    expect(extraSavingsVnd).toBe(40_000)
+
+    const remainingAfterSpendingExtraVnd =
+      3_100_000 - 160_000 - extraSavingsVnd
+    expect(Math.floor(remainingAfterSpendingExtraVnd / 29)).toBe(100_000)
+  })
+
+  it("updates downward when more spending is recorded in the same day", () => {
+    const before = computeAccumulatedExtraSavingsVnd({
+      monthlyVariableBudgetVnd: 3_100_000,
+      variableSpentVnd: 160_000,
+      daysInMonth: 31,
+      remainingDaysInMonth: 29,
+    })
+    const after = computeAccumulatedExtraSavingsVnd({
+      monthlyVariableBudgetVnd: 3_100_000,
+      variableSpentVnd: 185_000,
+      daysInMonth: 31,
+      remainingDaysInMonth: 29,
+    })
+
+    expect(before).toBe(40_000)
+    expect(after).toBe(15_000)
+  })
+
+  it("never reports a negative amount after overspending", () => {
+    expect(
+      computeAccumulatedExtraSavingsVnd({
+        monthlyVariableBudgetVnd: 3_100_000,
+        variableSpentVnd: 250_000,
+        daysInMonth: 31,
+        remainingDaysInMonth: 29,
+      }),
+    ).toBe(0)
+  })
+
+  it("does not count budget rounding residue before the month starts", () => {
+    expect(
+      computeAccumulatedExtraSavingsVnd({
+        monthlyVariableBudgetVnd: 3_100_015,
+        variableSpentVnd: 0,
+        daysInMonth: 31,
+        remainingDaysInMonth: 31,
+      }),
+    ).toBe(0)
+  })
+})
 
 describe("computePaceSurplus", () => {
   it("wantsSurplusToPace decreases after adding 600k wants spend", () => {

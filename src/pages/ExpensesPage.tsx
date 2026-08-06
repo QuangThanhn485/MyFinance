@@ -58,6 +58,7 @@ import {
   type BudgetHealthWarningType,
 } from "@/domain/finance/budgetHealth"
 import {
+  computeAccumulatedExtraSavingsVnd,
   computeRemainingDailySpendingCap,
   computeTodayDailySpendingCap,
   resolveEffectiveDailyTotalCapVnd,
@@ -406,6 +407,12 @@ export default function ExpensesPage() {
     0,
     Math.min(100, (daysElapsedInMonth / dayContext.daysInMonth) * 100),
   )
+  const accumulatedExtraSavingsVnd = computeAccumulatedExtraSavingsVnd({
+    monthlyVariableBudgetVnd,
+    variableSpentVnd: monthTotals.variableTotal,
+    daysInMonth: dayContext.daysInMonth,
+    remainingDaysInMonth,
+  })
   // Cap đang tính cho ngày kế tiếp (không phải hôm nay) khi hôm nay đã phát sinh chi tiêu.
   const capForNextDay = monthRefHasExpenseToday && remainingDaysInMonth > 0
 
@@ -1106,6 +1113,17 @@ export default function ExpensesPage() {
                   />
                   <Progress value={daysElapsedPct} />
                 </div>
+
+                <LabelValueRow
+                  label="Tiết kiệm thêm so với cap gốc"
+                  labelTitle="Phần dư tích lũy so với cap ngày gốc đầu tháng"
+                  value={formatVnd(accumulatedExtraSavingsVnd)}
+                  valueClassName={cn(
+                    accumulatedExtraSavingsVnd > 0
+                      ? "text-emerald-700 dark:text-emerald-300"
+                      : "text-muted-foreground",
+                  )}
+                />
 
                 {capForNextDay ? (
                   <div className="space-y-2 rounded-lg border border-amber-500/50 bg-amber-500/10 p-3">

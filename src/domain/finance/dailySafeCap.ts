@@ -192,6 +192,29 @@ export function computeTodayDailySpendingCap(input: {
   })
 }
 
+export function computeAccumulatedExtraSavingsVnd(input: {
+  monthlyVariableBudgetVnd: number
+  variableSpentVnd: number
+  daysInMonth: number
+  remainingDaysInMonth: number
+}) {
+  const monthlyVariableBudgetVnd = clampMoneyVnd(input.monthlyVariableBudgetVnd)
+  const variableSpentVnd = clampMoneyVnd(input.variableSpentVnd)
+  const daysInMonth = normalizeFinanceDaysInMonth(input.daysInMonth)
+  const remainingDaysInMonth = Math.min(
+    daysInMonth,
+    Math.max(0, Math.trunc(input.remainingDaysInMonth)),
+  )
+
+  if (remainingDaysInMonth >= daysInMonth) return 0
+
+  const baseDailyCapVnd = Math.floor(monthlyVariableBudgetVnd / daysInMonth)
+  const variableRemainingVnd = monthlyVariableBudgetVnd - variableSpentVnd
+  const baselineReserveVnd = baseDailyCapVnd * remainingDaysInMonth
+
+  return Math.max(0, variableRemainingVnd - baselineReserveVnd)
+}
+
 function normalizeRemainingBudgetVnd(value: number) {
   if (!Number.isFinite(value)) return 0
   return Math.trunc(value)
