@@ -5,10 +5,16 @@ import {
   CheckCheck,
   ChevronLeft,
   ChevronRight,
+  CircleCheck,
   Lock,
+  MoreVertical,
+  PauseCircle,
   Pencil,
+  PlayCircle,
   Plus,
+  Save,
   Trash2,
+  TriangleAlert,
   WalletCards,
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
@@ -23,6 +29,7 @@ import {
 import type {
   BudgetRule,
   ExpenseCategory,
+  FixedCost,
   ISODate,
   SavingsTransactionType,
   Settings,
@@ -36,13 +43,19 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Separator } from "@/components/ui/separator"
 import LabelValueRow from "@/components/LabelValueRow"
 import { formatVnd } from "@/lib/currency"
 import { monthFromIsoDate, previousMonth, todayIso } from "@/lib/date"
@@ -74,6 +87,15 @@ const SAVINGS_REASONS = [
   "Nạp lại quỹ",
   "Điều chỉnh số dư",
 ] as const
+
+type FixedCostEditDraft = {
+  id: string
+  name: string
+  amountVnd: number
+  paidAmountVnd: number
+  category: ExpenseCategory
+  active: boolean
+}
 
 function toYearMonth(year: number, month1To12: number): YearMonth {
   return `${year}-${String(month1To12).padStart(2, "0")}` as YearMonth
@@ -160,6 +182,10 @@ export default function SettingsPage() {
       ),
     [fixedCosts],
   )
+  const fixedCostsPaidPct =
+    fixedCostsSummary.plannedVnd > 0
+      ? Math.round((fixedCostsSummary.paidVnd / fixedCostsSummary.plannedVnd) * 100)
+      : 0
   const latestFixedCostMonth = useMemo<YearMonth | null>(() => {
     const hasByMonth = new Set<YearMonth>()
     for (const id of data.entities.fixedCosts.allIds) {
@@ -252,9 +278,8 @@ export default function SettingsPage() {
   const [newFcCategory, setNewFcCategory] = useState<ExpenseCategory>(defaultCategory)
   const [createFixedCostOpen, setCreateFixedCostOpen] = useState(false)
 
-  const [editingAmountId, setEditingAmountId] = useState<string | null>(null)
-  const [editingAmountVnd, setEditingAmountVnd] = useState(0)
-  const editingFixedCost = editingAmountId ? data.entities.fixedCosts.byId[editingAmountId] : null
+  const [editingFixedCostDraft, setEditingFixedCostDraft] =
+    useState<FixedCostEditDraft | null>(null)
   const [fundDialogType, setFundDialogType] = useState<SavingsTransactionType | null>(null)
   const [fundHistoryOpen, setFundHistoryOpen] = useState(false)
   const [fundHistoryTab, setFundHistoryTab] = useState<SavingsTransactionType>("withdraw")
@@ -459,6 +484,17 @@ export default function SettingsPage() {
     toast.success("Đã thêm chi phí cố định.")
   }
 
+  const openFixedCostEditor = (fixedCost: FixedCost) => {
+    setEditingFixedCostDraft({
+      id: fixedCost.id,
+      name: fixedCost.name,
+      amountVnd: Math.max(0, Math.trunc(fixedCost.amountVnd)),
+      paidAmountVnd: Math.max(0, Math.trunc(fixedCost.paidAmountVnd ?? 0)),
+      category: fixedCost.category,
+      active: fixedCost.active,
+    })
+  }
+
   const handleRestoreFixedCostsFromLatestMonth = () => {
     if (!latestFixedCostMonth) return
 
@@ -492,15 +528,26 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-3 sm:space-y-4">
-      <div>
-        <h1 className="text-lg font-semibold tracking-tight sm:text-2xl">Cài đặt theo tháng</h1>
-        <p className="hidden text-sm text-muted-foreground sm:block">
-          Mỗi tháng có cấu hình riêng. Tháng mới mặc định kế thừa cấu hình tháng trước.
-        </p>
+      <div className="flex flex-col gap-3 border-b pb-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-lg font-semibold tracking-tight sm:text-2xl">Cài đặt theo tháng</h1>
+          <p className="hidden text-sm text-muted-foreground sm:block">
+            Mỗi tháng có cấu hình riêng. Tháng mới mặc định kế thừa cấu hình tháng trước.
+          </p>
+        </div>
+        <Button
+          type="submit"
+          form="month-settings-form"
+          className="w-full shrink-0 sm:w-auto sm:min-w-52"
+          disabled={!form.formState.isDirty}
+        >
+          <Save className="mr-1.5 h-4 w-4" />
+          Lưu cấu hình tháng
+        </Button>
       </div>
 
-      <div className="grid gap-3 sm:gap-4 lg:grid-cols-[260px_minmax(0,1fr)] lg:items-start xl:h-[calc(100dvh-8rem)] xl:min-h-0 xl:grid-cols-[260px_minmax(0,1fr)_minmax(360px,0.9fr)]">
-        <div className="space-y-3 sm:space-y-4">
+      <div className="grid gap-3 sm:gap-4 lg:grid-cols-[240px_minmax(0,1fr)] lg:items-start xl:grid-cols-[240px_minmax(0,1fr)_minmax(360px,0.8fr)]">
+        <div className="space-y-3 sm:space-y-4 lg:sticky lg:top-20">
           <Card>
             <CardHeader className="pb-3">
               <CardTitle>Chọn tháng</CardTitle>
@@ -545,7 +592,7 @@ export default function SettingsPage() {
                 })}
               </div>
 
-              <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+              <div className="border-t pt-3 text-xs leading-relaxed text-muted-foreground">
                 {hasOwnSettings
                   ? `Tháng ${selectedMonth} đang có cấu hình riêng.`
                   : `Tháng ${selectedMonth} đang kế thừa từ tháng gần nhất trước đó.`}
@@ -555,6 +602,7 @@ export default function SettingsPage() {
 
         </div>
 
+        <div className="min-w-0 space-y-3 sm:space-y-4">
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="flex flex-wrap items-center justify-between gap-2">
@@ -566,7 +614,8 @@ export default function SettingsPage() {
           </CardHeader>
           <CardContent className="space-y-3">
             <form
-              className="grid gap-3"
+              id="month-settings-form"
+              className="grid gap-5"
               onSubmit={form.handleSubmit((values) => {
                 let budgetRule: BudgetRule
                 if (values.ruleType === "custom") {
@@ -598,157 +647,162 @@ export default function SettingsPage() {
                   toast.success(`Đã lưu cấu hình tháng ${selectedMonth}.`)
               })}
             >
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="grid gap-2">
-                  <Label>Lương cứng tháng (VND)</Label>
-                  <Controller
-                    control={form.control}
-                    name="monthlyIncomeVnd"
-                    render={({ field }) => (
-                      <MoneyInput value={Number(field.value) || 0} onValueChange={field.onChange} placeholder="Ví dụ: 15.000.000" />
-                    )}
-                  />
+              <section className="grid gap-3">
+                <div className="border-b pb-2 text-sm font-semibold">Thu nhập</div>
+                <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(140px,0.45fr)]">
+                  <div className="grid gap-2">
+                    <Label>Lương cứng tháng (VND)</Label>
+                    <Controller
+                      control={form.control}
+                      name="monthlyIncomeVnd"
+                      render={({ field }) => (
+                        <MoneyInput value={Number(field.value) || 0} onValueChange={field.onChange} placeholder="Ví dụ: 15.000.000" />
+                      )}
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Thu nhập thêm tháng (VND)</Label>
+                    <Controller
+                      control={form.control}
+                      name="extraIncomeMonthlyVnd"
+                      render={({ field }) => (
+                        <MoneyInput value={Number(field.value) || 0} onValueChange={field.onChange} placeholder="Ví dụ: 2.000.000" />
+                      )}
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Ngày nhận lương (1-31)</Label>
+                    <Input inputMode="numeric" {...form.register("paydayDayOfMonth")} />
+                  </div>
                 </div>
-                <div className="grid gap-2">
-                  <Label>Thu nhập thêm tháng (VND)</Label>
-                  <Controller
-                    control={form.control}
-                    name="extraIncomeMonthlyVnd"
-                    render={({ field }) => (
-                      <MoneyInput value={Number(field.value) || 0} onValueChange={field.onChange} placeholder="Ví dụ: 2.000.000" />
-                    )}
-                  />
-                </div>
-              </div>
+              </section>
 
-              <div className="grid gap-3 sm:grid-cols-3">
+              <section className="grid gap-3">
+                <div className="border-b pb-2 text-sm font-semibold">Phân bổ ngân sách</div>
                 <div className="grid gap-2">
-                  <Label>Ngày nhận lương (1-31)</Label>
-                  <Input inputMode="numeric" {...form.register("paydayDayOfMonth")} />
+                  <Label>Quy tắc chia Mong muốn/Tiết kiệm</Label>
+                  <Select value={ruleType} onValueChange={(v) => form.setValue("ruleType", v as FormValues["ruleType"])}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Chọn quy tắc" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="50_30_20">Mong muốn/Tiết kiệm 60/40</SelectItem>
+                      <SelectItem value="60_20_20">Mong muốn/Tiết kiệm 50/50</SelectItem>
+                      <SelectItem value="custom">Tuỳ chỉnh</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
-                <div className="grid gap-2">
-                  <Label>Trả nợ kế hoạch (VND)</Label>
-                  <Controller
-                    control={form.control}
-                    name="debtPaymentMonthlyVnd"
-                    render={({ field }) => (
-                      <MoneyInput value={Number(field.value) || 0} onValueChange={field.onChange} placeholder="Ví dụ: 800.000" />
-                    )}
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label>Trả nợ đã chi (VND)</Label>
-                  <Controller
-                    control={form.control}
-                    name="debtPaymentPaidVnd"
-                    render={({ field }) => (
-                      <MoneyInput value={Number(field.value) || 0} onValueChange={field.onChange} placeholder="Ví dụ: 800.000" />
-                    )}
-                  />
-                </div>
-              </div>
 
-              <div className="grid gap-2">
-                <Label>Quy tắc chia Wants/Savings</Label>
-                <Select value={ruleType} onValueChange={(v) => form.setValue("ruleType", v as FormValues["ruleType"])}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Chọn quy tắc" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="50_30_20">Mong muốn/Tiết kiệm 60/40</SelectItem>
-                    <SelectItem value="60_20_20">Mong muốn/Tiết kiệm 50/50</SelectItem>
-                    <SelectItem value="custom">Tuỳ chỉnh</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+                {ruleType === "custom" ? (
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <Input inputMode="numeric" placeholder="Mong muốn %" {...form.register("customWantsPct")} />
+                    <Input inputMode="numeric" placeholder="Tiết kiệm %" {...form.register("customSavingsPct")} />
+                    {form.formState.errors.customWantsPct ? (
+                      <div className="sm:col-span-2 text-xs text-destructive">{form.formState.errors.customWantsPct.message as string}</div>
+                    ) : null}
+                  </div>
+                ) : null}
 
-              {ruleType === "custom" ? (
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <Input inputMode="numeric" placeholder="Mong muốn %" {...form.register("customWantsPct")} />
-                  <Input inputMode="numeric" placeholder="Tiết kiệm %" {...form.register("customSavingsPct")} />
-                  {form.formState.errors.customWantsPct ? (
-                    <div className="sm:col-span-2 text-xs text-destructive">{form.formState.errors.customWantsPct.message as string}</div>
-                  ) : null}
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="grid gap-2">
+                    <Label>Baseline thiết yếu biến đổi (E)</Label>
+                    <Controller
+                      control={form.control}
+                      name="essentialVariableBaselineVnd"
+                      render={({ field }) => (
+                        <MoneyInput value={Number(field.value) || 0} onValueChange={field.onChange} placeholder="Ví dụ: 3.000.000" />
+                      )}
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Mục tiêu tiết kiệm tuỳ chọn</Label>
+                    <Controller
+                      control={form.control}
+                      name="customSavingsGoalVnd"
+                      render={({ field }) => (
+                        <MoneyInput value={Number(field.value) || 0} onValueChange={field.onChange} placeholder="Ví dụ: 4.000.000" />
+                      )}
+                    />
+                  </div>
                 </div>
-              ) : null}
+              </section>
 
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="grid gap-2">
-                  <Label>Baseline thiết yếu biến đổi (E)</Label>
-                  <Controller
-                    control={form.control}
-                    name="essentialVariableBaselineVnd"
-                    render={({ field }) => (
-                      <MoneyInput value={Number(field.value) || 0} onValueChange={field.onChange} placeholder="Ví dụ: 3.000.000" />
-                    )}
-                  />
+              <section className="grid gap-3">
+                <div className="border-b pb-2 text-sm font-semibold">Nợ và quỹ khẩn cấp</div>
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <div className="grid gap-2">
+                    <Label>Trả nợ kế hoạch (VND)</Label>
+                    <Controller
+                      control={form.control}
+                      name="debtPaymentMonthlyVnd"
+                      render={({ field }) => (
+                        <MoneyInput value={Number(field.value) || 0} onValueChange={field.onChange} placeholder="Ví dụ: 800.000" />
+                      )}
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Trả nợ đã chi (VND)</Label>
+                    <Controller
+                      control={form.control}
+                      name="debtPaymentPaidVnd"
+                      render={({ field }) => (
+                        <MoneyInput value={Number(field.value) || 0} onValueChange={field.onChange} placeholder="Ví dụ: 800.000" />
+                      )}
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Mục tiêu quỹ khẩn cấp (tháng)</Label>
+                    <Input inputMode="numeric" {...form.register("emergencyFundTargetMonths")} />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Số dư quỹ đầu tháng</Label>
+                    <Controller
+                      control={form.control}
+                      name="emergencyFundCurrentVnd"
+                      render={({ field }) => (
+                        <MoneyInput value={Number(field.value) || 0} onValueChange={field.onChange} placeholder="Ví dụ: 12.000.000" />
+                      )}
+                    />
+                  </div>
                 </div>
-                <div className="grid gap-2">
-                  <Label>Mục tiêu tiết kiệm tuỳ chọn</Label>
-                  <Controller
-                    control={form.control}
-                    name="customSavingsGoalVnd"
-                    render={({ field }) => (
-                      <MoneyInput value={Number(field.value) || 0} onValueChange={field.onChange} placeholder="Ví dụ: 4.000.000" />
-                    )}
-                  />
-                </div>
-              </div>
+              </section>
 
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="grid gap-2">
-                  <Label>Mục tiêu quỹ khẩn cấp (tháng)</Label>
-                  <Input inputMode="numeric" {...form.register("emergencyFundTargetMonths")} />
-                </div>
-                <div className="grid gap-2">
-                  <Label>Số dư quỹ đầu tháng</Label>
-                  <Controller
-                    control={form.control}
-                    name="emergencyFundCurrentVnd"
-                    render={({ field }) => (
-                      <MoneyInput value={Number(field.value) || 0} onValueChange={field.onChange} placeholder="Ví dụ: 12.000.000" />
-                    )}
-                  />
-                </div>
-              </div>
-
-              <Button type="submit">Lưu cấu hình tháng</Button>
             </form>
+          </CardContent>
+        </Card>
 
-            <Separator />
-
-            <div className="rounded-md border bg-muted/20 p-2.5 text-sm">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex min-w-0 items-center gap-2 font-medium">
-                  <WalletCards className="h-4 w-4 text-muted-foreground" />
-                  <span>Biến động quỹ khẩn cấp</span>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="h-8"
-                    onClick={() => openFundDialog("withdraw")}
-                  >
-                    <ArrowDownCircle className="mr-1.5 h-4 w-4" />
-                    Rút quỹ
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="secondary"
-                    className="h-8"
-                    onClick={() => openFundDialog("deposit")}
-                  >
-                    <ArrowUpCircle className="mr-1.5 h-4 w-4" />
-                    Nạp lại
-                  </Button>
-                </div>
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <CardTitle className="flex items-center gap-2">
+                <WalletCards className="h-4 w-4 text-muted-foreground" />
+                Quỹ khẩn cấp
+              </CardTitle>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => openFundDialog("withdraw")}
+                >
+                  <ArrowDownCircle className="mr-1.5 h-4 w-4" />
+                  Rút quỹ
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => openFundDialog("deposit")}
+                >
+                  <ArrowUpCircle className="mr-1.5 h-4 w-4" />
+                  Nạp lại
+                </Button>
               </div>
-
-              <div className="mt-2 grid gap-2 sm:grid-cols-3">
-                <div className="rounded-md bg-background px-2.5 py-2">
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-3 sm:grid-cols-3">
+                <div className="rounded-md border bg-muted/15 px-3 py-3">
                   <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
                     <WalletCards className="h-3.5 w-3.5" />
                     <span>Số dư đầu tháng</span>
@@ -760,7 +814,7 @@ export default function SettingsPage() {
                     {formatVnd(emergencyFundSummary.openingBalanceVnd)}
                   </div>
                 </div>
-                <div className="rounded-md bg-background px-2.5 py-2 ring-1 ring-primary/15">
+                <div className="rounded-md border border-primary/30 bg-primary/5 px-3 py-3">
                   <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
                     <WalletCards className="h-3.5 w-3.5" />
                     <span>Số dư hiện tại</span>
@@ -772,7 +826,7 @@ export default function SettingsPage() {
                     {formatVnd(emergencyFundSummary.effectiveBalanceVnd)}
                   </div>
                 </div>
-                <div className="rounded-md border bg-background/70 px-2.5 py-2">
+                <div className="rounded-md border bg-muted/15 px-3 py-3">
                   <div className="grid h-full gap-2 sm:grid-rows-[auto_auto]">
                     <div className="min-w-0">
                       <div className="truncate text-xs font-medium text-muted-foreground">
@@ -800,62 +854,90 @@ export default function SettingsPage() {
                     </Button>
                   </div>
                 </div>
-              </div>
             </div>
           </CardContent>
         </Card>
 
-        <Card id="fixed-costs" className="scroll-mt-4 lg:col-span-2 xl:col-span-1 xl:flex xl:h-[calc(100dvh-8rem)] xl:min-h-0 xl:flex-col xl:overflow-hidden">
-          <CardHeader className="pb-2">
-            <CardTitle className="flex flex-wrap items-center justify-between gap-2">
-              <span>Chi phí cố định • {selectedMonth}</span>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-sm text-muted-foreground">{fixedCosts.length} khoản</span>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => setCreateFixedCostOpen(true)}
-                >
-                  <Plus className="mr-1 h-4 w-4" />
-                  Thêm khoản
-                </Button>
+        </div>
+
+        <Card
+          id="fixed-costs"
+          className="scroll-mt-4 lg:col-span-2 xl:sticky xl:top-20 xl:col-span-1 xl:flex xl:max-h-[calc(100dvh-6rem)] xl:min-h-0 xl:flex-col xl:overflow-hidden"
+        >
+          <CardHeader className="pb-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <CardTitle>Chi phí cố định</CardTitle>
+                <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
+                  <span>{selectedMonth}</span>
+                  <span aria-hidden="true">•</span>
+                  <span>{fixedCosts.length} khoản</span>
+                </div>
               </div>
-            </CardTitle>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                className="shrink-0"
+                onClick={() => setCreateFixedCostOpen(true)}
+              >
+                <Plus className="mr-1.5 h-4 w-4" />
+                Thêm khoản
+              </Button>
+            </div>
           </CardHeader>
-          <CardContent className="space-y-3 p-2 sm:p-3 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
-            <div className="grid grid-cols-3 divide-x overflow-hidden rounded-md border bg-muted/20 text-center text-xs">
-              <div className="min-w-0 px-1.5 py-2">
-                <div className="text-muted-foreground">Kế hoạch</div>
-                <div className="mt-0.5 truncate font-semibold tabular-nums" title={formatVnd(fixedCostsSummary.plannedVnd)}>
-                  {formatVnd(fixedCostsSummary.plannedVnd)}
+          <CardContent className="space-y-4 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
+            <div className="overflow-hidden rounded-md border bg-muted/15">
+              <div className="grid grid-cols-3 divide-x text-center">
+                <div className="min-w-0 px-2 py-3 sm:px-4">
+                  <div className="text-xs text-muted-foreground">Kế hoạch</div>
+                  <div className="mt-1 truncate text-sm font-semibold tabular-nums sm:text-base" title={formatVnd(fixedCostsSummary.plannedVnd)}>
+                    {formatVnd(fixedCostsSummary.plannedVnd)}
+                  </div>
+                </div>
+                <div className="min-w-0 px-2 py-3 sm:px-4">
+                  <div className="text-xs text-muted-foreground">Đã chi</div>
+                  <div className="mt-1 truncate text-sm font-semibold tabular-nums sm:text-base" title={formatVnd(fixedCostsSummary.paidVnd)}>
+                    {formatVnd(fixedCostsSummary.paidVnd)}
+                  </div>
+                </div>
+                <div className="min-w-0 px-2 py-3 sm:px-4">
+                  <div className="text-xs text-muted-foreground">
+                    {fixedCostsSummary.paidVnd > fixedCostsSummary.plannedVnd ? "Vượt kế hoạch" : "Còn lại"}
+                  </div>
+                  <div
+                    className={cn(
+                      "mt-1 truncate text-sm font-semibold tabular-nums sm:text-base",
+                      fixedCostsSummary.paidVnd > fixedCostsSummary.plannedVnd && "text-destructive",
+                    )}
+                    title={formatVnd(Math.abs(fixedCostsSummary.plannedVnd - fixedCostsSummary.paidVnd))}
+                  >
+                    {formatVnd(Math.abs(fixedCostsSummary.plannedVnd - fixedCostsSummary.paidVnd))}
+                  </div>
                 </div>
               </div>
-              <div className="min-w-0 px-1.5 py-2">
-                <div className="text-muted-foreground">Đã chi</div>
-                <div className="mt-0.5 truncate font-semibold tabular-nums" title={formatVnd(fixedCostsSummary.paidVnd)}>
-                  {formatVnd(fixedCostsSummary.paidVnd)}
+              <div className="border-t px-3 py-2.5 sm:px-4">
+                <div className="mb-1.5 flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                  <span>Tiến độ thanh toán</span>
+                  <span className="shrink-0 font-medium tabular-nums text-foreground">
+                    {fixedCostsPaidPct}%
+                  </span>
                 </div>
-              </div>
-              <div className="min-w-0 px-1.5 py-2">
-                <div className="text-muted-foreground">
-                  {fixedCostsSummary.paidVnd > fixedCostsSummary.plannedVnd ? "Vượt" : "Còn lại"}
-                </div>
-                <div
-                  className={cn(
-                    "mt-0.5 truncate font-semibold tabular-nums",
-                    fixedCostsSummary.paidVnd > fixedCostsSummary.plannedVnd && "text-destructive",
-                  )}
-                  title={formatVnd(Math.abs(fixedCostsSummary.plannedVnd - fixedCostsSummary.paidVnd))}
-                >
-                  {formatVnd(Math.abs(fixedCostsSummary.plannedVnd - fixedCostsSummary.paidVnd))}
+                <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className={cn(
+                      "h-full rounded-full transition-[width]",
+                      fixedCostsPaidPct > 100 ? "bg-destructive" : "bg-primary",
+                    )}
+                    style={{ width: `${Math.min(100, Math.max(0, fixedCostsPaidPct))}%` }}
+                  />
                 </div>
               </div>
             </div>
 
-            <div className="grid gap-2 pr-1 lg:grid-cols-2 xl:min-h-0 xl:flex-1 xl:grid-cols-1 xl:overflow-y-auto">
+            <div className="grid gap-2.5 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:pr-1">
               {fixedCosts.length === 0 ? (
-                <div className="space-y-3 rounded-md border border-dashed p-3 text-sm text-muted-foreground lg:col-span-2 xl:col-span-1">
+                <div className="space-y-3 rounded-md border border-dashed p-4 text-sm text-muted-foreground">
                   <div>Tháng này chưa có chi phí cố định.</div>
                   <div className="flex flex-wrap gap-2">
                     <Button
@@ -881,111 +963,143 @@ export default function SettingsPage() {
                 </div>
               ) : (
                 fixedCosts.map((fc) => {
+                  const plannedAmountVnd = Math.max(0, Math.trunc(fc.amountVnd))
                   const paidAmountVnd = Math.max(0, Math.trunc(fc.paidAmountVnd ?? 0))
-                  const remainingVnd = fc.amountVnd - paidAmountVnd
+                  const progressPct =
+                    plannedAmountVnd > 0 ? (paidAmountVnd / plannedAmountVnd) * 100 : 0
+                  const isOverPlan = paidAmountVnd > plannedAmountVnd
+                  const isComplete = plannedAmountVnd > 0 && paidAmountVnd >= plannedAmountVnd
+                  const categoryLabel =
+                    categoryOptions.find((category) => category.id === fc.category)?.label ??
+                    fc.category
 
                   return (
                     <div
                       key={fc.id}
                       className={cn(
-                        "min-w-0 rounded-md border bg-background p-2.5",
-                        !fc.active && "bg-muted/20 opacity-70",
+                        "min-w-0 rounded-md border bg-background p-3",
+                        !fc.active && "bg-muted/20",
                       )}
                     >
-                    <div className="grid gap-2">
-                      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm font-semibold leading-5" title={fc.name}>{fc.name}</div>
-                          <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-xs leading-5 text-muted-foreground">
-                            <span>Kế hoạch {formatVnd(fc.amountVnd)}</span>
+                      <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-2.5 gap-y-3">
+                        <div className="flex min-w-0 items-center gap-2.5">
+                          <div
+                            className={cn(
+                              "flex h-8 w-8 shrink-0 items-center justify-center rounded-full border",
+                              !fc.active
+                                ? "bg-muted text-muted-foreground"
+                                : isOverPlan
+                                  ? "border-destructive/30 bg-destructive/10 text-destructive"
+                                  : isComplete
+                                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                                    : "border-primary/30 bg-primary/10 text-primary",
+                            )}
+                            title={
+                              !fc.active
+                                ? "Đã tạm dừng"
+                                : isOverPlan
+                                  ? "Vượt kế hoạch"
+                                  : isComplete
+                                    ? "Đã hoàn tất"
+                                    : "Đang thanh toán"
+                            }
+                          >
+                            {!fc.active ? (
+                              <PauseCircle className="h-4 w-4" />
+                            ) : isOverPlan ? (
+                              <TriangleAlert className="h-4 w-4" />
+                            ) : isComplete ? (
+                              <CircleCheck className="h-4 w-4" />
+                            ) : (
+                              <span className="h-2.5 w-2.5 rounded-full bg-current" />
+                            )}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-semibold leading-5" title={fc.name}>
+                              {fc.name}
+                            </div>
+                            <div className="truncate text-xs text-muted-foreground" title={categoryLabel}>
+                              {categoryLabel}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="col-span-2 min-w-0">
+                          <div className="mb-1.5 flex items-center justify-between gap-3 text-xs tabular-nums">
+                            <span className="font-medium text-foreground">
+                              {formatVnd(paidAmountVnd)} / {formatVnd(plannedAmountVnd)}
+                            </span>
                             <span
-                              className={cn(remainingVnd < 0 && "font-medium text-destructive")}
+                              className={cn(
+                                "shrink-0 font-medium",
+                                isOverPlan
+                                  ? "text-destructive"
+                                  : isComplete
+                                    ? "text-emerald-600 dark:text-emerald-400"
+                                    : "text-muted-foreground",
+                              )}
                             >
-                              {remainingVnd < 0
-                                ? `Vượt ${formatVnd(Math.abs(remainingVnd))}`
-                                : `Còn ${formatVnd(remainingVnd)}`}
+                              {Math.round(progressPct)}%
                             </span>
                           </div>
-                        </div>
-                        <div className="flex items-center justify-end gap-0.5">
-                          <Switch
-                            checked={fc.active}
-                            aria-label={`${fc.active ? "Tắt" : "Bật"} ${fc.name}`}
-                            title={fc.active ? "Đang hoạt động" : "Đang tắt"}
-                            onCheckedChange={(checked) => updateFixedCost(fc.id, { active: checked })}
-                          />
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                            title="Sửa số tiền kế hoạch"
-                            aria-label={`Sửa số tiền kế hoạch của ${fc.name}`}
-                            onClick={() => {
-                              setEditingAmountId(fc.id)
-                              setEditingAmountVnd(fc.amountVnd)
-                            }}
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                            title="Xoá khoản cố định"
-                            aria-label={`Xoá ${fc.name}`}
-                            onClick={() => {
-                              deleteFixedCost(fc.id)
-                              toast.success("Đã xoá.")
-                            }}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                      <div className="grid gap-2 sm:grid-cols-2">
-                        <div className="grid gap-1">
-                          <Label className="text-xs text-muted-foreground">Danh mục</Label>
-                          <Select
-                            value={fc.category}
-                            onValueChange={(v) => updateFixedCost(fc.id, { category: v as ExpenseCategory })}
-                          >
-                            <SelectTrigger className="h-9 text-sm">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {categoryOptions.map((c) => (
-                                <SelectItem key={c.id} value={c.id}>{c.label}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="grid gap-1">
-                          <div className="flex min-h-6 items-center justify-between gap-2">
-                            <Label className="text-xs text-muted-foreground">Số tiền đã chi</Label>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-6 text-muted-foreground hover:text-foreground"
-                              title="Điền đủ số tiền kế hoạch"
-                              aria-label={`Điền đủ ${formatVnd(fc.amountVnd)} cho ${fc.name}`}
-                              disabled={paidAmountVnd === fc.amountVnd}
-                              onClick={() => updateFixedCost(fc.id, { paidAmountVnd: fc.amountVnd })}
-                            >
-                              <CheckCheck className="h-3.5 w-3.5" />
-                            </Button>
+                          <div className="h-2 overflow-hidden rounded-full bg-muted">
+                            <div
+                              className={cn(
+                                "h-full rounded-full transition-[width] duration-300",
+                                !fc.active
+                                  ? "bg-muted-foreground/50"
+                                  : isOverPlan
+                                    ? "bg-destructive"
+                                    : isComplete
+                                      ? "bg-emerald-500"
+                                      : "bg-primary",
+                              )}
+                              style={{ width: `${Math.min(100, Math.max(0, progressPct))}%` }}
+                            />
                           </div>
-                          <MoneyInput
-                            className="h-9"
-                            value={paidAmountVnd}
-                            onValueChange={(value) => updateFixedCost(fc.id, { paidAmountVnd: value })}
-                            placeholder="0"
-                          />
+                        </div>
+                        <div className="col-start-2 row-start-1 flex items-center justify-end gap-0.5 self-center">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-9 w-9 text-muted-foreground hover:text-foreground"
+                                aria-label={`Thao tác khác cho ${fc.name}`}
+                              >
+                                <MoreVertical className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onSelect={() => openFixedCostEditor(fc)}>
+                                <Pencil className="mr-2 h-4 w-4" />
+                                Chỉnh sửa
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onSelect={() => updateFixedCost(fc.id, { active: !fc.active })}
+                              >
+                                {fc.active ? (
+                                  <PauseCircle className="mr-2 h-4 w-4" />
+                                ) : (
+                                  <PlayCircle className="mr-2 h-4 w-4" />
+                                )}
+                                {fc.active ? "Tạm dừng" : "Kích hoạt"}
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                className="text-destructive focus:text-destructive"
+                                onSelect={() => {
+                                  deleteFixedCost(fc.id)
+                                  toast.success("Đã xoá.")
+                                }}
+                              >
+                                <Trash2 className="mr-2 h-4 w-4" />
+                                Xoá khoản
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </div>
                       </div>
-                    </div>
                     </div>
                   )
                 })
@@ -1194,43 +1308,156 @@ export default function SettingsPage() {
       </Dialog>
 
       <Dialog
-        open={editingAmountId !== null}
+        open={editingFixedCostDraft !== null}
         onOpenChange={(open) => {
-          if (!open) setEditingAmountId(null)
+          if (!open) setEditingFixedCostDraft(null)
         }}
       >
-        <DialogContent>
+        <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Sửa số tiền</DialogTitle>
+            <DialogTitle>Chỉnh sửa chi phí cố định</DialogTitle>
+            <DialogDescription>{selectedMonth}</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
-            <div className="text-sm text-muted-foreground">
-              {editingFixedCost ? editingFixedCost.name : "Chi phí cố định"}
-            </div>
-            <div className="grid gap-2">
-              <Label>Số tiền (VND)</Label>
-              <MoneyInput value={editingAmountVnd} onValueChange={setEditingAmountVnd} placeholder="Ví dụ: 1.200.000" />
-            </div>
-            <div className="flex flex-wrap gap-2 [&>button]:w-full sm:[&>button]:w-auto">
-              <Button
-                onClick={() => {
-                  if (!editingAmountId) return
-                  if (editingAmountVnd <= 0) {
-                    toast.error("Vui lòng nhập số tiền hợp lệ.")
-                    return
+          {editingFixedCostDraft ? (
+            <div className="grid gap-4">
+              <div className="grid gap-2">
+                <Label>Tên khoản chi</Label>
+                <Input
+                  value={editingFixedCostDraft.name}
+                  onChange={(event) =>
+                    setEditingFixedCostDraft((current) =>
+                      current ? { ...current, name: event.target.value } : current,
+                    )
                   }
-                  updateFixedCost(editingAmountId, { amountVnd: editingAmountVnd })
-                  toast.success("Đã cập nhật.")
-                  setEditingAmountId(null)
-                }}
-              >
-                Lưu
-              </Button>
-              <Button variant="outline" onClick={() => setEditingAmountId(null)}>
-                Huỷ
-              </Button>
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <Label>Danh mục</Label>
+                <Select
+                  value={editingFixedCostDraft.category}
+                  onValueChange={(value) =>
+                    setEditingFixedCostDraft((current) =>
+                      current ? { ...current, category: value as ExpenseCategory } : current,
+                    )
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {categoryOptions.map((category) => (
+                      <SelectItem key={category.id} value={category.id}>
+                        {category.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid gap-2">
+                  <Label>Kế hoạch (VND)</Label>
+                  <MoneyInput
+                    value={editingFixedCostDraft.amountVnd}
+                    onValueChange={(value) =>
+                      setEditingFixedCostDraft((current) =>
+                        current ? { ...current, amountVnd: value } : current,
+                      )
+                    }
+                    placeholder="Ví dụ: 1.200.000"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label>Đã chi (VND)</Label>
+                  <div className="grid grid-cols-[minmax(0,1fr)_2.5rem] gap-2">
+                    <MoneyInput
+                      value={editingFixedCostDraft.paidAmountVnd}
+                      onValueChange={(value) =>
+                        setEditingFixedCostDraft((current) =>
+                          current ? { ...current, paidAmountVnd: value } : current,
+                        )
+                      }
+                      placeholder="0"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      title="Điền đủ số tiền kế hoạch"
+                      aria-label="Điền đủ số tiền kế hoạch"
+                      disabled={
+                        editingFixedCostDraft.paidAmountVnd ===
+                        editingFixedCostDraft.amountVnd
+                      }
+                      onClick={() =>
+                        setEditingFixedCostDraft((current) =>
+                          current
+                            ? { ...current, paidAmountVnd: current.amountVnd }
+                            : current,
+                        )
+                      }
+                    >
+                      <CheckCheck className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium">Tính vào ngân sách tháng</div>
+                  <div className="text-xs text-muted-foreground">
+                    Tắt khi khoản này tạm thời không áp dụng.
+                  </div>
+                </div>
+                <Switch
+                  checked={editingFixedCostDraft.active}
+                  onCheckedChange={(checked) =>
+                    setEditingFixedCostDraft((current) =>
+                      current ? { ...current, active: checked } : current,
+                    )
+                  }
+                />
+              </div>
+
+              <div className="flex flex-col-reverse gap-2 border-t pt-4 sm:flex-row sm:justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setEditingFixedCostDraft(null)}
+                >
+                  Huỷ
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => {
+                    const draft = editingFixedCostDraft
+                    if (!draft.name.trim()) {
+                      toast.error("Vui lòng nhập tên khoản chi.")
+                      return
+                    }
+                    if (draft.amountVnd <= 0) {
+                      toast.error("Vui lòng nhập số tiền kế hoạch hợp lệ.")
+                      return
+                    }
+                    updateFixedCost(draft.id, {
+                      name: draft.name.trim(),
+                      amountVnd: draft.amountVnd,
+                      paidAmountVnd: draft.paidAmountVnd,
+                      category: draft.category,
+                      active: draft.active,
+                    })
+                    toast.success("Đã cập nhật.")
+                    setEditingFixedCostDraft(null)
+                  }}
+                >
+                  <Save className="mr-1.5 h-4 w-4" />
+                  Lưu thay đổi
+                </Button>
+              </div>
             </div>
-          </div>
+          ) : null}
         </DialogContent>
       </Dialog>
     </div>
