@@ -413,7 +413,7 @@ function SpendingProgressCard({
       >
         <div className="min-w-0">
           <CardTitle className="text-base">Tiến độ chi tiêu</CardTitle>
-          <div className="text-xs text-muted-foreground truncate">Đã chi trên ngân sách chi (I − S)</div>
+          <div className="text-xs text-muted-foreground truncate">Đã dùng trên ngân sách chi (I − S)</div>
         </div>
         <Button type="button" variant="outline" size="sm" onClick={onOpenDetails}>
           Chi tiết
@@ -423,7 +423,7 @@ function SpendingProgressCard({
         <div className="space-y-2 text-sm">
           <LabelValueRow label="Ngân sách chi (I − S)" value={formatVnd(spendingBudgetVnd)} />
           <LabelValueRow
-            label="Đã chi"
+            label="Đã dùng ngân sách"
             value={formatVnd(spentVnd)}
             valueClassName={cn(overByVnd > 0 && "text-destructive")}
           />
@@ -674,7 +674,7 @@ function LeftDrawer({
                     label="Ngân sách chi (I − S)"
                     value={formatVnd(spendingBudgetVnd)}
                   />
-                  <LabelValueRow label="Đã chi" value={formatVnd(spentVnd)} />
+                  <LabelValueRow label="Đã dùng ngân sách" value={formatVnd(spentVnd)} />
                   <LabelValueRow
                     label="Còn lại"
                     value={formatVnd(remainingVnd)}
@@ -1010,9 +1010,9 @@ export default function BudgetsPage() {
           onClick={() => openDrawer("details", "budget-details-progress")}
         />
         <KpiCard
-          label="Đã chi"
+          label="Đã dùng ngân sách"
           value={formatVnd(totals.totalSpent)}
-          hint="F + E + W"
+          hint="F kế hoạch + E/W đã chi"
           onClick={() => openDrawer("details", "budget-details-progress")}
         />
         <KpiCard

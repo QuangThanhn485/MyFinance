@@ -51,20 +51,30 @@ export function getMonthTotals(state: CttmState, month: YearMonth) {
   }
 
   let fixedCostsTotal = 0
+  let fixedCostsPaidTotal = 0
   for (const id of state.entities.fixedCosts.allIds) {
     const fc = state.entities.fixedCosts.byId[id]
     if (!fc || !fc.active) continue
     if (fc.month !== month) continue
     fixedCostsTotal += fc.amountVnd
+    fixedCostsPaidTotal += Math.max(0, Math.trunc(fc.paidAmountVnd ?? 0))
   }
   fixedCostsTotal += Math.max(0, Math.trunc(settingsForMonth.debtPaymentMonthlyVnd ?? 0))
+  fixedCostsPaidTotal += Math.max(0, Math.trunc(settingsForMonth.debtPaymentPaidVnd ?? 0))
+
+  const budgetUsed = fixedCostsTotal + variableTotal
+  const actualSpent = fixedCostsPaidTotal + variableTotal
 
   return {
     fixedCostsTotal,
+    fixedCostsPaidTotal,
     variableTotal,
     variableNeeds,
     variableWants,
-    totalSpent: fixedCostsTotal + variableTotal,
+    budgetUsed,
+    actualSpent,
+    // Kept for existing budget formulas. This is committed budget, not cash paid.
+    totalSpent: budgetUsed,
   }
 }
 

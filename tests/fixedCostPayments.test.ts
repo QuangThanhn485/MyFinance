@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it } from "vitest"
-import { getFixedCostPaymentSummary } from "@/selectors/expenses"
+import { getFixedCostPaymentSummary, getMonthTotals } from "@/selectors/expenses"
 import { loadCttmStateFromKey } from "@/storage/localStorage"
 import { createInitialState } from "@/storage/schema"
 
@@ -52,6 +52,55 @@ describe("fixed-cost payment tracking", () => {
       paidVnd: 3_200_000,
       remainingVnd: 600_000,
       overPlanVnd: 0,
+    })
+    expect(getMonthTotals(state, "2026-07")).toMatchObject({
+      fixedCostsTotal: 3_800_000,
+      fixedCostsPaidTotal: 3_200_000,
+      budgetUsed: 3_800_000,
+      actualSpent: 3_200_000,
+      totalSpent: 3_800_000,
+    })
+  })
+
+  it("separates actual cash outflow from committed budget", () => {
+    const state = createInitialState("2026-08-15T00:00:00.000Z")
+    state.settingsByMonth["2026-08"] = {
+      ...state.settings,
+      debtPaymentMonthlyVnd: 500_000,
+      debtPaymentPaidVnd: 200_000,
+    }
+    state.entities.fixedCosts.byId.rent = {
+      id: "rent",
+      month: "2026-08",
+      name: "Tiền nhà",
+      amountVnd: 2_000_000,
+      paidAmountVnd: 1_500_000,
+      category: "Bills",
+      active: true,
+      createdAt: "2026-08-01T00:00:00.000Z",
+      updatedAt: "2026-08-15T00:00:00.000Z",
+    }
+    state.entities.fixedCosts.allIds = ["rent"]
+    state.entities.expenses.byId.food = {
+      id: "food",
+      amountVnd: 300_000,
+      category: "Food",
+      bucket: "needs",
+      note: "",
+      date: "2026-08-15",
+      createdAt: "2026-08-15T00:00:00.000Z",
+      updatedAt: "2026-08-15T00:00:00.000Z",
+    }
+    state.entities.expenses.allIds = ["food"]
+    state.indexes.expensesByMonth["2026-08"] = ["food"]
+
+    expect(getMonthTotals(state, "2026-08")).toMatchObject({
+      fixedCostsTotal: 2_500_000,
+      fixedCostsPaidTotal: 1_700_000,
+      variableTotal: 300_000,
+      budgetUsed: 2_800_000,
+      actualSpent: 2_000_000,
+      totalSpent: 2_800_000,
     })
   })
 

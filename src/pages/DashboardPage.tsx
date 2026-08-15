@@ -354,7 +354,7 @@ export default function DashboardPage() {
             </div>
             <div className="grid gap-2 rounded-md border bg-muted/30 p-3 text-sm">
               <LabelValueRow label="Ngân sách chi (I − S)" value={formatVnd(spendingBudgetVnd)} />
-              <LabelValueRow label="Đã chi tháng đến nay" value={formatVnd(totals.totalSpent)} />
+              <LabelValueRow label="Đã chi thực tế đến nay" value={formatVnd(totals.actualSpent)} />
               <LabelValueRow
                 label="Dự báo chi cả tháng"
                 value={formatVnd(projectedTotalSpendVnd)}
@@ -376,8 +376,8 @@ export default function DashboardPage() {
             <LabelValueRow label="7 ngày gần nhất" value={formatVnd(weekSpent)} />
             <LabelValueRow label="Trung bình 7 ngày/ngày" value={formatVnd(avgPerDay7)} />
             <LabelValueRow
-              label="Chi tháng đến nay"
-              value={formatVnd(totals.totalSpent)}
+              label="Chi thực tế tháng đến nay"
+              value={formatVnd(totals.actualSpent)}
               valueClassName="font-semibold"
             />
           </CardContent>

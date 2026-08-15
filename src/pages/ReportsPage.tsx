@@ -87,12 +87,17 @@ import {
 } from "@/components/charts/ChartTooltip"
 import { BUCKET_LABELS_VI, getExpenseCategoryLabel } from "@/domain/constants"
 import { computeBudgets } from "@/domain/finance/finance"
-import { computeAdvancedInsights, type ClusterTier } from "@/domain/finance/insights"
+import {
+  computeAdvancedInsights,
+  type ClusterQuality,
+  type ClusterTier,
+} from "@/domain/finance/insights"
 import {
   getEffectiveBudgetAdjustmentForMonth,
   getEffectiveSettingsForMonth,
   getMonthlyIncomeTotalVnd,
 } from "@/domain/finance/monthLock"
+import { projectMonthEndFromData } from "@/domain/finance/monthEndForecast"
 import { formatVnd } from "@/lib/currency"
 import {
   addDaysIsoDate,
@@ -165,6 +170,12 @@ const CLUSTER_TIER_LABELS: Record<ClusterTier, string> = {
   low: "Thấp",
   mid: "Trung bình",
   high: "Cao",
+}
+
+const CLUSTER_QUALITY_LABELS: Record<ClusterQuality, string> = {
+  weak: "Độ tách yếu",
+  moderate: "Độ tách vừa",
+  strong: "Độ tách tốt",
 }
 
 const PIVOT_METRIC_LABELS: Record<PivotMetric, string> = {
@@ -1465,7 +1476,17 @@ export default function ReportsPage() {
     customSavingsGoalVnd: settingsForMonth.customSavingsGoalVnd,
   })
   const savingsMin = budgets.savingsTargetVnd
-  const saved = isSingleFullMonth ? budgets.incomeVnd - totals.totalSpent : 0
+  const isCurrentSingleFullMonth =
+    isSingleFullMonth && month === monthFromIsoDate(today)
+  const currentMonthProjection = useMemo(
+    () => isCurrentSingleFullMonth
+      ? projectMonthEndFromData({ state: data, date: today })
+      : null,
+    [data, isCurrentSingleFullMonth, today],
+  )
+  const saved = isSingleFullMonth
+    ? currentMonthProjection?.projectedSavingsVnd ?? budgets.incomeVnd - totals.totalSpent
+    : 0
   const savingsRate =
     isSingleFullMonth && budgets.incomeVnd > 0 ? saved / budgets.incomeVnd : 0
 
@@ -1537,8 +1558,14 @@ export default function ReportsPage() {
   }, [allVariableExpenses, data, monthsInRange])
 
   const advancedInsights = useMemo(
-    () => computeAdvancedInsights({ expenses, historyExpenses: allVariableExpenses, month, today }),
-    [expenses, allVariableExpenses, month, today],
+    () => computeAdvancedInsights({
+      expenses,
+      historyExpenses: allVariableExpenses,
+      periodStart: dateRange.start,
+      periodEnd: dateRange.end,
+      today,
+    }),
+    [expenses, allVariableExpenses, dateRange.end, dateRange.start, today],
   )
   const trendMax = Math.max(
     advancedInsights.trend?.recentAvg ?? 0,
@@ -2424,7 +2451,9 @@ export default function ReportsPage() {
     [data, previousRange],
   )
   const hasPrev = prevTotals.totalSpent > 0
-  const delta = totals.totalSpent - prevTotals.totalSpent
+  const comparisonTotalVnd =
+    currentMonthProjection?.projectedTotalSpendVnd ?? totals.totalSpent
+  const delta = comparisonTotalVnd - prevTotals.totalSpent
   const deltaPct =
     hasPrev && prevTotals.totalSpent > 0 ? delta / prevTotals.totalSpent : 0
 
@@ -2648,7 +2677,7 @@ export default function ReportsPage() {
             </h1>
             <div className="mt-1 flex min-w-0 gap-1.5 overflow-x-auto pb-0.5 sm:hidden">
               <Badge variant="secondary" className="shrink-0 whitespace-nowrap text-[11px]">
-                Chi:{" "}
+                Dùng NS:{" "}
                 <span className="font-semibold tabular-nums">
                   {formatVnd(totals.totalSpent)}
                 </span>
@@ -2668,7 +2697,7 @@ export default function ReportsPage() {
               </span>
             </Badge>
             <Badge variant="secondary" className="whitespace-nowrap">
-              Tổng chi:{" "}
+              Đã dùng ngân sách:{" "}
               <span className="ml-1 font-semibold tabular-nums">
                 {formatVnd(totals.totalSpent)}
               </span>
@@ -2678,7 +2707,7 @@ export default function ReportsPage() {
                 variant={delta > 0 ? "destructive" : "secondary"}
                 className="whitespace-nowrap"
               >
-                So với kỳ trước: {delta >= 0 ? "+" : ""}
+                {isCurrentSingleFullMonth ? "Dự báo so với kỳ trước" : "So với kỳ trước"}: {delta >= 0 ? "+" : ""}
                 {formatVnd(delta)} ({(deltaPct * 100).toFixed(1)}%)
               </Badge>
             ) : null}
@@ -2734,7 +2763,7 @@ export default function ReportsPage() {
           <div className="grid gap-3">
             <div className="rounded-lg border bg-background p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="text-sm font-medium">Tổng chi trong khoảng</div>
+                <div className="text-sm font-medium">Đã dùng ngân sách trong khoảng</div>
                 <div className="text-right text-base font-semibold tabular-nums sm:text-lg">
                   {formatVnd(totals.totalSpent)}
                 </div>
@@ -2743,7 +2772,7 @@ export default function ReportsPage() {
                 {isSingleFullMonth ? (
                   <>
                     <LabelValueRow
-                      label="Dư/Thiếu (Thu - Chi)"
+                      label={isCurrentSingleFullMonth ? "Dự báo tiết kiệm cuối tháng" : "Dư/Thiếu (Thu - Chi)"}
                       value={formatVnd(saved)}
                     />
                     <LabelValueRow
@@ -2765,7 +2794,9 @@ export default function ReportsPage() {
 
             <div className="rounded-lg border bg-background p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="text-sm font-medium">So với kỳ trước</div>
+                <div className="text-sm font-medium">
+                  {isCurrentSingleFullMonth ? "Dự báo so với kỳ trước" : "So với kỳ trước"}
+                </div>
                 {hasPrev ? (
                   <div
                     className={cn(
@@ -2864,17 +2895,27 @@ export default function ReportsPage() {
         <CardContent className="space-y-4 text-sm">
           {advancedInsights.activeDays === 0 ? (
             <div className="text-sm text-muted-foreground">
-              Chưa có dữ liệu chi tiêu trong tháng để phân tích.
+              Chưa có dữ liệu chi tiêu trong khoảng đã chọn để phân tích.
             </div>
           ) : (
             <div className="grid gap-4 lg:grid-cols-3">
               <div className="rounded-lg border bg-muted/20 p-4 lg:col-span-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="text-sm font-semibold">Nhịp chi theo ngày</div>
-                  <Badge variant="outline">Chi biến đổi</Badge>
+                  <div className="flex items-center gap-2">
+                    {advancedInsights.cluster ? (
+                      <Badge
+                        variant="outline"
+                        title={`Silhouette ${advancedInsights.cluster.silhouette.toFixed(2)}; càng gần 1 thì các nhịp càng tách biệt rõ.`}
+                      >
+                        {CLUSTER_QUALITY_LABELS[advancedInsights.cluster.quality]}
+                      </Badge>
+                    ) : null}
+                    <Badge variant="outline">Chi biến đổi</Badge>
+                  </div>
                 </div>
                 <div className="mt-1 text-[11px] text-muted-foreground">
-                  Nhịp được phân cụm trên toàn bộ lịch sử chi biến đổi để tăng độ ổn định theo thời gian.
+                  Nhịp được phân cụm tối ưu trên lịch sử chi biến đổi đến cuối kỳ để tránh dùng dữ liệu tương lai.
                 </div>
                 {advancedInsights.historicalActiveDays > 0 ? (
                   <div className="mt-1 text-[11px] text-muted-foreground">
@@ -2885,6 +2926,11 @@ export default function ReportsPage() {
                     {advancedInsights.historicalFrom && advancedInsights.historicalTo
                       ? ` (${advancedInsights.historicalFrom} → ${advancedInsights.historicalTo})`
                       : ""}
+                  </div>
+                ) : null}
+                {advancedInsights.ignoredNominalExpenses > 0 ? (
+                  <div className="mt-1 text-[11px] text-muted-foreground">
+                    Đã loại {advancedInsights.ignoredNominalExpenses} bản ghi điều chỉnh ≤ 100 ₫ khỏi thống kê.
                   </div>
                 ) : null}
                 {advancedInsights.zeroDays > 0 ? (
@@ -2916,7 +2962,7 @@ export default function ReportsPage() {
                               </span>
                               <span
                                 className="text-[11px] text-muted-foreground text-right leading-tight"
-                                title="Số ngày trong kỳ phân tích thuộc nhịp này."
+                                title="Số ngày trong lịch sử phân tích thuộc nhịp này."
                               >
                                 {tier.count}/{advancedInsights.cluster?.sampleDays ?? 0} ngày
                                 <span className="block">có chi</span>
@@ -2975,17 +3021,18 @@ export default function ReportsPage() {
                         )}
                       </div>
                       <div className="rounded-md border bg-background/70 p-3">
-                        <div className="text-xs font-semibold">Ngày dễ vượt nhịp</div>
+                        <div className="text-xs font-semibold">Thứ dễ vào nhịp cao</div>
                         {advancedInsights.cluster.topWeekdays.length > 0 ? (
                           <div className="mt-2 flex flex-wrap gap-2">
                             {advancedInsights.cluster.topWeekdays.slice(0, 3).map((item) => {
                               const label = PIVOT_WEEKDAY_LABELS[item.weekday] ?? "?"
                               return (
                                 <span
-                                  key={`${item.weekday}-${item.avg}`}
+                                  key={`${item.weekday}-${item.highRate}`}
                                   className="rounded-full border bg-background px-2 py-0.5 text-xs text-muted-foreground"
+                                  title={`${item.highDays}/${item.activeDays} ngày có chi rơi vào nhịp cao; trung bình ${formatVnd(Math.round(item.highAvg))} khi ở nhịp cao`}
                                 >
-                                  {label} · {formatVnd(Math.round(item.avg))}
+                                  {label} · {Math.round(item.highRate * 100)}%
                                 </span>
                               )
                             })}
@@ -3000,7 +3047,7 @@ export default function ReportsPage() {
                   </>
                 ) : (
                   <div className="mt-3 text-xs text-muted-foreground">
-                    Chưa đủ dữ liệu để phân cụm (cần tối thiểu 7 ngày chi trong toàn bộ lịch sử).
+                    Chưa đủ dữ liệu để phân cụm ổn định (cần tối thiểu 21 ngày chi và 3 mức chi khác nhau trong lịch sử).
                   </div>
                 )}
               </div>
@@ -3008,7 +3055,7 @@ export default function ReportsPage() {
               <div className="rounded-lg border bg-muted/20 p-4">
                 <div className="flex items-center justify-between gap-2">
                   <div className="text-sm font-semibold">Tổ hợp danh mục</div>
-                  <Badge variant="outline">Theo ngày (toàn lịch sử)</Badge>
+                  <Badge variant="outline">Lịch sử đến cuối kỳ</Badge>
                 </div>
                 {advancedInsights.association ? (
                   <>
@@ -3020,36 +3067,82 @@ export default function ReportsPage() {
                         {`${categoryLabel(advancedInsights.association.base)} + ${categoryLabel(advancedInsights.association.with)}`}
                       </div>
                     </div>
-                    <div className="mt-3 grid gap-2">
-                      <LabelValueRow
-                        className="text-xs"
-                        label="Số ngày mẫu"
-                        labelTitle="Số ngày có chi dùng để tính tổ hợp"
-                        value={`${advancedInsights.association.sampleDays} ngày`}
-                      />
-                      <LabelValueRow
-                        className="text-xs"
-                        label="Tần suất"
-                        labelTitle="Tần suất"
-                        value={`${Math.round(advancedInsights.association.support * 100)}% ngày`}
-                      />
-                      <LabelValueRow
-                        className="text-xs"
-                        label="Xác suất đi kèm"
-                        labelTitle="Xác suất đi kèm"
-                        value={`${Math.round(advancedInsights.association.confidence * 100)}%`}
-                      />
-                      <LabelValueRow
-                        className="text-xs"
-                        label="Lift"
-                        labelTitle="Lift"
-                        value={`${advancedInsights.association.lift.toFixed(2)}x`}
-                      />
+                    <div className="mt-3 space-y-1.5 text-xs leading-relaxed text-muted-foreground">
+                      <div>
+                        Trong{" "}
+                        <span className="font-medium tabular-nums text-foreground">
+                          {advancedInsights.association.baseDays} ngày
+                        </span>{" "}
+                        có {categoryLabel(advancedInsights.association.base)}, có{" "}
+                        <span className="font-medium tabular-nums text-foreground">
+                          {advancedInsights.association.days} ngày
+                        </span>{" "}
+                        cũng phát sinh {categoryLabel(advancedInsights.association.with)}.
+                      </div>
+                      <div>
+                        Mẫu này đã lặp lại đủ rõ trên {advancedInsights.association.sampleDays} ngày lịch sử để được xem là một thói quen chi tiêu ổn định.
+                      </div>
                     </div>
                   </>
                 ) : (
-                  <div className="mt-3 text-xs text-muted-foreground">
-                    Chưa đủ dữ liệu để rút ra tổ hợp ổn định trên lịch sử chi tiêu.
+                  <div className="mt-3 space-y-2 text-xs text-muted-foreground">
+                    {advancedInsights.associationDiagnostic.state === "insufficient-data" ? (
+                      <div>
+                        Chưa đủ dữ liệu để đánh giá tổ hợp danh mục (cần tối thiểu 6 ngày có chi).
+                      </div>
+                    ) : (
+                      <>
+                        <div>
+                          Đã phân tích {advancedInsights.associationDiagnostic.sampleDays} ngày nhưng chưa có cặp đạt đồng thời độ lặp lại và mức liên hệ yêu cầu.
+                        </div>
+                        {advancedInsights.associationDiagnostic.candidate ? (
+                          <div className="rounded-md border bg-background/70 p-3">
+                            <div className="text-[11px] text-muted-foreground">
+                              Cặp đáng chú ý nhất
+                            </div>
+                            <div className="mt-1 font-semibold text-foreground">
+                              {`${categoryLabel(advancedInsights.associationDiagnostic.candidate.base)} + ${categoryLabel(advancedInsights.associationDiagnostic.candidate.with)}`}
+                            </div>
+                            <div className="mt-2 leading-relaxed">
+                              Trong{" "}
+                              <span className="font-medium tabular-nums text-foreground">
+                                {advancedInsights.associationDiagnostic.candidate.baseDays} ngày
+                              </span>{" "}
+                              có {categoryLabel(advancedInsights.associationDiagnostic.candidate.base)}, có{" "}
+                              <span className="font-medium tabular-nums text-foreground">
+                                {advancedInsights.associationDiagnostic.candidate.days} ngày
+                              </span>{" "}
+                              cũng phát sinh {categoryLabel(advancedInsights.associationDiagnostic.candidate.with)}.
+                            </div>
+                            {advancedInsights.associationDiagnostic.candidate.days <
+                            advancedInsights.associationDiagnostic.minPairDays ? (
+                              <div className="mt-1.5 leading-relaxed">
+                                Còn thiếu{" "}
+                                <span className="font-medium tabular-nums text-foreground">
+                                  {advancedInsights.associationDiagnostic.minPairDays -
+                                    advancedInsights.associationDiagnostic.candidate.days} ngày
+                                </span>{" "}
+                                cùng xuất hiện so với mức lặp tối thiểu hiện tại.
+                              </div>
+                            ) : advancedInsights.associationDiagnostic.candidate.confidence <
+                              advancedInsights.associationDiagnostic.minConfidence ? (
+                              <div className="mt-1.5 leading-relaxed">
+                                Tỷ lệ đi cùng vẫn còn thấp nên chưa thể xem là thói quen ổn định.
+                              </div>
+                            ) : advancedInsights.associationDiagnostic.candidate.support <
+                              advancedInsights.associationDiagnostic.minSupport ? (
+                              <div className="mt-1.5 leading-relaxed">
+                                Cặp này vẫn xuất hiện quá ít trong toàn bộ lịch sử chi tiêu.
+                              </div>
+                            ) : (
+                              <div className="mt-1.5 leading-relaxed">
+                                Hai danh mục thường xuất hiện trong cùng ngày, nhưng chưa khác biệt đủ rõ so với thói quen chi tiêu chung.
+                              </div>
+                            )}
+                          </div>
+                        ) : null}
+                      </>
+                    )}
                   </div>
                 )}
               </div>

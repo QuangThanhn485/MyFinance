@@ -350,12 +350,14 @@ export default function DailyCapPlannerPage() {
 
       <section className="grid gap-3 md:grid-cols-3" aria-label="Tổng quan ngân sách">
         <MetricTile
-          label="Cap hôm nay"
+          label={dayContext.dateHasExpense ? "Cap từ ngày kế tiếp" : "Cap hôm nay"}
           value={formatVnd(shownDailyCapVnd)}
           subValue={
             appliedCapIsLimiting
               ? `Đang giới hạn ở ${formatVnd(caps?.dailyTotalCapVnd ?? 0)}`
-              : "Mức có thể chi trong ngày"
+              : dayContext.dateHasExpense
+                ? `Áp dụng từ ${formatFullDate(dayContext.remainingStartDate)}`
+                : "Mức có thể chi trong ngày"
           }
         />
         <MetricTile
