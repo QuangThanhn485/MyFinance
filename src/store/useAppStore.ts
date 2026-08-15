@@ -1009,7 +1009,13 @@ export const useAppStore = create<AppStore>()(
         })
       },
 
-      saveAccountBalanceReconciliation: ({ month, asOfDate, actualBalanceVnd, incomeReceivedVnd }) => {
+      saveAccountBalanceReconciliation: ({
+        month,
+        asOfDate,
+        actualBalanceVnd,
+        incomeReceivedVnd,
+        calculationSnapshot,
+      }) => {
         set((s) => ({
           data: touch({
             ...s.data,
@@ -1020,6 +1026,7 @@ export const useAppStore = create<AppStore>()(
                 asOfDate,
                 actualBalanceVnd: Math.max(0, Math.trunc(actualBalanceVnd)),
                 incomeReceivedVnd: Math.max(0, Math.trunc(incomeReceivedVnd)),
+                calculationSnapshot,
                 updatedAt: nowIso(),
               },
             },

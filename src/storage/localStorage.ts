@@ -122,11 +122,42 @@ export function loadCttmStateFromKey(storageKey: string): CttmState {
     const incomeReceivedVnd = coerceNumber(value.incomeReceivedVnd, -1)
     const asOfDate = coerceString(value.asOfDate, "")
     if (actualBalanceVnd < 0 || incomeReceivedVnd < 0 || !/^\d{4}-\d{2}-\d{2}$/.test(asOfDate)) continue
+    const snapshotRaw = isRecord(value.calculationSnapshot)
+      ? value.calculationSnapshot
+      : null
+    const snapshotValues = snapshotRaw
+      ? {
+          emergencyOpeningVnd: coerceNumber(snapshotRaw.emergencyOpeningVnd, -1),
+          emergencyDepositedVnd: coerceNumber(snapshotRaw.emergencyDepositedVnd, -1),
+          emergencyWithdrawnVnd: coerceNumber(snapshotRaw.emergencyWithdrawnVnd, -1),
+          plannedIncomeVnd: coerceNumber(snapshotRaw.plannedIncomeVnd, -1),
+          fixedCostsPlannedVnd: coerceNumber(snapshotRaw.fixedCostsPlannedVnd, -1),
+          fixedCostsPaidVnd: coerceNumber(snapshotRaw.fixedCostsPaidVnd, -1),
+          variableBudgetVnd: coerceNumber(snapshotRaw.variableBudgetVnd, -1),
+          variableSpentVnd: coerceNumber(snapshotRaw.variableSpentVnd, -1),
+          savingsTargetVnd: coerceNumber(snapshotRaw.savingsTargetVnd, -1),
+        }
+      : null
+    const calculationSnapshot: AccountBalanceReconciliation["calculationSnapshot"] =
+      snapshotValues && Object.values(snapshotValues).every((number) => number >= 0)
+        ? {
+            emergencyOpeningVnd: Math.trunc(snapshotValues.emergencyOpeningVnd),
+            emergencyDepositedVnd: Math.trunc(snapshotValues.emergencyDepositedVnd),
+            emergencyWithdrawnVnd: Math.trunc(snapshotValues.emergencyWithdrawnVnd),
+            plannedIncomeVnd: Math.trunc(snapshotValues.plannedIncomeVnd),
+            fixedCostsPlannedVnd: Math.trunc(snapshotValues.fixedCostsPlannedVnd),
+            fixedCostsPaidVnd: Math.trunc(snapshotValues.fixedCostsPaidVnd),
+            variableBudgetVnd: Math.trunc(snapshotValues.variableBudgetVnd),
+            variableSpentVnd: Math.trunc(snapshotValues.variableSpentVnd),
+            savingsTargetVnd: Math.trunc(snapshotValues.savingsTargetVnd),
+          }
+        : undefined
     normalizedReconciliations[month] = {
       month: month as YearMonth,
       asOfDate: asOfDate as AccountBalanceReconciliation["asOfDate"],
       actualBalanceVnd: Math.trunc(actualBalanceVnd),
       incomeReceivedVnd: Math.trunc(incomeReceivedVnd),
+      calculationSnapshot,
       updatedAt: coerceString(value.updatedAt, now),
     }
   }

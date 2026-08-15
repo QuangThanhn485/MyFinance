@@ -89,7 +89,20 @@ export interface AccountBalanceReconciliation {
   asOfDate: ISODate
   actualBalanceVnd: number
   incomeReceivedVnd: number
+  calculationSnapshot?: AccountReconciliationCalculationSnapshot
   updatedAt: string
+}
+
+export interface AccountReconciliationCalculationSnapshot {
+  emergencyOpeningVnd: number
+  emergencyDepositedVnd: number
+  emergencyWithdrawnVnd: number
+  plannedIncomeVnd: number
+  fixedCostsPlannedVnd: number
+  fixedCostsPaidVnd: number
+  variableBudgetVnd: number
+  variableSpentVnd: number
+  savingsTargetVnd: number
 }
 
 export interface BudgetAdjustment {

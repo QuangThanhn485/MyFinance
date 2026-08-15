@@ -1,4 +1,4 @@
-import type { SavingsFund, SavingsTransaction, YearMonth } from "@/domain/types"
+import type { ISODate, SavingsFund, SavingsTransaction, YearMonth } from "@/domain/types"
 import { getEffectiveSettingsForMonth, getMonthlyIncomeTotalVnd } from "@/domain/finance/monthLock"
 import { monthFromIsoDate } from "@/lib/date"
 import { getFixedCostPaymentSummary, getMonthTotals } from "@/selectors/expenses"
@@ -15,10 +15,15 @@ export function getSavingsTransactionsByMonth(
     .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt))
 }
 
-export function getEmergencyFundMonthSummary(state: CttmState, month: YearMonth) {
+export function getEmergencyFundMonthSummary(
+  state: CttmState,
+  month: YearMonth,
+  throughDate?: ISODate,
+) {
   const settings = getEffectiveSettingsForMonth(state, month)
   const openingBalanceVnd = Math.max(0, Math.trunc(settings.emergencyFundCurrentVnd ?? 0))
   const transactions = getSavingsTransactionsByMonth(state, month, "emergency")
+    .filter((transaction) => !throughDate || transaction.date <= throughDate)
 
   let depositedVnd = 0
   let withdrawnVnd = 0

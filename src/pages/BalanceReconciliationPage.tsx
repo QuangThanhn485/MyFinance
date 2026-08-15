@@ -9,10 +9,8 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
-import { computeAccountReconciliation } from "@/domain/finance/accountReconciliation"
-import { computeBudgets } from "@/domain/finance/finance"
+import { resolveAccountReconciliationForm } from "@/domain/finance/accountReconciliation"
 import {
-  getEffectiveBudgetAdjustmentForMonth,
   getEffectiveSettingsForMonth,
   getMonthlyIncomeTotalVnd,
 } from "@/domain/finance/monthLock"
@@ -20,31 +18,21 @@ import type { ISODate, YearMonth } from "@/domain/types"
 import { formatVnd } from "@/lib/currency"
 import { daysInMonth, monthFromIsoDate, todayIso } from "@/lib/date"
 import { cn } from "@/lib/utils"
-import {
-  getFixedCostPaymentSummary,
-  getMonthToDateTotals,
-  getMonthTotals,
-} from "@/selectors/expenses"
-import { getEmergencyFundMonthSummary } from "@/selectors/savings"
+import { getAccountReconciliation } from "@/selectors/accountReconciliation"
+import { getFixedCostPaymentSummary } from "@/selectors/expenses"
 import { useAppStore } from "@/store/useAppStore"
 
-function defaultAsOfDate(month: YearMonth, currentDate: ISODate): ISODate {
-  const currentMonth = monthFromIsoDate(currentDate)
-  if (month === currentMonth) return currentDate
-  if (month < currentMonth) return `${month}-${String(daysInMonth(month)).padStart(2, "0")}` as ISODate
-  return `${month}-01` as ISODate
-}
-
 function SignedMoney({ value }: { value: number }) {
+  const normalizedValue = Object.is(value, -0) ? 0 : value
   return (
     <span
       className={cn(
         "font-semibold tabular-nums",
-        value < 0 && "text-destructive",
-        value > 0 && "text-emerald-700 dark:text-emerald-400",
+        normalizedValue < 0 && "text-destructive",
+        normalizedValue > 0 && "text-emerald-700 dark:text-emerald-400",
       )}
     >
-      {value > 0 ? "+" : ""}{formatVnd(value)}
+      {normalizedValue > 0 ? "+" : ""}{formatVnd(normalizedValue)}
     </span>
   )
 }
@@ -63,89 +51,61 @@ export default function BalanceReconciliationPage() {
     [data, selectedMonth],
   )
   const plannedIncomeVnd = getMonthlyIncomeTotalVnd(settings)
-  const [asOfDate, setAsOfDate] = useState<ISODate>(() =>
-    defaultAsOfDate(currentMonth, currentDate),
+  const initialForm = resolveAccountReconciliationForm({
+    selectedMonth: currentMonth,
+    currentMonth,
+    currentDate,
+    plannedIncomeVnd,
+    saved: data.accountBalanceReconciliationsByMonth[currentMonth],
+  })
+  const [asOfDate, setAsOfDate] = useState<ISODate>(initialForm.asOfDate)
+  const [actualBalanceVnd, setActualBalanceVnd] = useState(initialForm.actualBalanceVnd)
+  const [incomeReceivedVnd, setIncomeReceivedVnd] = useState(initialForm.incomeReceivedVnd)
+  const [hasActualBalance, setHasActualBalance] = useState(initialForm.hasActualBalance)
+
+  const resolvedForm = useMemo(
+    () => resolveAccountReconciliationForm({
+      selectedMonth,
+      currentMonth,
+      currentDate,
+      plannedIncomeVnd,
+      saved: data.accountBalanceReconciliationsByMonth[selectedMonth],
+    }),
+    [
+      currentDate,
+      currentMonth,
+      data.accountBalanceReconciliationsByMonth,
+      plannedIncomeVnd,
+      selectedMonth,
+    ],
   )
-  const [actualBalanceVnd, setActualBalanceVnd] = useState(0)
-  const [incomeReceivedVnd, setIncomeReceivedVnd] = useState(plannedIncomeVnd)
-  const [hasActualBalance, setHasActualBalance] = useState(false)
 
   useEffect(() => {
-    const monthSaved = data.accountBalanceReconciliationsByMonth[selectedMonth]
-    setAsOfDate(monthSaved?.asOfDate ?? defaultAsOfDate(selectedMonth, currentDate))
-    setActualBalanceVnd(monthSaved?.actualBalanceVnd ?? 0)
-    setIncomeReceivedVnd(monthSaved?.incomeReceivedVnd ?? getMonthlyIncomeTotalVnd(settings))
-    setHasActualBalance(Boolean(monthSaved))
-  }, [currentDate, data.accountBalanceReconciliationsByMonth, selectedMonth, settings])
+    setAsOfDate(resolvedForm.asOfDate)
+    setActualBalanceVnd(resolvedForm.actualBalanceVnd)
+    setIncomeReceivedVnd(resolvedForm.incomeReceivedVnd)
+    setHasActualBalance(resolvedForm.hasActualBalance)
+  }, [resolvedForm])
 
-  const monthTotals = useMemo(
-    () => getMonthTotals(data, selectedMonth),
-    [data, selectedMonth],
-  )
   const fixedCosts = useMemo(
     () => getFixedCostPaymentSummary(data, selectedMonth),
     [data, selectedMonth],
   )
-  const spendingToDate = useMemo(
-    () => getMonthToDateTotals(data, asOfDate).variableTotalToDateVnd,
-    [asOfDate, data],
-  )
-  const emergency = useMemo(
-    () => getEmergencyFundMonthSummary(data, selectedMonth),
-    [data, selectedMonth],
-  )
-  const emergencyToDate = useMemo(() => {
-    let depositedVnd = 0
-    let withdrawnVnd = 0
-    for (const transaction of emergency.transactions) {
-      if (transaction.date > asOfDate) continue
-      if (transaction.type === "deposit") depositedVnd += transaction.amountVnd
-      else withdrawnVnd += transaction.amountVnd
-    }
-    return { depositedVnd, withdrawnVnd }
-  }, [asOfDate, emergency.transactions])
-  const budgets = useMemo(
-    () =>
-      computeBudgets({
-        incomeVnd: plannedIncomeVnd,
-        fixedCostsVnd: monthTotals.fixedCostsTotal,
-        essentialVariableBaselineVnd: settings.essentialVariableBaselineVnd,
-        rule: settings.budgetRule,
-        adjustment: getEffectiveBudgetAdjustmentForMonth(data, selectedMonth),
-        customSavingsGoalVnd: settings.customSavingsGoalVnd,
-      }),
-    [data, monthTotals.fixedCostsTotal, plannedIncomeVnd, selectedMonth, settings],
-  )
-  const variableBudgetVnd =
-    Math.max(0, budgets.needsBudgetVnd - budgets.fixedCostsVnd) + budgets.wantsBudgetVnd
 
   const result = useMemo(
     () =>
-      computeAccountReconciliation({
-        emergencyOpeningVnd: emergency.openingBalanceVnd,
-        emergencyDepositedVnd: emergencyToDate.depositedVnd,
-        emergencyWithdrawnVnd: emergencyToDate.withdrawnVnd,
-        plannedIncomeVnd,
-        incomeReceivedVnd,
-        fixedCostsPlannedVnd: fixedCosts.plannedVnd,
-        fixedCostsPaidVnd: fixedCosts.paidVnd,
-        variableBudgetVnd,
-        variableSpentVnd: spendingToDate,
-        savingsTargetVnd: budgets.savingsTargetVnd,
+      getAccountReconciliation(data, {
+        month: selectedMonth,
+        asOfDate,
         actualBalanceVnd,
+        incomeReceivedVnd,
       }),
     [
       actualBalanceVnd,
-      budgets.savingsTargetVnd,
-      emergency.openingBalanceVnd,
-      emergencyToDate.depositedVnd,
-      emergencyToDate.withdrawnVnd,
-      fixedCosts.paidVnd,
-      fixedCosts.plannedVnd,
+      asOfDate,
+      data,
       incomeReceivedVnd,
-      plannedIncomeVnd,
-      spendingToDate,
-      variableBudgetVnd,
+      selectedMonth,
     ],
   )
 
@@ -168,6 +128,17 @@ export default function BalanceReconciliationPage() {
       asOfDate,
       actualBalanceVnd,
       incomeReceivedVnd,
+      calculationSnapshot: {
+        emergencyOpeningVnd: result.emergencyOpeningVnd,
+        emergencyDepositedVnd: result.emergencyDepositedVnd,
+        emergencyWithdrawnVnd: result.emergencyWithdrawnVnd,
+        plannedIncomeVnd: result.plannedIncomeVnd,
+        fixedCostsPlannedVnd: result.fixedCostsPlannedVnd,
+        fixedCostsPaidVnd: result.fixedCostsPaidVnd,
+        variableBudgetVnd: result.variableBudgetVnd,
+        variableSpentVnd: result.variableSpentVnd,
+        savingsTargetVnd: result.savingsTargetVnd,
+      },
     })
     setHasActualBalance(true)
     toast.success("Đã lưu kết quả đối soát.")
@@ -208,8 +179,10 @@ export default function BalanceReconciliationPage() {
               <DatePicker
                 value={asOfDate}
                 onChange={(value) => value && setAsOfDate(value)}
-                minDate={`${selectedMonth}-01` as ISODate}
-                maxDate={`${selectedMonth}-${String(daysInMonth(selectedMonth)).padStart(2, "0")}` as ISODate}
+                minDate={selectedMonth === currentMonth ? currentDate : `${selectedMonth}-01` as ISODate}
+                maxDate={selectedMonth === currentMonth
+                  ? currentDate
+                  : `${selectedMonth}-${String(daysInMonth(selectedMonth)).padStart(2, "0")}` as ISODate}
               />
             </div>
             <div className="grid gap-2">
@@ -222,6 +195,11 @@ export default function BalanceReconciliationPage() {
                 }}
                 placeholder="Nhập số dư ngân hàng và tiền mặt"
               />
+              {resolvedForm.hasStaleCurrentMonthSave ? (
+                <div className="text-xs text-amber-700 dark:text-amber-400">
+                  Lần lưu gần nhất thuộc ngày {data.accountBalanceReconciliationsByMonth[selectedMonth]?.asOfDate.split("-").reverse().join("/")}; hãy nhập số dư thực tế mới cho ngày hôm nay.
+                </div>
+              ) : null}
             </div>
             <div className="grid gap-2">
               <div className="flex items-center justify-between gap-2">
@@ -299,29 +277,77 @@ export default function BalanceReconciliationPage() {
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2">
               <CircleDollarSign className="h-5 w-5 text-muted-foreground" />
-              Cấu phần số dư hệ thống
+              Số liệu hệ thống tại ngày đối soát
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 py-1.5">
-              <span>Quỹ khẩn cấp hiện có</span>
-              <SignedMoney value={result.emergencyBalanceVnd} />
+          <CardContent className="space-y-4 text-sm">
+            <div className="grid gap-px overflow-hidden rounded-md border bg-border sm:grid-cols-2 xl:grid-cols-4">
+              <div className="min-w-0 bg-background px-3 py-3">
+                <div className="text-xs text-muted-foreground">Quỹ khẩn cấp hiện có</div>
+                <div className="mt-1 truncate text-base font-semibold tabular-nums" title={formatVnd(result.emergencyBalanceVnd)}>
+                  {formatVnd(result.emergencyBalanceVnd)}
+                </div>
+                <div className="mt-1 text-[11px] leading-4 text-muted-foreground">
+                  Đầu {formatVnd(result.emergencyOpeningVnd)} · Nạp {formatVnd(result.emergencyDepositedVnd)} · Rút {formatVnd(result.emergencyWithdrawnVnd)}
+                </div>
+              </div>
+              <div className="min-w-0 bg-background px-3 py-3">
+                <div className="text-xs text-muted-foreground">Tiết kiệm tháng đang giữ</div>
+                <div className={cn(
+                  "mt-1 truncate text-base font-semibold tabular-nums",
+                  result.monthlySavingsBalanceVnd < 0 && "text-destructive",
+                )} title={formatVnd(result.monthlySavingsBalanceVnd)}>
+                  {formatVnd(result.monthlySavingsBalanceVnd)}
+                </div>
+                <div className="mt-1 text-[11px] text-muted-foreground">
+                  Mục tiêu {formatVnd(result.savingsTargetVnd)}
+                </div>
+              </div>
+              <div className="min-w-0 bg-background px-3 py-3">
+                <div className="text-xs text-muted-foreground">Phí cố định còn phải trả</div>
+                <div className={cn(
+                  "mt-1 truncate text-base font-semibold tabular-nums",
+                  result.fixedCostsBalanceVnd < 0 && "text-destructive",
+                )} title={formatVnd(result.fixedCostsBalanceVnd)}>
+                  {formatVnd(result.fixedCostsBalanceVnd)}
+                </div>
+                <div className="mt-1 text-[11px] text-muted-foreground">
+                  Đã trả {formatVnd(result.fixedCostsPaidVnd)}
+                </div>
+              </div>
+              <div className="min-w-0 bg-background px-3 py-3">
+                <div className="text-xs text-muted-foreground">Ngân sách có thể chi còn lại</div>
+                <div className={cn(
+                  "mt-1 truncate text-base font-semibold tabular-nums",
+                  result.variableSpendingBalanceVnd < 0 && "text-destructive",
+                )} title={formatVnd(result.variableSpendingBalanceVnd)}>
+                  {formatVnd(result.variableSpendingBalanceVnd)}
+                </div>
+                <div className="mt-1 text-[11px] text-muted-foreground">
+                  Đã ghi {formatVnd(result.variableSpentVnd)} / {formatVnd(result.variableBudgetVnd)}
+                </div>
+              </div>
             </div>
-            <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 py-1.5">
-              <span>Tiết kiệm tháng còn trong tài khoản</span>
-              <SignedMoney value={result.monthlySavingsBalanceVnd} />
-            </div>
-            <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 py-1.5">
-              <span>Chi phí cố định chưa thanh toán</span>
-              <SignedMoney value={result.fixedCostsBalanceVnd} />
-            </div>
-            <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 py-1.5">
-              <span>Ngân sách có thể chi còn lại</span>
-              <SignedMoney value={result.variableSpendingBalanceVnd} />
-            </div>
-            <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 py-1.5">
-              <span>Thu nhập thực nhận so với tổng phân bổ</span>
-              <SignedMoney value={result.incomeAllocationDifferenceVnd} />
+
+            <Separator />
+            <div className="text-xs font-medium uppercase text-muted-foreground">Dòng tiền dùng để đối soát</div>
+            <div className="space-y-2">
+              <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3">
+                <span className="text-muted-foreground">Quỹ khẩn cấp tại ngày đối soát</span>
+                <SignedMoney value={result.emergencyBalanceVnd} />
+              </div>
+              <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3">
+                <span className="text-muted-foreground">Thu nhập đã thực nhận</span>
+                <SignedMoney value={result.incomeReceivedVnd} />
+              </div>
+              <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3">
+                <span className="text-muted-foreground">Chi phí cố định đã trả</span>
+                <SignedMoney value={-result.fixedCostsPaidVnd} />
+              </div>
+              <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3">
+                <span className="text-muted-foreground">Chi tiêu đã ghi nhận</span>
+                <SignedMoney value={-result.variableSpentVnd} />
+              </div>
             </div>
             <Separator />
             <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 pt-2">

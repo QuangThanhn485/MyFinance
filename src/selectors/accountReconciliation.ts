@@ -11,16 +11,19 @@ import {
   getMonthToDateTotals,
   getMonthTotals,
 } from "@/selectors/expenses"
+import { getEmergencyFundMonthSummary } from "@/selectors/savings"
 import type { CttmState } from "@/storage/schema"
 
-export function getSavedAccountReconciliation(
+export function getAccountReconciliation(
   state: CttmState,
-  month: YearMonth,
-  throughDate?: ISODate,
+  input: {
+    month: YearMonth
+    asOfDate: ISODate
+    actualBalanceVnd: number
+    incomeReceivedVnd: number
+  },
 ) {
-  const saved = state.accountBalanceReconciliationsByMonth[month]
-  if (!saved || (throughDate && saved.asOfDate > throughDate)) return null
-
+  const { month, asOfDate, actualBalanceVnd, incomeReceivedVnd } = input
   const settings = getEffectiveSettingsForMonth(state, month)
   const monthTotals = getMonthTotals(state, month)
   const fixedCosts = getFixedCostPaymentSummary(state, month)
@@ -33,36 +36,52 @@ export function getSavedAccountReconciliation(
     adjustment: getEffectiveBudgetAdjustmentForMonth(state, month),
     customSavingsGoalVnd: settings.customSavingsGoalVnd,
   })
-
-  let emergencyDepositedVnd = 0
-  let emergencyWithdrawnVnd = 0
-  for (const id of state.entities.savingsTransactions.allIds) {
-    const transaction = state.entities.savingsTransactions.byId[id]
-    if (
-      !transaction ||
-      transaction.fund !== "emergency" ||
-      transaction.date.slice(0, 7) !== month ||
-      transaction.date > saved.asOfDate
-    ) {
-      continue
-    }
-    if (transaction.type === "deposit") emergencyDepositedVnd += transaction.amountVnd
-    else emergencyWithdrawnVnd += transaction.amountVnd
-  }
-
+  const emergency = getEmergencyFundMonthSummary(state, month, asOfDate)
+  const spendingToDate = getMonthToDateTotals(state, asOfDate).variableTotalToDateVnd
   const variableBudgetVnd = budgets.essentialVariableBaselineVnd + budgets.wantsBudgetVnd
+
   return computeAccountReconciliation({
-    emergencyOpeningVnd: settings.emergencyFundCurrentVnd,
-    emergencyDepositedVnd,
-    emergencyWithdrawnVnd,
+    emergencyOpeningVnd: emergency.openingBalanceVnd,
+    emergencyDepositedVnd: emergency.depositedVnd,
+    emergencyWithdrawnVnd: emergency.withdrawnVnd,
     plannedIncomeVnd,
-    incomeReceivedVnd: saved.incomeReceivedVnd,
+    incomeReceivedVnd,
     fixedCostsPlannedVnd: fixedCosts.plannedVnd,
     fixedCostsPaidVnd: fixedCosts.paidVnd,
     variableBudgetVnd,
-    variableSpentVnd: getMonthToDateTotals(state, saved.asOfDate).variableTotalToDateVnd,
+    variableSpentVnd: spendingToDate,
     savingsTargetVnd: budgets.savingsTargetVnd,
+    actualBalanceVnd,
+  })
+}
+
+export function getSavedAccountReconciliation(
+  state: CttmState,
+  month: YearMonth,
+  throughDate?: ISODate,
+) {
+  const saved = state.accountBalanceReconciliationsByMonth[month]
+  if (!saved || (throughDate && saved.asOfDate > throughDate)) return null
+
+  if (saved.calculationSnapshot) {
+    return computeAccountReconciliation({
+      ...saved.calculationSnapshot,
+      incomeReceivedVnd: saved.incomeReceivedVnd,
+      actualBalanceVnd: saved.actualBalanceVnd,
+    })
+  }
+
+  const fixedCostsChangedAfterSave = state.entities.fixedCosts.allIds.some((id) => {
+    const fixedCost = state.entities.fixedCosts.byId[id]
+    return fixedCost?.month === month && fixedCost.updatedAt > saved.updatedAt
+  })
+  if (fixedCostsChangedAfterSave) return null
+
+  return getAccountReconciliation(state, {
+    month,
+    asOfDate: saved.asOfDate,
     actualBalanceVnd: saved.actualBalanceVnd,
+    incomeReceivedVnd: saved.incomeReceivedVnd,
   })
 }
 

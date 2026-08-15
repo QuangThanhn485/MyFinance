@@ -1,3 +1,6 @@
+import type { AccountBalanceReconciliation, ISODate, YearMonth } from "@/domain/types"
+import { daysInMonth } from "@/lib/date"
+
 export type AccountReconciliationInput = {
   emergencyOpeningVnd: number
   emergencyDepositedVnd: number
@@ -17,6 +20,36 @@ function money(value: number) {
   return Math.max(0, Math.trunc(value))
 }
 
+export function resolveAccountReconciliationForm(input: {
+  selectedMonth: YearMonth
+  currentMonth: YearMonth
+  currentDate: ISODate
+  plannedIncomeVnd: number
+  saved?: AccountBalanceReconciliation | null
+}) {
+  const { selectedMonth, currentMonth, currentDate, plannedIncomeVnd, saved } = input
+  const defaultDate = selectedMonth === currentMonth
+    ? currentDate
+    : selectedMonth < currentMonth
+      ? `${selectedMonth}-${String(daysInMonth(selectedMonth)).padStart(2, "0")}` as ISODate
+      : `${selectedMonth}-01` as ISODate
+  const restoreSaved = Boolean(
+    saved && (selectedMonth < currentMonth || saved.asOfDate === defaultDate),
+  )
+
+  return {
+    asOfDate: restoreSaved && saved ? saved.asOfDate : defaultDate,
+    actualBalanceVnd: restoreSaved && saved ? saved.actualBalanceVnd : 0,
+    incomeReceivedVnd: restoreSaved && saved
+      ? saved.incomeReceivedVnd
+      : money(plannedIncomeVnd),
+    hasActualBalance: restoreSaved,
+    hasStaleCurrentMonthSave: Boolean(
+      saved && selectedMonth === currentMonth && saved.asOfDate !== defaultDate,
+    ),
+  }
+}
+
 export function computeAccountReconciliation(input: AccountReconciliationInput) {
   const emergencyOpeningVnd = money(input.emergencyOpeningVnd)
   const emergencyDepositedVnd = money(input.emergencyDepositedVnd)
@@ -30,39 +63,54 @@ export function computeAccountReconciliation(input: AccountReconciliationInput) 
   const savingsTargetVnd = money(input.savingsTargetVnd)
   const actualBalanceVnd = money(input.actualBalanceVnd)
 
-  // Giao dịch nạp quỹ là một dòng tiền vào độc lập theo nghiệp vụ sổ quỹ hiện tại.
   const emergencyBalanceVnd = emergencyOpeningVnd + emergencyDepositedVnd - emergencyWithdrawnVnd
-  const monthlySavingsBalanceVnd = savingsTargetVnd
   const fixedCostsBalanceVnd = fixedCostsPlannedVnd - fixedCostsPaidVnd
   const variableSpendingBalanceVnd = variableBudgetVnd - variableSpentVnd
 
   const plannedAllocationVnd = fixedCostsPlannedVnd + variableBudgetVnd + savingsTargetVnd
-  const incomeAllocationDifferenceVnd = incomeReceivedVnd - plannedAllocationVnd
+  const incomeAllocationDifferenceVnd = incomeReceivedVnd - plannedIncomeVnd
+
+  // Giao dịch quỹ là dòng tiền độc lập với thu nhập và chi tiêu tháng. Phần còn
+  // lại của tháng chỉ được tính từ thu nhập thực nhận và các khoản phân bổ tháng.
+  const monthlySavingsBalanceVnd =
+    incomeReceivedVnd - fixedCostsPlannedVnd - variableBudgetVnd
 
   const expectedBalanceVnd =
     emergencyBalanceVnd +
     monthlySavingsBalanceVnd +
     fixedCostsBalanceVnd +
-    variableSpendingBalanceVnd +
-    incomeAllocationDifferenceVnd
+    variableSpendingBalanceVnd
+
+  // Công thức kiểm tra chéo chỉ dùng dòng tiền thực. Mục tiêu tiết kiệm và ngân
+  // sách kế hoạch không được phép làm thay đổi số dư tài khoản kỳ vọng.
   const controlExpectedBalanceVnd =
-    emergencyOpeningVnd -
+    emergencyOpeningVnd +
+    emergencyDepositedVnd -
     emergencyWithdrawnVnd +
-    emergencyDepositedVnd +
     incomeReceivedVnd -
     fixedCostsPaidVnd -
     variableSpentVnd
+  const trackedOutflowsVnd = fixedCostsPaidVnd + variableSpentVnd + emergencyWithdrawnVnd
   const differenceVnd = actualBalanceVnd - expectedBalanceVnd
 
   return {
+    emergencyOpeningVnd,
+    emergencyDepositedVnd,
+    emergencyWithdrawnVnd,
     plannedIncomeVnd,
     incomeReceivedVnd,
     plannedAllocationVnd,
+    fixedCostsPlannedVnd,
+    fixedCostsPaidVnd,
+    variableBudgetVnd,
+    variableSpentVnd,
+    savingsTargetVnd,
     emergencyBalanceVnd,
     monthlySavingsBalanceVnd,
     fixedCostsBalanceVnd,
     variableSpendingBalanceVnd,
     incomeAllocationDifferenceVnd,
+    trackedOutflowsVnd,
     expectedBalanceVnd,
     controlExpectedBalanceVnd,
     calculationBalanced: expectedBalanceVnd === controlExpectedBalanceVnd,
