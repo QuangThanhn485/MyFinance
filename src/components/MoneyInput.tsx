@@ -7,6 +7,8 @@ import { cn } from "@/lib/utils"
 type MoneyInputProps = Omit<InputProps, "value" | "onChange" | "type"> & {
   value: number
   onValueChange: (next: number) => void
+  onEmpty?: () => void
+  showZero?: boolean
   showSteppers?: boolean
   stepVnd?: number
 }
@@ -15,6 +17,8 @@ const MoneyInput = forwardRef<HTMLInputElement, MoneyInputProps>(function MoneyI
   {
     value,
     onValueChange,
+    onEmpty,
+    showZero = false,
     inputMode = "numeric",
     className,
     showSteppers = false,
@@ -24,8 +28,8 @@ const MoneyInput = forwardRef<HTMLInputElement, MoneyInputProps>(function MoneyI
   ref,
 ) {
   const formatted = useMemo(
-    () => (value > 0 ? formatVndNumber(value) : ""),
-    [value],
+    () => (value > 0 || (showZero && value === 0) ? formatVndNumber(value) : ""),
+    [showZero, value],
   )
   const [text, setText] = useState(formatted)
 
@@ -33,7 +37,7 @@ const MoneyInput = forwardRef<HTMLInputElement, MoneyInputProps>(function MoneyI
 
   const commitValue = (nextRaw: number) => {
     const next = Math.max(0, Math.trunc(Number.isFinite(nextRaw) ? nextRaw : 0))
-    setText(next > 0 ? formatVndNumber(next) : "")
+    setText(next > 0 || showZero ? formatVndNumber(next) : "")
     onValueChange(next)
   }
 
@@ -49,7 +53,8 @@ const MoneyInput = forwardRef<HTMLInputElement, MoneyInputProps>(function MoneyI
         const cleaned = raw.replace(/[^\d]/g, "")
         if (!cleaned) {
           setText("")
-          onValueChange(0)
+          if (onEmpty) onEmpty()
+          else onValueChange(0)
           return
         }
         const next = parseVndInput(raw)

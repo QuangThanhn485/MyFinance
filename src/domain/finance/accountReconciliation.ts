@@ -20,6 +20,14 @@ function money(value: number) {
   return Math.max(0, Math.trunc(value))
 }
 
+/** Legacy records had no presence marker; only their positive balances were unambiguous. */
+export function hasConfirmedActualBalance(
+  value: Pick<AccountBalanceReconciliation, "actualBalanceVnd" | "actualBalanceConfirmed">,
+) {
+  if (!Number.isFinite(value.actualBalanceVnd) || value.actualBalanceVnd < 0) return false
+  return value.actualBalanceConfirmed ?? (value.actualBalanceVnd > 0)
+}
+
 export function resolveAccountReconciliationForm(input: {
   selectedMonth: YearMonth
   currentMonth: YearMonth
@@ -33,8 +41,13 @@ export function resolveAccountReconciliationForm(input: {
     : selectedMonth < currentMonth
       ? `${selectedMonth}-${String(daysInMonth(selectedMonth)).padStart(2, "0")}` as ISODate
       : `${selectedMonth}-01` as ISODate
+  const hasSavedActualBalance = Boolean(
+    saved && hasConfirmedActualBalance(saved),
+  )
   const restoreSaved = Boolean(
-    saved && (selectedMonth < currentMonth || saved.asOfDate === defaultDate),
+    saved &&
+    hasSavedActualBalance &&
+    (selectedMonth < currentMonth || saved.asOfDate === defaultDate),
   )
 
   return {
@@ -45,7 +58,9 @@ export function resolveAccountReconciliationForm(input: {
       : money(plannedIncomeVnd),
     hasActualBalance: restoreSaved,
     hasStaleCurrentMonthSave: Boolean(
-      saved && selectedMonth === currentMonth && saved.asOfDate !== defaultDate,
+      saved &&
+      selectedMonth === currentMonth &&
+      (!hasSavedActualBalance || saved.asOfDate !== defaultDate),
     ),
   }
 }

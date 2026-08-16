@@ -212,6 +212,43 @@ describe("projectMonthEndFromData", () => {
     )
   })
 
+  it("ignores a zero-balance placeholder saved from an empty reconciliation field", () => {
+    const state = stateForMonth("2026-04")
+    addExpense(state, {
+      id: "tracked",
+      date: "2026-04-20",
+      amountVnd: 100_000,
+      bucket: "needs",
+    })
+    const withoutReconciliation = projectMonthEndFromData({
+      state,
+      date: "2026-04-20",
+    })
+    state.accountBalanceReconciliationsByMonth["2026-04"] = {
+      month: "2026-04",
+      asOfDate: "2026-04-20",
+      actualBalanceVnd: 0,
+      incomeReceivedVnd: 12_000_000,
+      updatedAt: "2026-04-20T12:00:00.000Z",
+    }
+
+    const withPlaceholder = projectMonthEndFromData({ state, date: "2026-04-20" })
+
+    expect(withPlaceholder.projectedUntrackedVnd).toBe(0)
+    expect(withPlaceholder.reconciliationAsOfDate).toBeNull()
+    expect(withPlaceholder.projectedSavingsVnd).toBe(
+      withoutReconciliation.projectedSavingsVnd,
+    )
+
+    state.accountBalanceReconciliationsByMonth["2026-04"].actualBalanceConfirmed = true
+    const withConfirmedZero = projectMonthEndFromData({ state, date: "2026-04-20" })
+
+    expect(withConfirmedZero.projectedUntrackedVnd).toBeGreaterThan(0)
+    expect(withConfirmedZero.projectedSavingsVnd).toBeLessThan(
+      withoutReconciliation.projectedSavingsVnd,
+    )
+  })
+
   it("uses active spending caps for the unobserved days", () => {
     const uncappedState = stateForMonth("2026-04")
     const cappedState = stateForMonth("2026-04")

@@ -156,6 +156,9 @@ export function loadCttmStateFromKey(storageKey: string): CttmState {
       month: month as YearMonth,
       asOfDate: asOfDate as AccountBalanceReconciliation["asOfDate"],
       actualBalanceVnd: Math.trunc(actualBalanceVnd),
+      actualBalanceConfirmed:
+        value.actualBalanceConfirmed === true ||
+        (value.actualBalanceConfirmed !== false && actualBalanceVnd > 0),
       incomeReceivedVnd: Math.trunc(incomeReceivedVnd),
       calculationSnapshot,
       updatedAt: coerceString(value.updatedAt, now),

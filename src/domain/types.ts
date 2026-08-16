@@ -88,6 +88,8 @@ export interface AccountBalanceReconciliation {
   month: YearMonth
   asOfDate: ISODate
   actualBalanceVnd: number
+  /** Distinguishes an explicitly entered 0 VND balance from a legacy empty field saved as 0. */
+  actualBalanceConfirmed?: boolean
   incomeReceivedVnd: number
   calculationSnapshot?: AccountReconciliationCalculationSnapshot
   updatedAt: string

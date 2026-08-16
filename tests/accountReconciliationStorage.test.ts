@@ -17,6 +17,7 @@ describe("account reconciliation storage", () => {
       month: "2026-08",
       asOfDate: "2026-08-15",
       actualBalanceVnd: 27_315_311,
+      actualBalanceConfirmed: true,
       incomeReceivedVnd: 14_000_000,
       calculationSnapshot: {
         emergencyOpeningVnd: 21_571_211,
@@ -38,6 +39,9 @@ describe("account reconciliation storage", () => {
     expect(
       loaded.accountBalanceReconciliationsByMonth["2026-08"].calculationSnapshot,
     ).toEqual(state.accountBalanceReconciliationsByMonth["2026-08"].calculationSnapshot)
+    expect(
+      loaded.accountBalanceReconciliationsByMonth["2026-08"].actualBalanceConfirmed,
+    ).toBe(true)
   })
 
   it("keeps legacy reconciliations without inventing a snapshot", () => {
@@ -56,5 +60,23 @@ describe("account reconciliation storage", () => {
     expect(
       loaded.accountBalanceReconciliationsByMonth["2026-08"].calculationSnapshot,
     ).toBeUndefined()
+  })
+
+  it("marks an ambiguous legacy zero balance as unconfirmed", () => {
+    const state = createInitialState("2026-08-15T00:00:00.000Z")
+    state.accountBalanceReconciliationsByMonth["2026-08"] = {
+      month: "2026-08",
+      asOfDate: "2026-08-15",
+      actualBalanceVnd: 0,
+      incomeReceivedVnd: 14_000_000,
+      updatedAt: "2026-08-15T00:00:00.000Z",
+    }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+
+    const loaded = loadCttmStateFromKey(STORAGE_KEY)
+
+    expect(
+      loaded.accountBalanceReconciliationsByMonth["2026-08"].actualBalanceConfirmed,
+    ).toBe(false)
   })
 })

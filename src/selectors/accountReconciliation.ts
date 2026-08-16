@@ -1,4 +1,7 @@
-import { computeAccountReconciliation } from "@/domain/finance/accountReconciliation"
+import {
+  computeAccountReconciliation,
+  hasConfirmedActualBalance,
+} from "@/domain/finance/accountReconciliation"
 import { computeBudgets } from "@/domain/finance/finance"
 import {
   getEffectiveBudgetAdjustmentForMonth,
@@ -61,7 +64,13 @@ export function getSavedAccountReconciliation(
   throughDate?: ISODate,
 ) {
   const saved = state.accountBalanceReconciliationsByMonth[month]
-  if (!saved || (throughDate && saved.asOfDate > throughDate)) return null
+  if (
+    !saved ||
+    !hasConfirmedActualBalance(saved) ||
+    (throughDate && saved.asOfDate > throughDate)
+  ) {
+    return null
+  }
 
   if (saved.calculationSnapshot) {
     return computeAccountReconciliation({

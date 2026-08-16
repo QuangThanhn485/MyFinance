@@ -87,22 +87,28 @@ export default function BalanceReconciliationPage() {
     setHasActualBalance(resolvedForm.hasActualBalance)
   }, [resolvedForm])
 
+  const canCalculate =
+    hasActualBalance && monthFromIsoDate(asOfDate) === selectedMonth
+
   const fixedCosts = useMemo(
-    () => getFixedCostPaymentSummary(data, selectedMonth),
-    [data, selectedMonth],
+    () => canCalculate ? getFixedCostPaymentSummary(data, selectedMonth) : null,
+    [canCalculate, data, selectedMonth],
   )
 
   const result = useMemo(
-    () =>
-      getAccountReconciliation(data, {
+    () => {
+      if (!canCalculate) return null
+      return getAccountReconciliation(data, {
         month: selectedMonth,
         asOfDate,
         actualBalanceVnd,
         incomeReceivedVnd,
-      }),
+      })
+    },
     [
       actualBalanceVnd,
       asOfDate,
+      canCalculate,
       data,
       incomeReceivedVnd,
       selectedMonth,
@@ -110,12 +116,14 @@ export default function BalanceReconciliationPage() {
   )
 
   const fixedCostRows = useMemo(
-    () =>
-      data.entities.fixedCosts.allIds
+    () => {
+      if (!canCalculate) return []
+      return data.entities.fixedCosts.allIds
         .map((id) => data.entities.fixedCosts.byId[id])
         .filter((item) => item?.active && item.month === selectedMonth)
-        .sort((a, b) => a.name.localeCompare(b.name, "vi")),
-    [data.entities.fixedCosts, selectedMonth],
+        .sort((a, b) => a.name.localeCompare(b.name, "vi"))
+    },
+    [canCalculate, data.entities.fixedCosts, selectedMonth],
   )
 
   const handleSave = () => {
@@ -123,10 +131,15 @@ export default function BalanceReconciliationPage() {
       toast.error(`Ngày đối soát phải thuộc tháng ${selectedMonth}.`)
       return
     }
+    if (!hasActualBalance || !result) {
+      toast.error("Hãy nhập tổng số dư thực tế trước khi lưu đối soát.")
+      return
+    }
     saveReconciliation({
       month: selectedMonth,
       asOfDate,
       actualBalanceVnd,
+      actualBalanceConfirmed: true,
       incomeReceivedVnd,
       calculationSnapshot: {
         emergencyOpeningVnd: result.emergencyOpeningVnd,
@@ -144,11 +157,13 @@ export default function BalanceReconciliationPage() {
     toast.success("Đã lưu kết quả đối soát.")
   }
 
-  const statusLabel = result.status === "matched"
-    ? "Khớp số dư"
-    : result.status === "surplus"
-      ? "Thực tế dư hơn app"
-      : "Thực tế thấp hơn app"
+  const statusLabel = result
+    ? result.status === "matched"
+      ? "Khớp số dư"
+      : result.status === "surplus"
+        ? "Thực tế dư hơn app"
+        : "Thực tế thấp hơn app"
+    : null
 
   return (
     <div className="space-y-4">
@@ -189,15 +204,20 @@ export default function BalanceReconciliationPage() {
               <Label>Tổng số dư thực tế của tất cả tài khoản</Label>
               <MoneyInput
                 value={actualBalanceVnd}
+                showZero={hasActualBalance}
                 onValueChange={(value) => {
                   setActualBalanceVnd(value)
                   setHasActualBalance(true)
+                }}
+                onEmpty={() => {
+                  setActualBalanceVnd(0)
+                  setHasActualBalance(false)
                 }}
                 placeholder="Nhập số dư ngân hàng và tiền mặt"
               />
               {resolvedForm.hasStaleCurrentMonthSave ? (
                 <div className="text-xs text-amber-700 dark:text-amber-400">
-                  Lần lưu gần nhất thuộc ngày {data.accountBalanceReconciliationsByMonth[selectedMonth]?.asOfDate.split("-").reverse().join("/")}; hãy nhập số dư thực tế mới cho ngày hôm nay.
+                  Bản đối soát gần nhất (ngày {data.accountBalanceReconciliationsByMonth[selectedMonth]?.asOfDate.split("-").reverse().join("/")}) chưa có số dư thực tế hợp lệ cho hôm nay; hãy nhập lại số dư.
                 </div>
               ) : null}
             </div>
@@ -212,7 +232,11 @@ export default function BalanceReconciliationPage() {
                 placeholder="Số tiền đã thực nhận"
               />
             </div>
-            <Button type="button" onClick={handleSave} disabled={!hasActualBalance}>
+            <Button
+              type="button"
+              onClick={handleSave}
+              disabled={!canCalculate}
+            >
               <Save className="h-4 w-4" />
               Lưu đối soát
             </Button>
@@ -226,7 +250,7 @@ export default function BalanceReconciliationPage() {
                 <Scale className="h-5 w-5 text-muted-foreground" />
                 Kết quả
               </span>
-              {hasActualBalance ? (
+              {result ? (
                 <Badge variant={result.status === "deficit" ? "destructive" : result.status === "matched" ? "secondary" : "outline"}>
                   {statusLabel}
                 </Badge>
@@ -234,7 +258,7 @@ export default function BalanceReconciliationPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {!hasActualBalance ? (
+            {!result ? (
               <div className="grid min-h-56 place-items-center rounded-md border border-dashed px-4 text-center text-sm text-muted-foreground">
                 Nhập tổng số dư thực tế để bắt đầu đối soát.
               </div>
@@ -272,7 +296,8 @@ export default function BalanceReconciliationPage() {
         </Card>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(340px,0.9fr)]">
+      {result && fixedCosts ? (
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(340px,0.9fr)]">
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2">
@@ -406,7 +431,8 @@ export default function BalanceReconciliationPage() {
             </div>
           </CardContent>
         </Card>
-      </div>
+        </div>
+      ) : null}
     </div>
   )
 }

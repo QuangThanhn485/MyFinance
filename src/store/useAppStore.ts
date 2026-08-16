@@ -16,8 +16,8 @@ import type {
   YearMonth,
 } from "@/domain/types"
 import { suggestBucketByCategory } from "@/domain/constants"
-import { computeBudgets } from "@/domain/finance/finance"
 import { computeRemainingDailySpendingCap } from "@/domain/finance/dailySafeCap"
+import { computeBudgets } from "@/domain/finance/finance"
 import { projectMonthEndFromData } from "@/domain/finance/monthEndForecast"
 import type { OverspendingResult, RecoveryOption } from "@/domain/finance/rescue"
 import { evaluateOverspending } from "@/domain/finance/rescue"
@@ -1013,9 +1013,17 @@ export const useAppStore = create<AppStore>()(
         month,
         asOfDate,
         actualBalanceVnd,
+        actualBalanceConfirmed,
         incomeReceivedVnd,
         calculationSnapshot,
       }) => {
+        const confirmedActualBalance =
+          actualBalanceConfirmed ??
+          (Number.isFinite(actualBalanceVnd) && actualBalanceVnd > 0)
+        if (!confirmedActualBalance || !Number.isFinite(actualBalanceVnd) || actualBalanceVnd < 0) {
+          return
+        }
+        const normalizedActualBalanceVnd = Math.trunc(actualBalanceVnd)
         set((s) => ({
           data: touch({
             ...s.data,
@@ -1024,7 +1032,8 @@ export const useAppStore = create<AppStore>()(
               [month]: {
                 month,
                 asOfDate,
-                actualBalanceVnd: Math.max(0, Math.trunc(actualBalanceVnd)),
+                actualBalanceVnd: normalizedActualBalanceVnd,
+                actualBalanceConfirmed: true,
                 incomeReceivedVnd: Math.max(0, Math.trunc(incomeReceivedVnd)),
                 calculationSnapshot,
                 updatedAt: nowIso(),

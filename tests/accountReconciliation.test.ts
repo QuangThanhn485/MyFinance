@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   computeAccountReconciliation,
+  hasConfirmedActualBalance,
   resolveAccountReconciliationForm,
 } from "@/domain/finance/accountReconciliation"
 import {
@@ -236,6 +237,59 @@ describe("account balance reconciliation", () => {
       hasActualBalance: false,
       hasStaleCurrentMonthSave: true,
     })
+  })
+
+  it("treats a legacy saved zero balance as an empty reconciliation input", () => {
+    const saved = {
+      month: "2026-08" as const,
+      asOfDate: "2026-08-15" as const,
+      actualBalanceVnd: 0,
+      incomeReceivedVnd: 14_000_000,
+      updatedAt: "2026-08-15T12:00:00.000Z",
+    }
+
+    const form = resolveAccountReconciliationForm({
+      selectedMonth: "2026-08",
+      currentMonth: "2026-08",
+      currentDate: "2026-08-15",
+      plannedIncomeVnd: 14_000_000,
+      saved,
+    })
+    const state = createInitialState("2026-08-15T12:00:00.000Z")
+    state.accountBalanceReconciliationsByMonth["2026-08"] = saved
+
+    expect(hasConfirmedActualBalance(saved)).toBe(false)
+    expect(form).toEqual({
+      asOfDate: "2026-08-15",
+      actualBalanceVnd: 0,
+      incomeReceivedVnd: 14_000_000,
+      hasActualBalance: false,
+      hasStaleCurrentMonthSave: true,
+    })
+    expect(getSavedAccountReconciliation(state, "2026-08")).toBeNull()
+  })
+
+  it("preserves an explicitly confirmed zero account balance", () => {
+    const saved = {
+      month: "2026-08" as const,
+      asOfDate: "2026-08-15" as const,
+      actualBalanceVnd: 0,
+      actualBalanceConfirmed: true,
+      incomeReceivedVnd: 14_000_000,
+      updatedAt: "2026-08-15T12:00:00.000Z",
+    }
+    const state = createInitialState("2026-08-15T12:00:00.000Z")
+    state.accountBalanceReconciliationsByMonth["2026-08"] = saved
+
+    expect(hasConfirmedActualBalance(saved)).toBe(true)
+    expect(resolveAccountReconciliationForm({
+      selectedMonth: "2026-08",
+      currentMonth: "2026-08",
+      currentDate: "2026-08-15",
+      plannedIncomeVnd: 14_000_000,
+      saved,
+    }).hasActualBalance).toBe(true)
+    expect(getSavedAccountReconciliation(state, "2026-08")).not.toBeNull()
   })
 
   it("replays a saved reconciliation from its immutable calculation snapshot", () => {
