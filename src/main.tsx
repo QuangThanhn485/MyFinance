@@ -12,25 +12,24 @@ import "@/index.css"
 
 initializeTheme()
 
-function AppShell() {
+// Toaster nằm NGOÀI DataSourceProvider để thông báo lỗi đồng bộ luôn hiển thị được,
+// kể cả khi cây ứng dụng chưa mount.
+function AppToaster() {
   const { resolvedTheme } = useTheme()
   return (
-    <>
-      <App />
-      <Toaster
-        theme={resolvedTheme}
-        richColors
-        position="top-right"
-        duration={2500}
-        visibleToasts={2}
-        closeButton={false}
-        offset={{ top: 72, right: 16 }}
-        toastOptions={{
-          className:
-            "pointer-events-none max-w-[360px] w-[calc(100vw-1.5rem)] sm:w-auto",
-        }}
-      />
-    </>
+    <Toaster
+      theme={resolvedTheme}
+      richColors
+      position="top-right"
+      duration={2500}
+      visibleToasts={2}
+      closeButton={false}
+      offset={{ top: 72, right: 16 }}
+      toastOptions={{
+        className:
+          "pointer-events-none max-w-[360px] w-[calc(100vw-1.5rem)] sm:w-auto",
+      }}
+    />
   )
 }
 
@@ -39,8 +38,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     <ThemeProvider>
       <BrowserRouter>
         <DataSourceProvider>
-          <AppShell />
+          <App />
         </DataSourceProvider>
+        <AppToaster />
       </BrowserRouter>
     </ThemeProvider>
   </React.StrictMode>,

@@ -61,6 +61,8 @@ export interface CttmState {
   monthLocksByMonth: Record<string, MonthLockSnapshot>
   accountBalanceReconciliationsByMonth: Record<string, AccountBalanceReconciliation>
   emergencyFundOpeningSourcesByMonth: Record<string, "auto" | "manual">
+  /** id (hoặc cat:<id>) -> thời điểm xoá (ISO). Dùng để merge đa thiết bị; dọn sau 90 ngày. */
+  tombstones?: Record<string, string>
 }
 
 export function createEmptyExpenseIndexes(): ExpenseIndexes {

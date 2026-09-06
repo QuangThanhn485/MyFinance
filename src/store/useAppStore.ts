@@ -52,7 +52,10 @@ import {
   loadCttmStateFromKey,
   saveCttmState,
 } from "@/storage/localStorage"
-import { createInitialState, type CttmState } from "@/storage/schema"
+import { createInitialState, STORAGE_KEY, type CttmState } from "@/storage/schema"
+import { getDataSourceConfig } from "@/storage/dataSource"
+import { monotonicIso } from "@/sync/clock"
+import { contentHash } from "@/sync/snapshot"
 import {
   ensureCategoriesForState,
   makeExpenseCategoryId,
@@ -159,6 +162,8 @@ type Actions = {
   importJson: (raw: string) => { ok: true } | { ok: false; error: string }
   resetAll: () => void
   autoClosePreviousMonthIfNeeded: () => void
+  /** Thay toàn bộ dữ liệu (dùng bởi SyncEngine sau khi merge/khôi phục). Không reload trang. */
+  replaceData: (next: CttmState) => void
 }
 
 export type AppStore = {
@@ -169,7 +174,7 @@ export type AppStore = {
 }
 
 function nowIso() {
-  return new Date().toISOString()
+  return monotonicIso()
 }
 
 function touch(state: CttmState): CttmState {
@@ -178,6 +183,27 @@ function touch(state: CttmState): CttmState {
 
 function id(prefix: "ex_" | "fc_" | "pp_" | "st_") {
   return `${prefix}${nanoid(10)}`
+}
+
+/** Ghi tombstone cho một id (hoặc cat:<id>) để lệnh xoá lan sang thiết bị khác khi đồng bộ. */
+function withTombstone(state: CttmState, key: string): CttmState {
+  return { ...state, tombstones: { ...(state.tombstones ?? {}), [key]: nowIso() } }
+}
+
+/** Khi thay toàn bộ dữ liệu (import/reset), mọi entity biến mất đều được ghi tombstone. */
+function tombstonesForReplacement(prev: CttmState, next: CttmState): Record<string, string> {
+  const at = nowIso()
+  const out: Record<string, string> = { ...(next.tombstones ?? {}) }
+  for (const kind of ["expenses", "fixedCosts", "purchasePlans", "savingsTransactions"] as const) {
+    for (const entityId of prev.entities[kind].allIds) {
+      if (!next.entities[kind].byId[entityId]) out[entityId] = at
+    }
+  }
+  const nextCategoryIds = new Set(next.expenseCategories.map((category) => category.id))
+  for (const category of prev.expenseCategories) {
+    if (!nextCategoryIds.has(category.id)) out[`cat:${category.id}`] = at
+  }
+  return out
 }
 
 function cloneSettings(settings: Settings): Settings {
@@ -289,15 +315,18 @@ function ensureMonthConfigurationFromPrevious(
     .filter((fixedCost): fixedCost is FixedCost => !!fixedCost && fixedCost.month === prevMonth)
 
   if (prevFixedCosts.length > 0) {
+    // Id và mốc thời gian tất định: hai thiết bị cùng sang tháng mới sẽ sinh ra đúng cùng
+    // một bộ chi phí cố định, merge theo id không bị nhân đôi.
+    const clonedAt = `${targetMonth}-01T00:00:00.000Z`
     const cloned = prevFixedCosts.map((fixedCost) => {
-      const newId = id("fc_")
+      const newId = `fc_${targetMonth}_${contentHash(fixedCost.id).slice(0, 10)}`
       return {
         ...fixedCost,
         id: newId,
         month: targetMonth,
         paidAmountVnd: 0,
-        createdAt: now,
-        updatedAt: now,
+        createdAt: clonedAt,
+        updatedAt: clonedAt,
       }
     })
 
@@ -539,7 +568,12 @@ function buildDemoSeedState(now: string): CttmState {
   return base
 }
 
-const debouncedSave = createDebouncedSaver(400)
+const persistedListeners = new Set<(data: CttmState) => void>()
+const debouncedSaver = createDebouncedSaver(400, (key, state) => {
+  if (key !== STORAGE_KEY) return
+  for (const listener of persistedListeners) listener(state)
+})
+const debouncedSave = debouncedSaver.save
 const persistedWorkspace = loadWorkspaceId()
 const initialWorkspace: WorkspaceId = "real"
 if (persistedWorkspace !== "real") {
@@ -547,7 +581,12 @@ if (persistedWorkspace !== "real") {
 }
 const initialStorageKey = getStorageKeyForWorkspace(initialWorkspace)
 const loadedInitialData = loadCttmStateFromKey(initialStorageKey)
-const initialData = autoClosePreviousMonthIfNeeded(loadedInitialData)
+// Ở mode Upstash, auto-close tháng chỉ chạy SAU khi SyncEngine đã pull được bản mới nhất,
+// để máy mở lại sau nhiều ngày không tự sinh dữ liệu dẫn xuất trên bản cũ rồi đẩy lên mây.
+const initialData =
+  getDataSourceConfig().mode === "upstash"
+    ? loadedInitialData
+    : autoClosePreviousMonthIfNeeded(loadedInitialData)
 if (initialData !== loadedInitialData) {
   saveCttmState(initialStorageKey, initialData)
 }
@@ -761,12 +800,17 @@ export const useAppStore = create<AppStore>()(
         set((s) => {
           if (!s.data.expenseCategories.some((category) => category.id === categoryId)) return s
           return {
-            data: touch({
-              ...s.data,
-              expenseCategories: s.data.expenseCategories.filter(
-                (category) => category.id !== categoryId,
+            data: touch(
+              withTombstone(
+                {
+                  ...s.data,
+                  expenseCategories: s.data.expenseCategories.filter(
+                    (category) => category.id !== categoryId,
+                  ),
+                },
+                `cat:${categoryId}`,
               ),
-            }),
+            ),
           }
         })
         return { ok: true as const }
@@ -822,13 +866,18 @@ export const useAppStore = create<AppStore>()(
           if (!existing) return s
           const { [idToDelete]: _removed, ...rest } = table.byId
           return {
-            data: touch({
-              ...s.data,
-              entities: {
-                ...s.data.entities,
-                fixedCosts: { byId: rest, allIds: table.allIds.filter((x) => x !== idToDelete) },
-              },
-            }),
+            data: touch(
+              withTombstone(
+                {
+                  ...s.data,
+                  entities: {
+                    ...s.data.entities,
+                    fixedCosts: { byId: rest, allIds: table.allIds.filter((x) => x !== idToDelete) },
+                  },
+                },
+                idToDelete,
+              ),
+            ),
           }
         })
       },
@@ -949,11 +998,16 @@ export const useAppStore = create<AppStore>()(
           const { [expenseId]: _removed, ...rest } = table.byId
           const nextIndexes = removeExpenseFromIndexes(s.data.indexes, existing)
           return {
-            data: touch({
-              ...s.data,
-              entities: { ...s.data.entities, expenses: { byId: rest, allIds: table.allIds.filter((x) => x !== expenseId) } },
-              indexes: nextIndexes,
-            }),
+            data: touch(
+              withTombstone(
+                {
+                  ...s.data,
+                  entities: { ...s.data.entities, expenses: { byId: rest, allIds: table.allIds.filter((x) => x !== expenseId) } },
+                  indexes: nextIndexes,
+                },
+                expenseId,
+              ),
+            ),
           }
         })
       },
@@ -995,16 +1049,21 @@ export const useAppStore = create<AppStore>()(
           if (!existing) return s
           const { [transactionId]: _removed, ...rest } = table.byId
           return {
-            data: touch({
-              ...s.data,
-              entities: {
-                ...s.data.entities,
-                savingsTransactions: {
-                  byId: rest,
-                  allIds: table.allIds.filter((x) => x !== transactionId),
+            data: touch(
+              withTombstone(
+                {
+                  ...s.data,
+                  entities: {
+                    ...s.data.entities,
+                    savingsTransactions: {
+                      byId: rest,
+                      allIds: table.allIds.filter((x) => x !== transactionId),
+                    },
+                  },
                 },
-              },
-            }),
+                transactionId,
+              ),
+            ),
           }
         })
       },
@@ -1102,13 +1161,18 @@ export const useAppStore = create<AppStore>()(
           if (!existing) return s
           const { [ppId]: _removed, ...rest } = table.byId
           return {
-            data: touch({
-              ...s.data,
-              entities: {
-                ...s.data.entities,
-                purchasePlans: { byId: rest, allIds: table.allIds.filter((x) => x !== ppId) },
-              },
-            }),
+            data: touch(
+              withTombstone(
+                {
+                  ...s.data,
+                  entities: {
+                    ...s.data.entities,
+                    purchasePlans: { byId: rest, allIds: table.allIds.filter((x) => x !== ppId) },
+                  },
+                },
+                ppId,
+              ),
+            ),
           }
         })
       },
@@ -1281,6 +1345,7 @@ export const useAppStore = create<AppStore>()(
           ),
           updatedAt: nowIso(),
         })
+        nextData.tombstones = tombstonesForReplacement(get().data, nextData)
 
         saveCttmState(getStorageKeyForWorkspace(get().workspace), nextData)
 
@@ -1299,6 +1364,7 @@ export const useAppStore = create<AppStore>()(
         })
         const now = nowIso()
         const next = createInitialState(now)
+        next.tombstones = tombstonesForReplacement(get().data, next)
         saveCttmState(getStorageKeyForWorkspace(get().workspace), next)
         set(() => ({
           data: next,
@@ -1307,15 +1373,42 @@ export const useAppStore = create<AppStore>()(
       },
 
       autoClosePreviousMonthIfNeeded: () => {
-        set((s) => ({ data: autoClosePreviousMonthIfNeeded(s.data) }))
+        set((s) => {
+          const next = autoClosePreviousMonthIfNeeded(s.data)
+          // Trả về chính state khi không có gì để đóng → zustand không thông báo listener,
+          // không ghi đĩa, không kích hoạt đồng bộ.
+          return next === s.data ? s : { data: next }
+        })
+      },
+
+      replaceData: (next) => {
+        set(() => ({ data: next }))
       },
     },
   })),
 )
 
+// Chỉ ghi khi tham chiếu `data` đổi (Object.is), không còn ghi lại mỗi lần set() vô nghĩa.
 useAppStore.subscribe(
-  (s) => ({ workspace: s.workspace, data: s.data }),
-  ({ workspace, data }) => debouncedSave(getStorageKeyForWorkspace(workspace), data),
+  (s) => s.data,
+  (data) => debouncedSave(getStorageKeyForWorkspace(useAppStore.getState().workspace), data),
 )
+
+/** Ép ghi ngay dữ liệu đang chờ debounce xuống localStorage (SyncEngine gọi trước khi pull/push). */
+export function flushPendingSave() {
+  debouncedSaver.flush()
+}
+
+/** Nhận thông báo mỗi khi dữ liệu workspace real đã thực sự nằm trên đĩa. */
+export function subscribePersisted(listener: (data: CttmState) => void) {
+  persistedListeners.add(listener)
+  return () => {
+    persistedListeners.delete(listener)
+  }
+}
+
+export function loadRealDataFromDisk(): CttmState {
+  return loadCttmStateFromKey(STORAGE_KEY)
+}
 
 

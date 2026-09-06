@@ -11,6 +11,7 @@ import {
   ensureCategoriesForState,
   normalizeExpenseCategoryList,
 } from "@/storage/categories"
+import { bumpWriteSeq } from "@/sync/localMeta"
 
 function nowIso() {
   return new Date().toISOString()
@@ -69,11 +70,24 @@ export function loadCttmState(): CttmState {
 }
 
 export function loadCttmStateFromKey(storageKey: string): CttmState {
+  return normalizeCttmStateFromRaw(localStorage.getItem(storageKey))
+}
+
+function normalizeTombstones(raw: unknown): Record<string, string> | undefined {
+  if (!isRecord(raw)) return undefined
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(raw)) {
+    if (typeof value === "string" && value) out[key] = value
+  }
+  return Object.keys(out).length > 0 ? out : undefined
+}
+
+/** Chuẩn hoá một chuỗi JSON CttmState (từ localStorage, Redis hay file) — không bao giờ throw. */
+export function normalizeCttmStateFromRaw(raw: string | null): CttmState {
   const now = nowIso()
   const empty = createInitialState(now)
   const fallbackMonth = toYearMonthFromDateTime(now, "2000-01")
 
-  const raw = localStorage.getItem(storageKey)
   if (!raw) return empty
 
   const parsed = safeParseJson(raw)
@@ -207,6 +221,7 @@ export function loadCttmStateFromKey(storageKey: string): CttmState {
     accountBalanceReconciliationsByMonth: normalizedReconciliations,
     emergencyFundOpeningSourcesByMonth: normalizedOpeningSources,
     indexes: empty.indexes,
+    tombstones: normalizeTombstones((state as any).tombstones),
   }
 
   for (const id of next.entities.fixedCosts.allIds) {
@@ -235,20 +250,56 @@ export function loadCttmStateFromKey(storageKey: string): CttmState {
 }
 
 export function saveCttmState(storageKey: string, state: CttmState) {
+  // Đánh dấu "bản ghi này do build mới tạo" TRƯỚC khi ghi, để tab khác nhận storage event
+  // của cttm_v1 đã thấy writeSeq mới (phân biệt với tab build cũ ghi đè).
+  if (storageKey === STORAGE_KEY) bumpWriteSeq(localStorage)
   localStorage.setItem(storageKey, JSON.stringify(state))
 }
 
-export function createDebouncedSaver(delayMs: number) {
+export function createDebouncedSaver(
+  delayMs: number,
+  onSaved?: (key: string, state: CttmState) => void,
+) {
   let handle: number | null = null
   let latest: { key: string; state: CttmState } | null = null
 
-  return (key: string, state: CttmState) => {
-    latest = { key, state }
-    if (handle !== null) window.clearTimeout(handle)
-    handle = window.setTimeout(() => {
-      if (!latest) return
-      saveCttmState(latest.key, latest.state)
-      handle = null
-    }, delayMs)
+  const write = () => {
+    if (!latest) return
+    const { key, state } = latest
+    latest = null
+    try {
+      saveCttmState(key, state)
+      onSaved?.(key, state)
+    } catch (error) {
+      // Hết dung lượng localStorage: giữ lại để lần flush sau thử lại, và báo ra console.
+      latest = { key, state }
+      console.error("Không ghi được dữ liệu vào localStorage:", error)
+    }
+  }
+
+  return {
+    save(key: string, state: CttmState) {
+      latest = { key, state }
+      if (handle !== null) clearTimeout(handle)
+      handle = setTimeout(() => {
+        handle = null
+        write()
+      }, delayMs) as unknown as number
+    },
+    /** Ghi ngay phần đang chờ (nếu có). */
+    flush() {
+      if (handle !== null) {
+        clearTimeout(handle)
+        handle = null
+      }
+      write()
+    },
+    cancel() {
+      if (handle !== null) {
+        clearTimeout(handle)
+        handle = null
+      }
+      latest = null
+    },
   }
 }

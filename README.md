@@ -82,6 +82,20 @@ Nguyên tắc:
 ### Rebuild indexes
 Trang **Xuất / Nhập dữ liệu** có nút **Rebuild indexes** để khôi phục index khi import/không đồng bộ.
 
+## Đồng bộ đa thiết bị (Sync v3 — Upstash Redis)
+
+Toàn bộ logic nằm trong `src/sync/`; tài liệu thiết kế: `docs/sync-v3-design.md`.
+
+Nguyên tắc:
+- **Không bao giờ ghi đè mù.** Mọi lần ghi lên Redis là một script Lua compare-and-swap (`mf3:version`): chỉ thành công khi thiết bị đã thấy đúng phiên bản hiện hành; nếu không, kéo về, gộp (three-way merge theo từng entity, có tombstone cho xoá) rồi thử lại.
+- **Chỉ push sau khi đã pull thành công** trong phiên. Boot lỗi mạng → app chạy local, thay đổi giữ trên máy và đồng bộ khi có mạng.
+- **Mọi phiên bản đều được giữ lại**: `mf3:snap:<n>` + `mf3:history` (20 bản gần nhất, 1 bản/ngày trong 60 ngày, bản ghim không bao giờ bị dọn). Trang **Dữ liệu** cho phép khôi phục/ghim; máy cũng giữ 3 bản gần nhất trước mỗi lần bị đồng bộ thay đổi.
+- Chỉ những thao tác phá huỷ (xoá hàng loạt từ máy khác, Redis bị xoá/đổi database, máy mới chưa có điểm chung, migration từ cơ chế cũ) mới hỏi người dùng; mọi lựa chọn đều giữ bản trước đó.
+- Dữ liệu đồng bộ: `cttm_v1` (không kèm indexes) và mẫu chi tiêu nhanh. UI preferences, workspace demo, backup local **không** đồng bộ.
+- Key cũ `myfinance:storage:snapshot` chỉ được đọc một lần để migrate, bản gốc lưu ở `mf3:legacy:v2`; sau đó key cũ mang marker để build cũ không tải về/xoá dữ liệu.
+
+Kiểm thử: `tests/sync/` mô phỏng 2 thiết bị + Redis giả chạy đúng logic Lua (4 kịch bản mất dữ liệu đã từng xảy ra, xung đột CAS, mất response, xoá hàng loạt, Redis bị xoá, multi-tab, migration).
+
 ## Công thức & logic tài chính (deterministic)
 
 Các hàm thuần (pure functions) nằm tại:

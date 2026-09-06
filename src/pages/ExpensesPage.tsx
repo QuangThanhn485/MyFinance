@@ -71,6 +71,8 @@ import {
   getAllExpenseTemplatesSorted,
   loadExpenseTemplates,
   saveExpenseTemplates,
+
+  TEMPLATES_CHANGED_EVENT,
   touchExpenseTemplate,
   updateExpenseTemplate,
   upsertExpenseTemplate,
@@ -208,6 +210,12 @@ export default function ExpensesPage() {
   const [templates, setTemplates] = useState<ExpenseTemplate[]>(() =>
     loadExpenseTemplates(),
   )
+  // Khi đồng bộ thay danh sách mẫu (từ thiết bị khác), nạp lại để UI không giữ bản cũ.
+  useEffect(() => {
+    const onChanged = () => setTemplates(loadExpenseTemplates())
+    window.addEventListener(TEMPLATES_CHANGED_EVENT, onChanged)
+    return () => window.removeEventListener(TEMPLATES_CHANGED_EVENT, onChanged)
+  }, [])
   // Số lượng mỗi mẫu muốn thêm trong lần này (id -> số lượng). > 0 nghĩa là đang chọn.
   const [templateQuantities, setTemplateQuantities] = useState<Record<string, number>>({})
   const [templateEditor, setTemplateEditor] = useState<

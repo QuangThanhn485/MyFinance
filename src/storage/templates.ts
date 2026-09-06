@@ -2,8 +2,11 @@ import { nanoid } from "nanoid"
 import { getExpenseCategoryLabel } from "@/domain/constants"
 import { clampMoneyVnd } from "@/domain/finance/finance"
 import type { BudgetBucket, ExpenseCategory } from "@/domain/types"
+import { monotonicIso } from "@/sync/clock"
 
 export const EXPENSE_TEMPLATES_STORAGE_KEY = "smartSpend.templates.v1"
+export const EXPENSE_TEMPLATE_TOMBSTONES_KEY = "mf3.tplTombstones"
+export const TEMPLATES_CHANGED_EVENT = "mf3:templates-changed"
 
 export type TemplateBucket = "NEEDS" | "WANTS"
 
@@ -16,11 +19,12 @@ export type ExpenseTemplate = {
   note?: string
   lastUsedAt: string
   createdAt: string
+  updatedAt: string
   useCount: number
 }
 
 function nowIso() {
-  return new Date().toISOString()
+  return monotonicIso()
 }
 
 function safeParseJson(raw: string): unknown {
@@ -84,7 +88,7 @@ function deriveTemplateName(input: {
   return `${base} • ${shortened}`
 }
 
-function normalizeTemplate(raw: unknown, fallbackNow: string): ExpenseTemplate | null {
+export function normalizeTemplate(raw: unknown, fallbackNow: string): ExpenseTemplate | null {
   if (!isRecord(raw)) return null
 
   const category = normalizeCategory(raw.category)
@@ -97,6 +101,7 @@ function normalizeTemplate(raw: unknown, fallbackNow: string): ExpenseTemplate |
   const note = normalizeNote(coerceString(raw.note, ""))
   const createdAt = coerceString(raw.createdAt, fallbackNow)
   const lastUsedAt = coerceString(raw.lastUsedAt, createdAt)
+  const updatedAt = coerceString(raw.updatedAt, lastUsedAt)
   const useCount = Math.max(1, Math.trunc(coerceNumber(raw.useCount, 1)))
   const id = coerceString(raw.id, `tpl_${nanoid(10)}`)
 
@@ -112,31 +117,80 @@ function normalizeTemplate(raw: unknown, fallbackNow: string): ExpenseTemplate |
     note: note || undefined,
     createdAt,
     lastUsedAt,
+    updatedAt,
     useCount,
   }
 }
 
-export function loadExpenseTemplates(): ExpenseTemplate[] {
-  if (typeof localStorage === "undefined") return []
-
-  const raw = localStorage.getItem(EXPENSE_TEMPLATES_STORAGE_KEY)
-  if (!raw) return []
-
-  const parsed = safeParseJson(raw)
-  if (!Array.isArray(parsed)) return []
-
-  const fallbackNow = nowIso()
+export function normalizeTemplateList(raw: unknown, fallbackNow = nowIso()): ExpenseTemplate[] {
+  if (!Array.isArray(raw)) return []
   const out: ExpenseTemplate[] = []
-  for (const item of parsed) {
+  for (const item of raw) {
     const t = normalizeTemplate(item, fallbackNow)
     if (t) out.push(t)
   }
   return out
 }
 
+export function loadExpenseTemplates(): ExpenseTemplate[] {
+  if (typeof localStorage === "undefined") return []
+  const raw = localStorage.getItem(EXPENSE_TEMPLATES_STORAGE_KEY)
+  if (!raw) return []
+  return normalizeTemplateList(safeParseJson(raw))
+}
+
+export function loadTemplateTombstones(): Record<string, string> {
+  if (typeof localStorage === "undefined") return {}
+  const parsed = safeParseJson(localStorage.getItem(EXPENSE_TEMPLATE_TOMBSTONES_KEY) ?? "")
+  if (!isRecord(parsed)) return {}
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(parsed)) {
+    if (typeof value === "string") out[key] = value
+  }
+  return out
+}
+
+function notifyTemplatesChanged() {
+  if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") return
+  try {
+    window.dispatchEvent(new CustomEvent(TEMPLATES_CHANGED_EVENT))
+  } catch {
+    // ignore
+  }
+}
+
+function writeTemplatesRaw(templates: ExpenseTemplate[], tombstones: Record<string, string>) {
+  if (typeof localStorage === "undefined") return
+  try {
+    localStorage.setItem(EXPENSE_TEMPLATES_STORAGE_KEY, JSON.stringify(templates))
+    localStorage.setItem(EXPENSE_TEMPLATE_TOMBSTONES_KEY, JSON.stringify(tombstones))
+  } catch {
+    // quota — giữ nguyên bản cũ
+  }
+}
+
+/**
+ * Ghi danh sách mẫu do người dùng thay đổi. Mẫu nào biến mất so với bản đang lưu
+ * được ghi tombstone để xoá lan sang thiết bị khác thay vì "hồi sinh".
+ */
 export function saveExpenseTemplates(templates: ExpenseTemplate[]) {
   if (typeof localStorage === "undefined") return
-  localStorage.setItem(EXPENSE_TEMPLATES_STORAGE_KEY, JSON.stringify(templates))
+  const previous = loadExpenseTemplates()
+  const nextIds = new Set(templates.map((t) => t.id))
+  const tombstones = loadTemplateTombstones()
+  const now = nowIso()
+  for (const t of previous) {
+    if (!nextIds.has(t.id)) tombstones[t.id] = now
+  }
+  for (const id of nextIds) delete tombstones[id]
+  writeTemplatesRaw(templates, tombstones)
+  notifyTemplatesChanged()
+}
+
+/** Ghi kết quả đồng bộ (đã merge) — không sinh tombstone mới. */
+export function replaceExpenseTemplatesFromSync(templates: ExpenseTemplate[], tombstones: Record<string, string>) {
+  writeTemplatesRaw(templates, tombstones)
+  notifyTemplatesChanged()
 }
 
 export function getRecentExpenseTemplates(
@@ -218,6 +272,7 @@ export function upsertExpenseTemplate(input: {
       ...existing,
       name: existing.name || nextName,
       lastUsedAt: now,
+      updatedAt: now,
       useCount: Math.max(1, (existing.useCount ?? 1) + 1),
     }
     next = templates.slice()
@@ -232,6 +287,7 @@ export function upsertExpenseTemplate(input: {
       note: note || undefined,
       createdAt: now,
       lastUsedAt: now,
+      updatedAt: now,
       useCount: 1,
     }
     next = [...templates, created]
@@ -253,6 +309,7 @@ export function touchExpenseTemplate(
   const updated: ExpenseTemplate = {
     ...t,
     lastUsedAt: now,
+    updatedAt: now,
     useCount: Math.max(1, (t.useCount ?? 1) + 1),
   }
   const next = templates.slice()
@@ -292,6 +349,7 @@ export function updateExpenseTemplate(
       typeof patch.note === "string"
         ? normalizeNote(patch.note) || undefined
         : existing.note,
+    updatedAt: nowIso(),
   }
 
   if (next.amount <= 0) return templates

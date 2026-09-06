@@ -1,17 +1,8 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react"
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { toast } from "sonner"
-import {
-  AlertTriangle,
-  Cloud,
-  Database,
-  DownloadCloud,
-  HardDrive,
-  UploadCloud,
-} from "lucide-react"
+import { AlertTriangle, Cloud, HardDrive, Loader2 } from "lucide-react"
 import {
   AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -19,62 +10,122 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
-import { Progress } from "@/components/ui/progress"
+import { SyncStatusPill } from "@/app/SyncStatusPill"
 import {
   type DataSourceConfig,
   type DataSourceMode,
-  type StorageComparison,
   type UpstashConfig,
-  cleanupUpstashLegacyKeys,
-  compareLocalAndRemote,
-  downloadUpstashToLocal,
-  getBootSyncAction,
   getDataSourceConfig,
   getStorageErrorMessage,
   parseUpstashConfigInput,
   saveDataSourceConfig,
   setDataSourceMode,
-  testUpstashConnection,
-  uploadLocalToUpstash,
 } from "@/storage/dataSource"
-
-type PendingDecision =
-  | {
-      kind: "activate-local-remote-newer" | "boot-diverged"
-      comparison: StorageComparison
-      upstash: UpstashConfig
-    }
-  | null
+import { getSyncEngine } from "@/sync/appSync"
+import { createUpstashClient, pingRedis } from "@/sync/redisProtocol"
+import type { SyncDialog, SyncDialogChoice, SyncEngine, SyncState } from "@/sync/syncEngine"
 
 type DataSourceContextValue = {
   config: DataSourceConfig
-  comparison: StorageComparison | null
+  sync: SyncState
   loading: boolean
-  syncing: boolean
+  engine: SyncEngine
   saveUpstash: (config: UpstashConfig) => Promise<void>
   activateMode: (mode: DataSourceMode) => Promise<void>
-  refresh: () => Promise<StorageComparison | null>
-  uploadLocal: () => Promise<void>
-  downloadRemote: () => Promise<void>
+  syncNow: () => Promise<void>
 }
 
 const DataSourceContext = createContext<DataSourceContextValue | null>(null)
 
-async function downloadAndReload(upstash: UpstashConfig) {
-  const manifest = await downloadUpstashToLocal(upstash)
-  if (manifest) {
-    window.setTimeout(() => window.location.reload(), 250)
+function countEntities(doc: SyncDialog["localDoc"] | null) {
+  if (!doc) return 0
+  const e = doc.cttm.entities
+  return e.expenses.allIds.length + e.fixedCosts.allIds.length + e.purchasePlans.allIds.length + e.savingsTransactions.allIds.length
+}
+
+type DialogOption = { choice: SyncDialogChoice; label: string; variant?: "default" | "outline" | "destructive" | "secondary" }
+
+function getDialogCopy(dialog: SyncDialog): { title: string; description: string; options: DialogOption[] } {
+  const stats = dialog.stats
+  switch (dialog.kind) {
+    case "migrate-v2":
+      return {
+        title: "Kết nối Redis với cơ chế đồng bộ mới",
+        description:
+          "Dữ liệu trên máy này và bản đang có trên Redis (cơ chế cũ) khác nhau. Bản cũ trên Redis sẽ được lưu trữ lại, không bị xoá. Gộp cả hai là lựa chọn an toàn nhất.",
+        options: [
+          { choice: "merge", label: "Gộp cả hai (khuyên dùng)" },
+          { choice: "keep-local", label: "Dùng dữ liệu máy này", variant: "outline" },
+          { choice: "use-remote", label: "Dùng dữ liệu trên Redis", variant: "outline" },
+        ],
+      }
+    case "no-base":
+      return {
+        title: "Máy này chưa có điểm đồng bộ chung với Redis",
+        description:
+          "Không thể biết thay đổi nào mới hơn giữa máy này và Redis. Gộp cả hai sẽ giữ toàn bộ dữ liệu của hai bên; bản trên Redis vẫn nằm trong lịch sử để khôi phục.",
+        options: [
+          { choice: "merge", label: "Gộp cả hai (khuyên dùng)" },
+          { choice: "keep-local", label: "Dùng máy này, ghi lên Redis", variant: "outline" },
+          { choice: "use-remote", label: "Dùng dữ liệu trên Redis", variant: "outline" },
+        ],
+      }
+    case "mass-delete":
+      return {
+        title: "Bản trên Redis xoá nhiều dữ liệu",
+        description: stats
+          ? `Áp dụng sẽ xoá ${stats.missing}/${stats.total} mục đang có trên máy này (có thể do một thiết bị khác vừa xoá hoặc phục hồi file cũ). Bản hiện tại của máy được lưu vào lịch sử trước khi áp dụng.`
+          : "Áp dụng sẽ xoá nhiều mục đang có trên máy này. Bản hiện tại của máy được lưu vào lịch sử trước khi áp dụng.",
+        options: [
+          { choice: "keep-local", label: "Giữ dữ liệu máy này" },
+          { choice: "apply", label: "Áp dụng theo Redis", variant: "destructive" },
+        ],
+      }
+    case "remote-reset":
+      return {
+        title: "Redis không còn dữ liệu đồng bộ trước đó",
+        description:
+          dialog.remoteVersion > 0
+            ? "Dữ liệu trên Redis không thuộc chuỗi đồng bộ mà máy này đang theo (có thể bạn đã trỏ sang database khác, hoặc Redis đã bị xoá rồi ghi lại). Hãy chọn nguồn muốn giữ."
+            : "Redis đang trống trong khi máy này từng đồng bộ với nó. Có thể Redis đã bị xoá hoặc bạn đã đổi sang database khác.",
+        options: [
+          { choice: "push-local", label: "Đẩy dữ liệu máy này lên Redis" },
+          ...(dialog.remoteVersion > 0 ? [{ choice: "use-remote" as const, label: "Dùng dữ liệu trên Redis", variant: "outline" as const }] : []),
+          { choice: "pause", label: "Tạm dừng đồng bộ", variant: "outline" },
+        ],
+      }
+    case "legacy-changed":
+      return {
+        title: "Một thiết bị chạy bản cũ vừa ghi dữ liệu",
+        description:
+          "Có dữ liệu mới được ghi bằng cơ chế đồng bộ cũ (thiết bị chưa tải lại app). Gộp vào để không mất; hãy tải lại app trên mọi thiết bị để dùng cơ chế mới.",
+        options: [
+          { choice: "merge", label: "Gộp vào" },
+          { choice: "ignore", label: "Bỏ qua", variant: "outline" },
+        ],
+      }
+    default:
+      return { title: "Đồng bộ dữ liệu", description: "", options: [] }
   }
-  return manifest
 }
 
 export function DataSourceProvider({ children }: { children: React.ReactNode }) {
+  const engine = useMemo(() => getSyncEngine(), [])
+  const subscribeToEngine = useMemo(() => engine.subscribe.bind(engine), [engine])
+  const getEngineState = useMemo(() => engine.getState.bind(engine), [engine])
+  const sync = useSyncExternalStore(subscribeToEngine, getEngineState, getEngineState)
   const [config, setConfig] = useState<DataSourceConfig>(() => getDataSourceConfig())
-  const [comparison, setComparison] = useState<StorageComparison | null>(null)
-  const [pendingDecision, setPendingDecision] = useState<PendingDecision>(null)
   const [loading, setLoading] = useState(false)
-  const [syncing, setSyncing] = useState(false)
-  const [bootChecking, setBootChecking] = useState(() => getDataSourceConfig().mode === "upstash")
+  const [resolving, setResolving] = useState(false)
+
+  useEffect(() => {
+    engine.start()
+    return () => engine.stop()
+  }, [engine])
+
+  useEffect(() => {
+    if (sync.phase === "degraded" && sync.lastError) toast.error(sync.lastError)
+  }, [sync.phase, sync.lastError])
 
   const reloadConfig = useCallback(() => {
     const next = getDataSourceConfig()
@@ -82,88 +133,33 @@ export function DataSourceProvider({ children }: { children: React.ReactNode }) 
     return next
   }, [])
 
-  const refresh = useCallback(async () => {
-    const current = reloadConfig()
-    if (!current.upstash) {
-      setComparison(null)
-      return null
-    }
-    const next = await compareLocalAndRemote(current.upstash)
-    setComparison(next)
-    return next
-  }, [reloadConfig])
-
-  const uploadLocal = useCallback(async () => {
-    const current = getDataSourceConfig()
-    if (!current.upstash) {
-      toast.error("Chưa cấu hình Upstash Redis.")
-      return
-    }
-    setSyncing(true)
-    try {
-      await uploadLocalToUpstash(current.upstash, { cleanupLegacy: true })
-      await refresh()
-      toast.success("Đã tải dữ liệu localStorage lên Upstash Redis.")
-    } catch (error) {
-      toast.error(getStorageErrorMessage(error, "Không thể tải dữ liệu lên Upstash Redis."))
-    } finally {
-      setSyncing(false)
-    }
-  }, [refresh])
-
-  const downloadRemote = useCallback(async () => {
-    const current = getDataSourceConfig()
-    if (!current.upstash) {
-      toast.error("Chưa cấu hình Upstash Redis.")
-      return
-    }
-    setSyncing(true)
-    try {
-      await downloadAndReload(current.upstash)
-      toast.success("Đã tải dữ liệu Upstash Redis về localStorage.")
-    } catch (error) {
-      toast.error(getStorageErrorMessage(error, "Không thể tải dữ liệu từ Upstash Redis."))
-    } finally {
-      setSyncing(false)
-    }
-  }, [])
+  const syncNow = useCallback(async () => {
+    await engine.syncNow({ resume: true })
+  }, [engine])
 
   const saveUpstash = useCallback(
     async (nextConfig: UpstashConfig) => {
       const upstash = parseUpstashConfigInput(nextConfig.url, nextConfig.token)
       setLoading(true)
       try {
-        await testUpstashConnection(upstash)
+        const redis = await createUpstashClient(upstash)
+        await pingRedis(redis)
         const current = getDataSourceConfig()
         saveDataSourceConfig({ ...current, upstash, updatedAt: Date.now() })
-        setConfig(getDataSourceConfig())
-
-        const nextComparison = await compareLocalAndRemote(upstash)
-        setComparison(nextComparison)
-
-        if (!nextComparison.remoteHasData) {
-          await uploadLocalToUpstash(upstash, { cleanupLegacy: true })
-          await refresh()
-          toast.success("Kết nối thành công. Redis đang trống nên dữ liệu localStorage đã được tải lên.")
-          return
+        reloadConfig()
+        if (current.mode === "upstash") {
+          engine.restart()
+          toast.success("Đã lưu cấu hình. Đang đồng bộ lại với Redis.")
+        } else {
+          toast.success("Kết nối Upstash Redis thành công. Bấm thẻ “Upstash Redis” để bật đồng bộ.")
         }
-
-        await cleanupUpstashLegacyKeys(upstash)
-
-        if (current.mode === "upstash" && nextComparison.relation !== "same") {
-          await downloadAndReload(upstash)
-          toast.success("Kết nối thành công. Đang tải dữ liệu Redis về local cache.")
-          return
-        }
-
-        toast.success("Kết nối Upstash Redis thành công.")
       } catch (error) {
         toast.error(getStorageErrorMessage(error, "Không thể kết nối Upstash Redis."))
       } finally {
         setLoading(false)
       }
     },
-    [refresh],
+    [engine, reloadConfig],
   )
 
   const activateMode = useCallback(
@@ -172,27 +168,17 @@ export function DataSourceProvider({ children }: { children: React.ReactNode }) 
       setLoading(true)
       try {
         if (mode === "localStorage") {
-          if (!current.upstash) {
-            setDataSourceMode("localStorage")
-            setConfig(getDataSourceConfig())
-            toast.success("Đã dùng localStorage.")
-            return
+          if (current.mode === "upstash" && current.upstash) {
+            // Cố gắng đẩy nốt thay đổi trước khi tắt đồng bộ; không bao giờ xoá gì trên máy.
+            await engine.syncNow()
+            if (engine.isDirty()) {
+              toast.warning("Còn thay đổi chưa đẩy được lên Redis. Dữ liệu vẫn nằm trên máy này và sẽ đồng bộ khi bật lại.")
+            }
           }
-
-          const nextComparison = await compareLocalAndRemote(current.upstash)
-          setComparison(nextComparison)
-          if (nextComparison.relation === "remote-newer") {
-            setPendingDecision({
-              kind: "activate-local-remote-newer",
-              comparison: nextComparison,
-              upstash: current.upstash,
-            })
-            return
-          }
-
           setDataSourceMode("localStorage", current.upstash)
-          setConfig(getDataSourceConfig())
-          toast.success("Đã dùng localStorage.")
+          reloadConfig()
+          engine.restart()
+          toast.success("Đã chuyển sang lưu trên máy này.")
           return
         }
 
@@ -200,261 +186,111 @@ export function DataSourceProvider({ children }: { children: React.ReactNode }) 
           toast.error("Hãy cấu hình Upstash Redis trước.")
           return
         }
-
-        await testUpstashConnection(current.upstash)
-        const nextComparison = await compareLocalAndRemote(current.upstash)
-        setComparison(nextComparison)
-
-        if (!nextComparison.remoteHasData) {
-          await uploadLocalToUpstash(current.upstash, { cleanupLegacy: true })
-          setDataSourceMode("upstash", current.upstash)
-          setConfig(getDataSourceConfig())
-          await refresh()
-          toast.success("Đã dùng Upstash Redis. Redis trống nên dữ liệu localStorage đã được tải lên.")
-          return
-        }
-
-        if (nextComparison.relation === "same") {
-          setDataSourceMode("upstash", current.upstash)
-          setConfig(getDataSourceConfig())
-          toast.success("Đã dùng Upstash Redis.")
-          return
-        }
-
+        const redis = await createUpstashClient(current.upstash)
+        await pingRedis(redis)
         setDataSourceMode("upstash", current.upstash)
-        setConfig(getDataSourceConfig())
-        await downloadAndReload(current.upstash)
-        toast.success("Đã dùng Upstash Redis. Redis là nguồn chính nên dữ liệu đã được tải về local cache.")
+        reloadConfig()
+        engine.restart()
+        toast.success("Đã bật đồng bộ Upstash Redis.")
       } catch (error) {
         toast.error(getStorageErrorMessage(error, "Không thể chuyển nguồn dữ liệu."))
       } finally {
         setLoading(false)
       }
     },
-    [refresh],
+    [engine, reloadConfig],
   )
 
-  const resolveUploadLocal = useCallback(async () => {
-    if (!pendingDecision) return
-    setSyncing(true)
-    try {
-      await uploadLocalToUpstash(pendingDecision.upstash, { cleanupLegacy: true })
-      setConfig(getDataSourceConfig())
-      setPendingDecision(null)
-      await refresh()
-      toast.success("Đã tải localStorage lên Upstash Redis.")
-    } catch (error) {
-      toast.error(getStorageErrorMessage(error, "Không thể tải localStorage lên Redis."))
-    } finally {
-      setSyncing(false)
-      setBootChecking(false)
-    }
-  }, [pendingDecision, refresh])
-
-  const resolveDownloadRemote = useCallback(async () => {
-    if (!pendingDecision) return
-    setSyncing(true)
-    try {
-      await downloadAndReload(pendingDecision.upstash)
-      if (pendingDecision.kind === "activate-local-remote-newer") {
-        setDataSourceMode("localStorage", pendingDecision.upstash)
-      }
-      setConfig(getDataSourceConfig())
-      setPendingDecision(null)
-      toast.success("Đã tải dữ liệu Upstash Redis về localStorage.")
-    } catch (error) {
-      toast.error(getStorageErrorMessage(error, "Không thể tải Redis về localStorage."))
-    } finally {
-      setSyncing(false)
-      setBootChecking(false)
-    }
-  }, [pendingDecision])
-
-  const resolveKeepLocal = useCallback(() => {
-    if (!pendingDecision) return
-    setDataSourceMode("localStorage", pendingDecision.upstash)
-    setConfig(getDataSourceConfig())
-    setPendingDecision(null)
-    setBootChecking(false)
-    toast.info("Đã giữ dữ liệu localStorage hiện tại.")
-  }, [pendingDecision])
-
-  useEffect(() => {
-    let cancelled = false
-    async function bootCheck() {
-      const current = getDataSourceConfig()
-      if (current.mode !== "upstash" || !current.upstash) {
-        setBootChecking(false)
-        return
-      }
-
+  const resolve = useCallback(
+    async (choice: SyncDialogChoice, dialogId: number) => {
+      setResolving(true)
       try {
-        const nextComparison = await compareLocalAndRemote(current.upstash)
-        if (cancelled) return
-        setComparison(nextComparison)
-        const action = getBootSyncAction(nextComparison)
-
-        if (action === "upload-local") {
-          await uploadLocalToUpstash(current.upstash)
-          if (!cancelled) setBootChecking(false)
-          return
-        }
-
-        if (action === "none") {
-          setBootChecking(false)
-          return
-        }
-
-        if (action === "download-remote") {
-          await downloadAndReload(current.upstash)
-          return
-        }
-
-        setPendingDecision({
-          kind: "boot-diverged",
-          comparison: nextComparison,
-          upstash: current.upstash,
-        })
-      } catch (error) {
-        if (!cancelled) {
-          toast.error(getStorageErrorMessage(error, "Không thể kiểm tra Upstash Redis."))
-          setBootChecking(false)
-        }
+        await engine.resolveDialog(choice, dialogId)
+      } finally {
+        setResolving(false)
       }
-    }
-
-    void bootCheck()
-    return () => {
-      cancelled = true
-    }
-  }, [])
+    },
+    [engine],
+  )
 
   const value = useMemo<DataSourceContextValue>(
-    () => ({
-      config,
-      comparison,
-      loading,
-      syncing,
-      saveUpstash,
-      activateMode,
-      refresh,
-      uploadLocal,
-      downloadRemote,
-    }),
-    [activateMode, comparison, config, downloadRemote, loading, refresh, saveUpstash, syncing, uploadLocal],
+    () => ({ config, sync, loading, engine, saveUpstash, activateMode, syncNow }),
+    [activateMode, config, engine, loading, saveUpstash, sync, syncNow],
   )
 
-  const copy = getDecisionCopy(pendingDecision)
-  const blockApp = bootChecking && !pendingDecision
+  const dialog = sync.dialog
+  const copy = dialog ? getDialogCopy(dialog) : null
 
   return (
     <DataSourceContext.Provider value={value}>
-      {!blockApp ? children : null}
+      {children}
+      <SyncStatusPill sync={sync} />
 
-      {blockApp ? (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-background/80 backdrop-blur">
-          <div className="w-[min(420px,calc(100vw-2rem))] rounded-lg border bg-card p-5 shadow-lg">
-            <div className="flex items-center gap-3">
-              <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                <Database className="h-5 w-5" />
-              </span>
-              <div>
-                <div className="font-semibold">Đang kiểm tra nguồn dữ liệu</div>
-                <div className="text-sm text-muted-foreground">Đang so sánh localStorage và Upstash Redis.</div>
-              </div>
-            </div>
-            <Progress value={65} className="mt-4" />
-          </div>
-        </div>
-      ) : null}
-
-      <AlertDialog open={Boolean(pendingDecision)}>
+      <AlertDialog open={Boolean(dialog)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2">
               <AlertTriangle className="h-5 w-5 text-amber-500" />
-              {copy.title}
+              {copy?.title}
             </AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-3">
-                <p>{copy.description}</p>
-                {pendingDecision ? (
+                <p>{copy?.description}</p>
+                {dialog ? (
                   <div className="grid gap-2 rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground">
                     <div className="flex items-center justify-between gap-3">
                       <span className="inline-flex items-center gap-1.5">
                         <HardDrive className="h-3.5 w-3.5" />
-                        localStorage
+                        Máy này
                       </span>
-                      <span>
-                        {pendingDecision.comparison.local.keyCount} key · rev{" "}
-                        {pendingDecision.comparison.local.revision || 0}
-                      </span>
+                      <span>{countEntities(dialog.localDoc)} mục</span>
                     </div>
                     <div className="flex items-center justify-between gap-3">
                       <span className="inline-flex items-center gap-1.5">
                         <Cloud className="h-3.5 w-3.5" />
-                        Upstash Redis
+                        {dialog.kind === "migrate-v2" || dialog.kind === "legacy-changed" ? "Redis (bản cũ)" : `Redis v${dialog.remoteVersion}`}
                       </span>
-                      <span>
-                        {pendingDecision.comparison.remote?.keyCount ?? 0} key · rev{" "}
-                        {pendingDecision.comparison.remote?.revision ?? 0}
-                      </span>
+                      <span>{countEntities(dialog.remoteDoc)} mục</span>
                     </div>
+                    {dialog.mergedDoc ? (
+                      <div className="flex items-center justify-between gap-3">
+                        <span>Sau khi gộp</span>
+                        <span>{countEntities(dialog.mergedDoc)} mục</span>
+                      </div>
+                    ) : null}
+                    {dialog.remoteHead?.deviceLabel ? (
+                      <div className="flex items-center justify-between gap-3">
+                        <span>Ghi lần cuối bởi</span>
+                        <span>
+                          {dialog.remoteHead.deviceLabel} · {new Date(dialog.remoteHead.committedAt).toLocaleString("vi-VN")}
+                        </span>
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
-                {syncing ? <Progress value={75} /> : null}
+                <p className="text-xs text-muted-foreground">
+                  Mọi lựa chọn đều giữ lại bản trước đó (lịch sử trên Redis và bản lưu trên máy) để có thể khôi phục.
+                </p>
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={syncing} onClick={resolveKeepLocal}>
-              {copy.keepLocal}
-            </AlertDialogCancel>
-            <Button variant="outline" disabled={syncing} onClick={resolveUploadLocal}>
-              <UploadCloud className="h-4 w-4" />
-              {copy.uploadLocal}
-            </Button>
-            <AlertDialogAction disabled={syncing} onClick={resolveDownloadRemote}>
-              <DownloadCloud className="h-4 w-4" />
-              {copy.downloadRemote}
-            </AlertDialogAction>
+          <AlertDialogFooter className="flex-col gap-2 sm:flex-row sm:flex-wrap">
+            {copy?.options.map((option) => (
+              <Button
+                key={option.choice}
+                variant={option.variant ?? "default"}
+                disabled={resolving || !dialog}
+                onClick={() => dialog && void resolve(option.choice, dialog.id)}
+              >
+                {resolving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                {option.label}
+              </Button>
+            ))}
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
     </DataSourceContext.Provider>
   )
-}
-
-function getDecisionCopy(decision: PendingDecision) {
-  if (!decision) {
-    return {
-      title: "",
-      description: "",
-      keepLocal: "Giữ local",
-      uploadLocal: "Tải local lên Redis",
-      downloadRemote: "Tải Redis về local",
-    }
-  }
-
-  if (decision.kind === "boot-diverged") {
-    return {
-      title: "Dữ liệu local và Redis khác nhau",
-      description:
-        "Hai nguồn có cùng phiên bản nhưng nội dung khác nhau. Hãy chọn nguồn cần giữ để tránh ghi đè dữ liệu ngoài ý muốn.",
-      keepLocal: "Dùng localStorage",
-      uploadLocal: "Ghi local lên Redis",
-      downloadRemote: "Tải Redis về local",
-    }
-  }
-
-  return {
-    title: "Redis mới hơn localStorage",
-    description:
-      "Bạn đang chuyển về localStorage nhưng dữ liệu trên Redis mới hơn. Nên tải Redis về local để tránh mất dữ liệu mới.",
-    keepLocal: "Vẫn dùng local",
-    uploadLocal: "Ghi local lên Redis",
-    downloadRemote: "Tải Redis về local",
-  }
 }
 
 export function useDataSource() {

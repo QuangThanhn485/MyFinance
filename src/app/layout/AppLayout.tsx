@@ -3,7 +3,8 @@ import { Outlet, useLocation } from "react-router-dom"
 import AppOverlays from "@/app/layout/AppOverlays"
 import { MobileAppBar, MobileBottomNav } from "@/app/layout/MobileNavigation"
 import SideNav from "@/app/layout/SideNav"
-import { useAppStore } from "@/store/useAppStore"
+import { monthFromIsoDate, todayIso } from "@/lib/date"
+import { getSyncEngine } from "@/sync/appSync"
 
 const SIDEBAR_COLLAPSED_KEY = "smartSpend.ui.sidebarCollapsed.v1"
 const APP_TITLE = "Chi Tiêu Thông Minh"
@@ -22,7 +23,6 @@ const ROUTE_TITLES: Record<string, string> = {
 }
 
 export default function AppLayout() {
-  const autoClose = useAppStore((s) => s.actions.autoClosePreviousMonthIfNeeded)
   const location = useLocation()
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
@@ -40,13 +40,15 @@ export default function AppLayout() {
     }
   }, [sidebarCollapsed])
 
+  // Auto-close tháng đi qua SyncEngine: chỉ chạy khi đã có dữ liệu mới nhất (hoặc mode local),
+  // và chỉ một lần cho mỗi tháng — không còn ghi đĩa/đồng bộ vô nghĩa mỗi 60 giây.
   useEffect(() => {
-    autoClose()
-    const timer = window.setInterval(() => {
-      autoClose()
-    }, 60_000)
+    const engine = getSyncEngine()
+    const tick = () => engine.requestAutoClose(monthFromIsoDate(todayIso()))
+    tick()
+    const timer = window.setInterval(tick, 60_000)
     return () => window.clearInterval(timer)
-  }, [autoClose])
+  }, [])
 
   useEffect(() => {
     const pathname = location.pathname
