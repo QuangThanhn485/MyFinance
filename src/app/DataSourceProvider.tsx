@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { toast } from "sonner"
-import { AlertTriangle, Cloud, HardDrive, Loader2 } from "lucide-react"
+import { AlertTriangle, Loader2 } from "lucide-react"
 import {
   AlertDialog,
   AlertDialogContent,
@@ -11,6 +11,8 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { SyncStatusPill } from "@/app/SyncStatusPill"
+import { getLedgerEngine } from "@/ledger/appLedger"
+import type { LedgerDialog, LedgerDialogChoice, LedgerEngine, LedgerSyncState } from "@/ledger/engine"
 import {
   type DataSourceConfig,
   type DataSourceMode,
@@ -21,15 +23,13 @@ import {
   saveDataSourceConfig,
   setDataSourceMode,
 } from "@/storage/dataSource"
-import { getSyncEngine } from "@/sync/appSync"
 import { createUpstashClient, pingRedis } from "@/sync/redisProtocol"
-import type { SyncDialog, SyncDialogChoice, SyncEngine, SyncState } from "@/sync/syncEngine"
 
 type DataSourceContextValue = {
   config: DataSourceConfig
-  sync: SyncState
+  sync: LedgerSyncState
   loading: boolean
-  engine: SyncEngine
+  engine: LedgerEngine
   saveUpstash: (config: UpstashConfig) => Promise<void>
   activateMode: (mode: DataSourceMode) => Promise<void>
   syncNow: () => Promise<void>
@@ -37,71 +37,28 @@ type DataSourceContextValue = {
 
 const DataSourceContext = createContext<DataSourceContextValue | null>(null)
 
-function countEntities(doc: SyncDialog["localDoc"] | null) {
-  if (!doc) return 0
-  const e = doc.cttm.entities
-  return e.expenses.allIds.length + e.fixedCosts.allIds.length + e.purchasePlans.allIds.length + e.savingsTransactions.allIds.length
-}
+type DialogOption = { choice: LedgerDialogChoice; label: string; variant?: "default" | "outline" | "destructive" | "secondary" }
 
-type DialogOption = { choice: SyncDialogChoice; label: string; variant?: "default" | "outline" | "destructive" | "secondary" }
-
-function getDialogCopy(dialog: SyncDialog): { title: string; description: string; options: DialogOption[] } {
-  const stats = dialog.stats
+function getDialogCopy(dialog: LedgerDialog): { title: string; description: string; options: DialogOption[] } {
   switch (dialog.kind) {
-    case "migrate-v2":
+    case "remote-empty":
       return {
-        title: "Kết nối Redis với cơ chế đồng bộ mới",
+        title: "Redis không còn sổ cái mà máy này đang đồng bộ",
         description:
-          "Dữ liệu trên máy này và bản đang có trên Redis (cơ chế cũ) khác nhau. Bản cũ trên Redis sẽ được lưu trữ lại, không bị xoá. Gộp cả hai là lựa chọn an toàn nhất.",
+          "Database Upstash đang trống (có thể đã bị xoá, hoặc bạn vừa trỏ sang database mới). Dữ liệu trên máy này vẫn nguyên vẹn. Bạn có thể khởi tạo lại sổ cái trên Redis từ dữ liệu máy này.",
         options: [
-          { choice: "merge", label: "Gộp cả hai (khuyên dùng)" },
-          { choice: "keep-local", label: "Dùng dữ liệu máy này", variant: "outline" },
-          { choice: "use-remote", label: "Dùng dữ liệu trên Redis", variant: "outline" },
-        ],
-      }
-    case "no-base":
-      return {
-        title: "Máy này chưa có điểm đồng bộ chung với Redis",
-        description:
-          "Không thể biết thay đổi nào mới hơn giữa máy này và Redis. Gộp cả hai sẽ giữ toàn bộ dữ liệu của hai bên; bản trên Redis vẫn nằm trong lịch sử để khôi phục.",
-        options: [
-          { choice: "merge", label: "Gộp cả hai (khuyên dùng)" },
-          { choice: "keep-local", label: "Dùng máy này, ghi lên Redis", variant: "outline" },
-          { choice: "use-remote", label: "Dùng dữ liệu trên Redis", variant: "outline" },
-        ],
-      }
-    case "mass-delete":
-      return {
-        title: "Bản trên Redis xoá nhiều dữ liệu",
-        description: stats
-          ? `Áp dụng sẽ xoá ${stats.missing}/${stats.total} mục đang có trên máy này (có thể do một thiết bị khác vừa xoá hoặc phục hồi file cũ). Bản hiện tại của máy được lưu vào lịch sử trước khi áp dụng.`
-          : "Áp dụng sẽ xoá nhiều mục đang có trên máy này. Bản hiện tại của máy được lưu vào lịch sử trước khi áp dụng.",
-        options: [
-          { choice: "keep-local", label: "Giữ dữ liệu máy này" },
-          { choice: "apply", label: "Áp dụng theo Redis", variant: "destructive" },
-        ],
-      }
-    case "remote-reset":
-      return {
-        title: "Redis không còn dữ liệu đồng bộ trước đó",
-        description:
-          dialog.remoteVersion > 0
-            ? "Dữ liệu trên Redis không thuộc chuỗi đồng bộ mà máy này đang theo (có thể bạn đã trỏ sang database khác, hoặc Redis đã bị xoá rồi ghi lại). Hãy chọn nguồn muốn giữ."
-            : "Redis đang trống trong khi máy này từng đồng bộ với nó. Có thể Redis đã bị xoá hoặc bạn đã đổi sang database khác.",
-        options: [
-          { choice: "push-local", label: "Đẩy dữ liệu máy này lên Redis" },
-          ...(dialog.remoteVersion > 0 ? [{ choice: "use-remote" as const, label: "Dùng dữ liệu trên Redis", variant: "outline" as const }] : []),
+          { choice: "reseed", label: "Đẩy dữ liệu máy này lên" },
           { choice: "pause", label: "Tạm dừng đồng bộ", variant: "outline" },
         ],
       }
-    case "legacy-changed":
+    case "remote-different":
       return {
-        title: "Một thiết bị chạy bản cũ vừa ghi dữ liệu",
+        title: "Redis đang chứa một sổ cái khác",
         description:
-          "Có dữ liệu mới được ghi bằng cơ chế đồng bộ cũ (thiết bị chưa tải lại app). Gộp vào để không mất; hãy tải lại app trên mọi thiết bị để dùng cơ chế mới.",
+          "Sổ cái trên database này không phải sổ cái máy này đã đồng bộ (đổi database, hoặc database bị thay). Gộp sẽ thêm dữ liệu của máy này vào sổ cái đó mà không xoá gì của nó.",
         options: [
-          { choice: "merge", label: "Gộp vào" },
-          { choice: "ignore", label: "Bỏ qua", variant: "outline" },
+          { choice: "merge-local", label: "Gộp dữ liệu máy này vào" },
+          { choice: "pause", label: "Tạm dừng đồng bộ", variant: "outline" },
         ],
       }
     default:
@@ -110,7 +67,7 @@ function getDialogCopy(dialog: SyncDialog): { title: string; description: string
 }
 
 export function DataSourceProvider({ children }: { children: React.ReactNode }) {
-  const engine = useMemo(() => getSyncEngine(), [])
+  const engine = useMemo(() => getLedgerEngine(), [])
   const subscribeToEngine = useMemo(() => engine.subscribe.bind(engine), [engine])
   const getEngineState = useMemo(() => engine.getState.bind(engine), [engine])
   const sync = useSyncExternalStore(subscribeToEngine, getEngineState, getEngineState)
@@ -119,13 +76,23 @@ export function DataSourceProvider({ children }: { children: React.ReactNode }) 
   const [resolving, setResolving] = useState(false)
 
   useEffect(() => {
-    engine.start()
-    return () => engine.stop()
-  }, [engine])
+    if ((sync.phase === "error" || sync.phase === "needs-update") && sync.lastError) toast.error(sync.lastError)
+  }, [sync.phase, sync.lastError])
 
   useEffect(() => {
-    if (sync.phase === "degraded" && sync.lastError) toast.error(sync.lastError)
-  }, [sync.phase, sync.lastError])
+    if (sync.storageError) toast.error(sync.storageError)
+  }, [sync.storageError])
+
+  useEffect(() => {
+    if (!sync.notice) return
+    if (sync.notice.kind === "edit-on-deleted") {
+      toast.warning(
+        `${sync.notice.count} thay đổi của bạn rơi vào mục đã bị xoá trên thiết bị khác nên không được áp dụng. Có thể khôi phục mục đó trong “Nhật ký thay đổi”.`,
+        { duration: 8000 },
+      )
+    }
+    engine.dismissNotice()
+  }, [engine, sync.notice])
 
   const reloadConfig = useCallback(() => {
     const next = getDataSourceConfig()
@@ -169,10 +136,10 @@ export function DataSourceProvider({ children }: { children: React.ReactNode }) 
       try {
         if (mode === "localStorage") {
           if (current.mode === "upstash" && current.upstash) {
-            // Cố gắng đẩy nốt thay đổi trước khi tắt đồng bộ; không bao giờ xoá gì trên máy.
+            // Cố đẩy nốt thay đổi trước khi tắt đồng bộ; không bao giờ xoá gì trên máy.
             await engine.syncNow()
-            if (engine.isDirty()) {
-              toast.warning("Còn thay đổi chưa đẩy được lên Redis. Dữ liệu vẫn nằm trên máy này và sẽ đồng bộ khi bật lại.")
+            if (engine.pendingCount() > 0) {
+              toast.warning("Còn thay đổi chưa đẩy được lên Redis. Chúng vẫn nằm trên máy này và sẽ được gửi khi bật lại đồng bộ.")
             }
           }
           setDataSourceMode("localStorage", current.upstash)
@@ -202,7 +169,7 @@ export function DataSourceProvider({ children }: { children: React.ReactNode }) 
   )
 
   const resolve = useCallback(
-    async (choice: SyncDialogChoice, dialogId: number) => {
+    async (choice: LedgerDialogChoice, dialogId: number) => {
       setResolving(true)
       try {
         await engine.resolveDialog(choice, dialogId)
@@ -236,40 +203,8 @@ export function DataSourceProvider({ children }: { children: React.ReactNode }) 
             <AlertDialogDescription asChild>
               <div className="space-y-3">
                 <p>{copy?.description}</p>
-                {dialog ? (
-                  <div className="grid gap-2 rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground">
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="inline-flex items-center gap-1.5">
-                        <HardDrive className="h-3.5 w-3.5" />
-                        Máy này
-                      </span>
-                      <span>{countEntities(dialog.localDoc)} mục</span>
-                    </div>
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="inline-flex items-center gap-1.5">
-                        <Cloud className="h-3.5 w-3.5" />
-                        {dialog.kind === "migrate-v2" || dialog.kind === "legacy-changed" ? "Redis (bản cũ)" : `Redis v${dialog.remoteVersion}`}
-                      </span>
-                      <span>{countEntities(dialog.remoteDoc)} mục</span>
-                    </div>
-                    {dialog.mergedDoc ? (
-                      <div className="flex items-center justify-between gap-3">
-                        <span>Sau khi gộp</span>
-                        <span>{countEntities(dialog.mergedDoc)} mục</span>
-                      </div>
-                    ) : null}
-                    {dialog.remoteHead?.deviceLabel ? (
-                      <div className="flex items-center justify-between gap-3">
-                        <span>Ghi lần cuối bởi</span>
-                        <span>
-                          {dialog.remoteHead.deviceLabel} · {new Date(dialog.remoteHead.committedAt).toLocaleString("vi-VN")}
-                        </span>
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
                 <p className="text-xs text-muted-foreground">
-                  Mọi lựa chọn đều giữ lại bản trước đó (lịch sử trên Redis và bản lưu trên máy) để có thể khôi phục.
+                  Trong lúc chờ bạn chọn, mọi thao tác vẫn được ghi vào nhật ký trên máy này và không mất.
                 </p>
               </div>
             </AlertDialogDescription>

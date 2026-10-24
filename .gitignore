@@ -9,3 +9,6 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+
+# Dữ liệu sinh ra cho e2e đồng bộ
+e2e/sync/seed.json

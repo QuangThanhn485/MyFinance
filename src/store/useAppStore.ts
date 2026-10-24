@@ -50,10 +50,11 @@ import {
 import {
   createDebouncedSaver,
   loadCttmStateFromKey,
+  normalizeCttmStateFromRaw,
   saveCttmState,
 } from "@/storage/localStorage"
 import { createInitialState, STORAGE_KEY, type CttmState } from "@/storage/schema"
-import { getDataSourceConfig } from "@/storage/dataSource"
+import type { ExpenseTemplate } from "@/storage/templates"
 import { monotonicIso } from "@/sync/clock"
 import { contentHash } from "@/sync/snapshot"
 import {
@@ -66,7 +67,6 @@ import {
   saveWorkspaceId,
   type WorkspaceId,
 } from "@/storage/workspace"
-import { writeLastBackup } from "@/storage/backups"
 import { getMonthDayContext } from "@/storage/dayLock"
 
 type UiState = {
@@ -162,13 +162,14 @@ type Actions = {
   importJson: (raw: string) => { ok: true } | { ok: false; error: string }
   resetAll: () => void
   autoClosePreviousMonthIfNeeded: () => void
-  /** Thay toàn bộ dữ liệu (dùng bởi SyncEngine sau khi merge/khôi phục). Không reload trang. */
-  replaceData: (next: CttmState) => void
+  setTemplates: (next: ExpenseTemplate[]) => void
 }
 
 export type AppStore = {
   workspace: WorkspaceId
   data: CttmState
+  /** Mẫu chi tiêu nhanh (dùng chung mọi workspace). */
+  templates: ExpenseTemplate[]
   ui: UiState
   actions: Actions
 }
@@ -183,27 +184,6 @@ function touch(state: CttmState): CttmState {
 
 function id(prefix: "ex_" | "fc_" | "pp_" | "st_") {
   return `${prefix}${nanoid(10)}`
-}
-
-/** Ghi tombstone cho một id (hoặc cat:<id>) để lệnh xoá lan sang thiết bị khác khi đồng bộ. */
-function withTombstone(state: CttmState, key: string): CttmState {
-  return { ...state, tombstones: { ...(state.tombstones ?? {}), [key]: nowIso() } }
-}
-
-/** Khi thay toàn bộ dữ liệu (import/reset), mọi entity biến mất đều được ghi tombstone. */
-function tombstonesForReplacement(prev: CttmState, next: CttmState): Record<string, string> {
-  const at = nowIso()
-  const out: Record<string, string> = { ...(next.tombstones ?? {}) }
-  for (const kind of ["expenses", "fixedCosts", "purchasePlans", "savingsTransactions"] as const) {
-    for (const entityId of prev.entities[kind].allIds) {
-      if (!next.entities[kind].byId[entityId]) out[entityId] = at
-    }
-  }
-  const nextCategoryIds = new Set(next.expenseCategories.map((category) => category.id))
-  for (const category of prev.expenseCategories) {
-    if (!nextCategoryIds.has(category.id)) out[`cat:${category.id}`] = at
-  }
-  return out
 }
 
 function cloneSettings(settings: Settings): Settings {
@@ -442,7 +422,7 @@ function buildDemoSeedState(now: string): CttmState {
     {
       id: id("fc_"),
       month,
-      name: "Tiá»n nhÃ ",
+      name: "Tiền nhà",
       amountVnd: 5000000,
       paidAmountVnd: 0,
       category: "Bills",
@@ -453,7 +433,7 @@ function buildDemoSeedState(now: string): CttmState {
     {
       id: id("fc_"),
       month,
-      name: "Äiá»‡n/nÆ°á»›c/internet",
+      name: "Điện/nước/internet",
       amountVnd: 1200000,
       paidAmountVnd: 0,
       category: "Bills",
@@ -464,7 +444,7 @@ function buildDemoSeedState(now: string): CttmState {
     {
       id: id("fc_"),
       month,
-      name: "Báº£o hiá»ƒm",
+      name: "Bảo hiểm",
       amountVnd: 600000,
       paidAmountVnd: 0,
       category: "Bills",
@@ -483,35 +463,35 @@ function buildDemoSeedState(now: string): CttmState {
       amountVnd: 35000,
       category: "Food",
       bucket: "needs",
-      note: "CÃ  phÃª",
+      note: "Cà phê",
       date: today,
     },
     {
       amountVnd: 85000,
       category: "Food",
       bucket: "needs",
-      note: "Ä‚n trÆ°a",
+      note: "Ăn trưa",
       date: today,
     },
     {
       amountVnd: 25000,
       category: "Transport",
       bucket: "needs",
-      note: "Xe Ã´m",
+      note: "Xe ôm",
       date: addDaysIsoDate(today, -1),
     },
     {
       amountVnd: 120000,
       category: "Food",
       bucket: "needs",
-      note: "Ä‚n tá»‘i",
+      note: "Ăn tối",
       date: addDaysIsoDate(today, -1),
     },
     {
       amountVnd: 180000,
       category: "Shopping",
       bucket: "wants",
-      note: "Mua láº·t váº·t",
+      note: "Mua lặt vặt",
       date: addDaysIsoDate(today, -2),
     },
     {
@@ -525,14 +505,14 @@ function buildDemoSeedState(now: string): CttmState {
       amountVnd: 90000,
       category: "Health",
       bucket: "needs",
-      note: "Thuá»‘c",
+      note: "Thuốc",
       date: addDaysIsoDate(today, -4),
     },
     {
       amountVnd: 42000,
       category: "Food",
       bucket: "needs",
-      note: "Ä‚n sÃ¡ng",
+      note: "Ăn sáng",
       date: addDaysIsoDate(today, -5),
     },
   ]
@@ -561,54 +541,78 @@ function buildDemoSeedState(now: string): CttmState {
       wantsFreezeUntil: null,
       appliedAt: now,
       source: "seed",
-      note: "Dá»¯ liá»‡u máº«u",
+      note: "Dữ liệu mẫu",
     },
   }
 
   return base
 }
 
-const persistedListeners = new Set<(data: CttmState) => void>()
-const debouncedSaver = createDebouncedSaver(400, (key, state) => {
-  if (key !== STORAGE_KEY) return
-  for (const listener of persistedListeners) listener(state)
-})
-const debouncedSave = debouncedSaver.save
+// ---------------------------------------------------------------------------
+// Liên kết với sổ cái (src/ledger): store KHÔNG tự ghi dữ liệu thật xuống đĩa. Mọi thay đổi của
+// `data` (workspace real) và `templates` được appLedger biến thành op; sổ cái đổ dữ liệu vào
+// store qua hydrateStoreFromLedger().
+// ---------------------------------------------------------------------------
+
+let hydratingDepth = 0
+let derivedDepth = 0
+let realDataProvider: (() => { cttm: CttmState; templates: ExpenseTemplate[] }) | null = null
+
+/** true khi store đang được sổ cái đổ dữ liệu vào — thay đổi lúc đó không phải thao tác người dùng. */
+export function isHydrating() {
+  return hydratingDepth > 0
+}
+
+/** true khi thay đổi đang diễn ra là dữ liệu tự sinh (sang tháng mới...), không phải người dùng nhập. */
+export function isDerivedWrite() {
+  return derivedDepth > 0
+}
+
+function runDerived(fn: () => void) {
+  derivedDepth += 1
+  try {
+    fn()
+  } finally {
+    derivedDepth -= 1
+  }
+}
+
+export function bindRealDataProvider(provider: (() => { cttm: CttmState; templates: ExpenseTemplate[] }) | null) {
+  realDataProvider = provider
+}
+
+const demoSaver = createDebouncedSaver(400)
 const persistedWorkspace = loadWorkspaceId()
 const initialWorkspace: WorkspaceId = "real"
 if (persistedWorkspace !== "real") {
   saveWorkspaceId("real")
 }
-const initialStorageKey = getStorageKeyForWorkspace(initialWorkspace)
-const loadedInitialData = loadCttmStateFromKey(initialStorageKey)
-// Ở mode Upstash, auto-close tháng chỉ chạy SAU khi SyncEngine đã pull được bản mới nhất,
-// để máy mở lại sau nhiều ngày không tự sinh dữ liệu dẫn xuất trên bản cũ rồi đẩy lên mây.
-const initialData =
-  getDataSourceConfig().mode === "upstash"
-    ? loadedInitialData
-    : autoClosePreviousMonthIfNeeded(loadedInitialData)
-if (initialData !== loadedInitialData) {
-  saveCttmState(initialStorageKey, initialData)
-}
+const demoStorageKey = getStorageKeyForWorkspace("demo")
 
 export const useAppStore = create<AppStore>()(
   subscribeWithSelector((set, get) => ({
     workspace: initialWorkspace,
-    data: initialData,
+    // Dữ liệu thật được sổ cái đổ vào lúc khởi động (trước khi render), xem src/ledger/appLedger.ts.
+    data: createInitialState(nowIso()),
+    templates: [],
     ui: { overspending: null, forcedPurchaseRescue: null },
     actions: {
       setWorkspace: (workspace) => {
         const currentWorkspace = get().workspace
         if (workspace === currentWorkspace) return
 
-        saveCttmState(getStorageKeyForWorkspace(currentWorkspace), get().data)
+        if (currentWorkspace === "demo") saveCttmState(demoStorageKey, get().data)
         saveWorkspaceId(workspace)
+
+        // Dữ liệu thật lấy từ sổ cái (không bao giờ đọc/ghi cttm_v1 của bản cũ).
+        const nextData =
+          workspace === "real"
+            ? (realDataProvider?.().cttm ?? loadCttmStateFromKey(STORAGE_KEY))
+            : autoClosePreviousMonthIfNeeded(loadCttmStateFromKey(demoStorageKey))
 
         set(() => ({
           workspace,
-          data: autoClosePreviousMonthIfNeeded(
-            loadCttmStateFromKey(getStorageKeyForWorkspace(workspace)),
-          ),
+          data: nextData,
           ui: { overspending: null, forcedPurchaseRescue: null },
         }))
       },
@@ -621,7 +625,7 @@ export const useAppStore = create<AppStore>()(
 
         const now = nowIso()
         const seeded = buildDemoSeedState(now)
-        saveCttmState(getStorageKeyForWorkspace("demo"), seeded)
+        saveCttmState(demoStorageKey, seeded)
 
         set(() => ({
           data: seeded,
@@ -630,21 +634,10 @@ export const useAppStore = create<AppStore>()(
       },
 
       resetDemoAndSeed: () => {
-        const currentWorkspace = get().workspace
-        saveCttmState(getStorageKeyForWorkspace(currentWorkspace), get().data)
-
-        const demoKey = getStorageKeyForWorkspace("demo")
-        const existingDemo = loadCttmStateFromKey(demoKey)
-        writeLastBackup({
-          workspace: "demo",
-          reason: "reset_demo_seed",
-          data: existingDemo,
-        })
-
         const now = nowIso()
         const seeded = buildDemoSeedState(now)
         saveWorkspaceId("demo")
-        saveCttmState(demoKey, seeded)
+        saveCttmState(demoStorageKey, seeded)
 
         set(() => ({
           workspace: "demo",
@@ -699,12 +692,15 @@ export const useAppStore = create<AppStore>()(
       },
       ensureSettingsForMonth: (month) => {
         const currentMonth = monthFromIsoDate(todayIso())
-        set((s) => ({
-          data: ensureMonthConfigurationFromPrevious(s.data, month, {
-            refreshEmergencyOpening: month > currentMonth,
-            repairLegacyEmergencyOpening: month === currentMonth,
+        runDerived(() =>
+          set((s) => {
+            const next = ensureMonthConfigurationFromPrevious(s.data, month, {
+              refreshEmergencyOpening: month > currentMonth,
+              repairLegacyEmergencyOpening: month === currentMonth,
+            })
+            return next === s.data ? s : { data: next }
           }),
-        }))
+        )
       },
 
       addExpenseCategory: ({ label, defaultBucket }) => {
@@ -800,17 +796,12 @@ export const useAppStore = create<AppStore>()(
         set((s) => {
           if (!s.data.expenseCategories.some((category) => category.id === categoryId)) return s
           return {
-            data: touch(
-              withTombstone(
-                {
-                  ...s.data,
-                  expenseCategories: s.data.expenseCategories.filter(
-                    (category) => category.id !== categoryId,
-                  ),
-                },
-                `cat:${categoryId}`,
+            data: touch({
+              ...s.data,
+              expenseCategories: s.data.expenseCategories.filter(
+                (category) => category.id !== categoryId,
               ),
-            ),
+            }),
           }
         })
         return { ok: true as const }
@@ -866,18 +857,13 @@ export const useAppStore = create<AppStore>()(
           if (!existing) return s
           const { [idToDelete]: _removed, ...rest } = table.byId
           return {
-            data: touch(
-              withTombstone(
-                {
-                  ...s.data,
-                  entities: {
-                    ...s.data.entities,
-                    fixedCosts: { byId: rest, allIds: table.allIds.filter((x) => x !== idToDelete) },
-                  },
-                },
-                idToDelete,
-              ),
-            ),
+            data: touch({
+              ...s.data,
+              entities: {
+                ...s.data.entities,
+                fixedCosts: { byId: rest, allIds: table.allIds.filter((x) => x !== idToDelete) },
+              },
+            }),
           }
         })
       },
@@ -998,16 +984,11 @@ export const useAppStore = create<AppStore>()(
           const { [expenseId]: _removed, ...rest } = table.byId
           const nextIndexes = removeExpenseFromIndexes(s.data.indexes, existing)
           return {
-            data: touch(
-              withTombstone(
-                {
-                  ...s.data,
-                  entities: { ...s.data.entities, expenses: { byId: rest, allIds: table.allIds.filter((x) => x !== expenseId) } },
-                  indexes: nextIndexes,
-                },
-                expenseId,
-              ),
-            ),
+            data: touch({
+              ...s.data,
+              entities: { ...s.data.entities, expenses: { byId: rest, allIds: table.allIds.filter((x) => x !== expenseId) } },
+              indexes: nextIndexes,
+            }),
           }
         })
       },
@@ -1049,21 +1030,16 @@ export const useAppStore = create<AppStore>()(
           if (!existing) return s
           const { [transactionId]: _removed, ...rest } = table.byId
           return {
-            data: touch(
-              withTombstone(
-                {
-                  ...s.data,
-                  entities: {
-                    ...s.data.entities,
-                    savingsTransactions: {
-                      byId: rest,
-                      allIds: table.allIds.filter((x) => x !== transactionId),
-                    },
-                  },
+            data: touch({
+              ...s.data,
+              entities: {
+                ...s.data.entities,
+                savingsTransactions: {
+                  byId: rest,
+                  allIds: table.allIds.filter((x) => x !== transactionId),
                 },
-                transactionId,
-              ),
-            ),
+              },
+            }),
           }
         })
       },
@@ -1161,18 +1137,13 @@ export const useAppStore = create<AppStore>()(
           if (!existing) return s
           const { [ppId]: _removed, ...rest } = table.byId
           return {
-            data: touch(
-              withTombstone(
-                {
-                  ...s.data,
-                  entities: {
-                    ...s.data.entities,
-                    purchasePlans: { byId: rest, allIds: table.allIds.filter((x) => x !== ppId) },
-                  },
-                },
-                ppId,
-              ),
-            ),
+            data: touch({
+              ...s.data,
+              entities: {
+                ...s.data.entities,
+                purchasePlans: { byId: rest, allIds: table.allIds.filter((x) => x !== ppId) },
+              },
+            }),
           }
         })
       },
@@ -1187,7 +1158,7 @@ export const useAppStore = create<AppStore>()(
         const installment = option.actions.installmentSimulation
 
         if (!caps && !delta && !extraIncomeTargetVnd && !installment) {
-          return { ok: false as const, error: "PhÆ°Æ¡ng Ã¡n nÃ y khÃ´ng cÃ³ thay Ä‘á»•i Ä‘á»ƒ Ã¡p dá»¥ng." }
+          return { ok: false as const, error: "Phương án này không có thay đổi để áp dụng." }
         }
 
         set((s) => {
@@ -1218,11 +1189,11 @@ export const useAppStore = create<AppStore>()(
             const noteParts: string[] = []
             if (caps?.note) noteParts.push(caps.note)
             if (typeof extraIncomeTargetVnd === "number" && extraIncomeTargetVnd > 0) {
-              noteParts.push(`Má»¥c tiÃªu tÄƒng thu nháº­p: ${formatVnd(extraIncomeTargetVnd)}`)
+              noteParts.push(`Mục tiêu tăng thu nhập: ${formatVnd(extraIncomeTargetVnd)}`)
             }
             if (installment) {
               noteParts.push(
-                `MÃ´ phá»ng tráº£ gÃ³p: ~${formatVnd(installment.monthlyInstallmentVnd)}/thÃ¡ng trong ${installment.tenorMonths} thÃ¡ng`,
+                `Mô phỏng trả góp: ~${formatVnd(installment.monthlyInstallmentVnd)}/tháng trong ${installment.tenorMonths} tháng`,
               )
             }
 
@@ -1278,7 +1249,7 @@ export const useAppStore = create<AppStore>()(
                   null,
                 appliedAt: nowIso(),
                 source: option.id,
-                note: noteParts.length ? noteParts.join(" â€¢ ") : current?.note,
+                note: noteParts.length ? noteParts.join(" • ") : current?.note,
               },
             }
           }
@@ -1306,48 +1277,21 @@ export const useAppStore = create<AppStore>()(
         try {
           parsed = JSON.parse(raw)
         } catch {
-          return { ok: false as const, error: "JSON khÃ´ng há»£p lá»‡." }
+          return { ok: false as const, error: "JSON không hợp lệ." }
         }
         if (!parsed || typeof parsed !== "object") {
-          return { ok: false as const, error: "Dá»¯ liá»‡u import khÃ´ng há»£p lá»‡." }
+          return { ok: false as const, error: "Dữ liệu import không hợp lệ." }
         }
         const incoming = parsed as Partial<CttmState>
         if (incoming.schemaVersion !== 1) {
-          return { ok: false as const, error: "Sai schemaVersion (chá»‰ há»— trá»£ v1)." }
+          return { ok: false as const, error: "Sai schemaVersion (chỉ hỗ trợ v1)." }
         }
 
-        writeLastBackup({
-          workspace: get().workspace,
-          reason: "import_overwrite",
-          data: get().data,
-        })
-
-        const baseImportState = createInitialState(nowIso())
-        const nextData: CttmState = ensureCategoriesForState({
-          ...baseImportState,
-          ...(incoming as CttmState),
-          settings: {
-            ...baseImportState.settings,
-            ...((incoming as CttmState).settings ?? {}),
-          },
-          settingsByMonth: {
-            ...((incoming as CttmState).settingsByMonth ?? {}),
-          },
-          entities: {
-            ...baseImportState.entities,
-            ...((incoming as CttmState).entities ?? {}),
-            savingsTransactions:
-              (incoming as CttmState).entities?.savingsTransactions ??
-              baseImportState.entities.savingsTransactions,
-          },
-          indexes: rebuildExpenseIndexesFromEntities(
-            (incoming as CttmState).entities.expenses,
-          ),
-          updatedAt: nowIso(),
-        })
-        nextData.tombstones = tombstonesForReplacement(get().data, nextData)
-
-        saveCttmState(getStorageKeyForWorkspace(get().workspace), nextData)
+        // Cùng bộ chuẩn hoá với dữ liệu đọc từ máy: thiếu phần nào thì lấy mặc định, không ném lỗi.
+        const nextData: CttmState = { ...normalizeCttmStateFromRaw(raw), updatedAt: nowIso() }
+        // Workspace real: mọi mục biến mất/thay đổi được sổ cái ghi thành op (hoàn tác được trong
+        // "Nhật ký thay đổi"). Tombstone kiểu cũ trong file nhập không còn ý nghĩa.
+        delete nextData.tombstones
 
         set(() => ({
           data: nextData,
@@ -1357,15 +1301,8 @@ export const useAppStore = create<AppStore>()(
       },
 
       resetAll: () => {
-        writeLastBackup({
-          workspace: get().workspace,
-          reason: "reset_all",
-          data: get().data,
-        })
         const now = nowIso()
         const next = createInitialState(now)
-        next.tombstones = tombstonesForReplacement(get().data, next)
-        saveCttmState(getStorageKeyForWorkspace(get().workspace), next)
         set(() => ({
           data: next,
           ui: { overspending: null, forcedPurchaseRescue: null },
@@ -1373,42 +1310,41 @@ export const useAppStore = create<AppStore>()(
       },
 
       autoClosePreviousMonthIfNeeded: () => {
-        set((s) => {
-          const next = autoClosePreviousMonthIfNeeded(s.data)
-          // Trả về chính state khi không có gì để đóng → zustand không thông báo listener,
-          // không ghi đĩa, không kích hoạt đồng bộ.
-          return next === s.data ? s : { data: next }
-        })
+        runDerived(() =>
+          set((s) => {
+            const next = autoClosePreviousMonthIfNeeded(s.data)
+            // Trả về chính state khi không có gì để đóng → zustand không thông báo listener,
+            // không sinh op, không kích hoạt đồng bộ.
+            return next === s.data ? s : { data: next }
+          }),
+        )
       },
 
-      replaceData: (next) => {
-        set(() => ({ data: next }))
+      setTemplates: (next) => {
+        set(() => ({ templates: next }))
       },
     },
   })),
 )
 
-// Chỉ ghi khi tham chiếu `data` đổi (Object.is), không còn ghi lại mỗi lần set() vô nghĩa.
-useAppStore.subscribe(
-  (s) => s.data,
-  (data) => debouncedSave(getStorageKeyForWorkspace(useAppStore.getState().workspace), data),
-)
-
-/** Ép ghi ngay dữ liệu đang chờ debounce xuống localStorage (SyncEngine gọi trước khi pull/push). */
-export function flushPendingSave() {
-  debouncedSaver.flush()
-}
-
-/** Nhận thông báo mỗi khi dữ liệu workspace real đã thực sự nằm trên đĩa. */
-export function subscribePersisted(listener: (data: CttmState) => void) {
-  persistedListeners.add(listener)
-  return () => {
-    persistedListeners.delete(listener)
+// Workspace demo chỉ lưu trên máy (không vào sổ cái).
+useAppStore.subscribe((state, prev) => {
+  if (state.workspace === "demo" && prev.workspace === "demo" && state.data !== prev.data) {
+    demoSaver.save(demoStorageKey, state.data)
   }
-}
+})
 
-export function loadRealDataFromDisk(): CttmState {
-  return loadCttmStateFromKey(STORAGE_KEY)
+/**
+ * Sổ cái đổ dữ liệu vào store (lúc khởi động, khi nhận thay đổi từ thiết bị/tab khác, sau khi
+ * hoàn tác...). Không bao giờ bị ghi lại thành op.
+ */
+export function hydrateStoreFromLedger(doc: { cttm: CttmState; templates: ExpenseTemplate[] }) {
+  hydratingDepth += 1
+  try {
+    useAppStore.setState((s) => (s.workspace === "real" ? { data: doc.cttm, templates: doc.templates } : { templates: doc.templates }))
+  } finally {
+    hydratingDepth -= 1
+  }
 }
 
 

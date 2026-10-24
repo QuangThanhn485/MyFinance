@@ -11,7 +11,6 @@ import {
   ensureCategoriesForState,
   normalizeExpenseCategoryList,
 } from "@/storage/categories"
-import { bumpWriteSeq } from "@/sync/localMeta"
 
 function nowIso() {
   return new Date().toISOString()
@@ -249,10 +248,11 @@ export function normalizeCttmStateFromRaw(raw: string | null): CttmState {
   return ensureCategoriesForState(next)
 }
 
+/**
+ * Ghi một CttmState vào localStorage. Từ sổ cái v4, dữ liệu thật KHÔNG còn được ghi theo cách
+ * này (chỉ workspace demo); `cttm_v1` của bản cũ được giữ nguyên để có đường quay lại.
+ */
 export function saveCttmState(storageKey: string, state: CttmState) {
-  // Đánh dấu "bản ghi này do build mới tạo" TRƯỚC khi ghi, để tab khác nhận storage event
-  // của cttm_v1 đã thấy writeSeq mới (phân biệt với tab build cũ ghi đè).
-  if (storageKey === STORAGE_KEY) bumpWriteSeq(localStorage)
   localStorage.setItem(storageKey, JSON.stringify(state))
 }
 

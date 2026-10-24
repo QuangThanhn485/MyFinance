@@ -82,19 +82,20 @@ Nguyên tắc:
 ### Rebuild indexes
 Trang **Xuất / Nhập dữ liệu** có nút **Rebuild indexes** để khôi phục index khi import/không đồng bộ.
 
-## Đồng bộ đa thiết bị (Sync v3 — Upstash Redis)
+## Lưu trữ & đồng bộ đa thiết bị (Sync v4 — sổ cái chỉ-ghi-thêm)
 
-Toàn bộ logic nằm trong `src/sync/`; tài liệu thiết kế: `docs/sync-v3-design.md`.
+Mã nguồn: `src/ledger/`; tài liệu thiết kế: `docs/sync-v4-ledger-design.md`.
 
 Nguyên tắc:
-- **Không bao giờ ghi đè mù.** Mọi lần ghi lên Redis là một script Lua compare-and-swap (`mf3:version`): chỉ thành công khi thiết bị đã thấy đúng phiên bản hiện hành; nếu không, kéo về, gộp (three-way merge theo từng entity, có tombstone cho xoá) rồi thử lại.
-- **Chỉ push sau khi đã pull thành công** trong phiên. Boot lỗi mạng → app chạy local, thay đổi giữ trên máy và đồng bộ khi có mạng.
-- **Mọi phiên bản đều được giữ lại**: `mf3:snap:<n>` + `mf3:history` (20 bản gần nhất, 1 bản/ngày trong 60 ngày, bản ghim không bao giờ bị dọn). Trang **Dữ liệu** cho phép khôi phục/ghim; máy cũng giữ 3 bản gần nhất trước mỗi lần bị đồng bộ thay đổi.
-- Chỉ những thao tác phá huỷ (xoá hàng loạt từ máy khác, Redis bị xoá/đổi database, máy mới chưa có điểm chung, migration từ cơ chế cũ) mới hỏi người dùng; mọi lựa chọn đều giữ bản trước đó.
-- Dữ liệu đồng bộ: `cttm_v1` (không kèm indexes) và mẫu chi tiêu nhanh. UI preferences, workspace demo, backup local **không** đồng bộ.
-- Key cũ `myfinance:storage:snapshot` chỉ được đọc một lần để migrate, bản gốc lưu ở `mf3:legacy:v2`; sau đó key cũ mang marker để build cũ không tải về/xoá dữ liệu.
+- **Thiết bị không bao giờ gửi trạng thái, chỉ gửi thao tác** ("thêm X", "đổi field f của X", "xoá X"). Thiết bị/tab có dữ liệu cũ không thể xoá thứ nó không biết.
+- **Sổ cái trên Redis chỉ ghi thêm** (`mf4:log`, ghi duy nhất qua script Lua `APPEND_LUA`), thứ tự do server cấp. Dữ liệu = phát lại sổ cái. Không có code nào xoá/ghi đè sổ cái ⇒ lịch sử chính là dữ liệu, không cần bản sao lưu.
+- **Ghi idempotent** theo `(deviceId, cseq)`: mất phản hồi, thử lại, nhiều tab cùng đẩy đều không trùng, không mất.
+- **Lệnh xoá vĩnh viễn**, không hết hạn.
+- Trên máy: IndexedDB `myfinance-ledger` (op chưa gửi + trạng thái đã xác nhận), dùng chung mọi tab; tab khác cập nhật qua BroadcastChannel.
+- Trang **Dữ liệu → Nhật ký thay đổi**: xem mọi thay đổi trên mọi thiết bị, hoàn tác từng thao tác, quay về trạng thái trước một thời điểm, tải toàn bộ sổ cái (`.jsonl`).
+- Lần đầu chạy v4, dữ liệu cũ (`cttm_v1`, Sync v3 trên Redis) được chuyển tự động; v3 bị đóng băng (`mf3:version` = `frozen-v4:<n>`), dữ liệu v3 giữ nguyên để có đường quay lại.
 
-Kiểm thử: `tests/sync/` mô phỏng 2 thiết bị + Redis giả chạy đúng logic Lua (4 kịch bản mất dữ liệu đã từng xảy ra, xung đột CAS, mất response, xoá hàng loạt, Redis bị xoá, multi-tab, migration).
+Kiểm thử: `tests/ledger/` (nhiều thiết bị/tab với IndexedDB giả + Redis giả chạy đúng logic Lua; store thật; chuyển đổi từ v3). Đối chiếu Lua trên Redis thật: `REAL_REDIS_PORT=<cổng redis thử> npx vitest run tests/ledger/redisConformance.test.ts` (test sẽ `FLUSHDB`).
 
 ## Công thức & logic tài chính (deterministic)
 
