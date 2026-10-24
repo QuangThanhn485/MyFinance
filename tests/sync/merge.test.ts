@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { countMissingEntities, isMassDelete, threeWayMerge } from "@/sync/merge"
 import { hashDoc, hashState, stableStringify, stripForSync } from "@/sync/snapshot"
 import type { SyncDoc } from "@/sync/snapshot"
-import { makeState, withExpense, withFixedCost, withoutExpense } from "./harness"
+import { makeState, withExpense, withFixedCost, withoutExpense } from "./fixtures"
 
 const NOW = "2026-09-05T10:00:00.000Z"
 const doc = (cttm: ReturnType<typeof makeState>, templates: SyncDoc["templates"] = { items: [], tombstones: {} }): SyncDoc => ({ cttm, templates })

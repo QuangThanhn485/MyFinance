@@ -5,6 +5,7 @@ import { Toaster } from "sonner"
 import { DataSourceProvider } from "@/app/DataSourceProvider"
 import App from "@/app/App"
 import { ThemeProvider, useTheme } from "@/app/theme/ThemeProvider"
+import { startLedger } from "@/ledger/appLedger"
 import { initializeTheme } from "@/lib/theme"
 import "flatpickr/dist/flatpickr.css"
 import "flatpickr/dist/plugins/monthSelect/style.css"
@@ -33,15 +34,19 @@ function AppToaster() {
   )
 }
 
-ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <ThemeProvider>
-      <BrowserRouter>
-        <DataSourceProvider>
-          <App />
-        </DataSourceProvider>
-        <AppToaster />
-      </BrowserRouter>
-    </ThemeProvider>
-  </React.StrictMode>,
-)
+// Mở sổ cái (IndexedDB) và đổ dữ liệu vào store TRƯỚC khi render: không thao tác nào có thể
+// chạy trên dữ liệu chưa tải xong. startLedger không bao giờ reject.
+void startLedger().then(() => {
+  ReactDOM.createRoot(document.getElementById("root")!).render(
+    <React.StrictMode>
+      <ThemeProvider>
+        <BrowserRouter>
+          <DataSourceProvider>
+            <App />
+          </DataSourceProvider>
+          <AppToaster />
+        </BrowserRouter>
+      </ThemeProvider>
+    </React.StrictMode>,
+  )
+})

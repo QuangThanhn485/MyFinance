@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import {
   AlertTriangle,
@@ -9,13 +9,9 @@ import {
   Download,
   FileUp,
   HardDrive,
-  History,
   KeyRound,
   Loader2,
-  Pin,
-  PinOff,
   RefreshCw,
-  RotateCcw,
   ShieldCheck,
   Trash2,
   Upload,
@@ -41,10 +37,9 @@ import { todayIso } from "@/lib/date"
 import { cn } from "@/lib/utils"
 import { useDataSource } from "@/app/DataSourceProvider"
 import { describeSyncPhase } from "@/app/SyncStatusPill"
+import { LedgerHistoryPanel } from "@/components/LedgerHistoryPanel"
 import { parseUpstashConfigInput } from "@/storage/dataSource"
 import { useAppStore } from "@/store/useAppStore"
-import type { HistoryEntry } from "@/sync/redisProtocol"
-import type { LocalHistoryEntry } from "@/sync/localMeta"
 
 const CONFIRM_CODE = "485000"
 
@@ -53,14 +48,8 @@ function formatDateTime(ms?: number) {
   return new Date(ms).toLocaleString("vi-VN")
 }
 
-function countDocEntities(entry: LocalHistoryEntry) {
-  const e = entry.doc.cttm.entities
-  return e.expenses.allIds.length + e.fixedCosts.allIds.length + e.purchasePlans.allIds.length + e.savingsTransactions.allIds.length
-}
-
 export default function ImportExportPage() {
-  const { config: dataSourceConfig, sync, loading: dataSourceLoading, engine, saveUpstash, activateMode, syncNow } =
-    useDataSource()
+  const { config: dataSourceConfig, sync, loading: dataSourceLoading, saveUpstash, activateMode, syncNow } = useDataSource()
   const exportJson = useAppStore((s) => s.actions.exportJson)
   const importJson = useAppStore((s) => s.actions.importJson)
   const resetAll = useAppStore((s) => s.actions.resetAll)
@@ -85,12 +74,6 @@ export default function ImportExportPage() {
   const [upstashUrl, setUpstashUrl] = useState(dataSourceConfig.upstash?.url ?? "")
   const [upstashToken, setUpstashToken] = useState(dataSourceConfig.upstash?.token ?? "")
 
-  const [remoteHistory, setRemoteHistory] = useState<HistoryEntry[] | null>(null)
-  const [historyLoading, setHistoryLoading] = useState(false)
-  const [historyBusyVersion, setHistoryBusyVersion] = useState<number | null>(null)
-  const [localHistory, setLocalHistory] = useState<LocalHistoryEntry[]>(() => engine.getLocalHistory())
-  const [showLocalHistory, setShowLocalHistory] = useState(false)
-
   const hasImportData = importText.trim().length > 0
   const dataSourceBusy = dataSourceLoading || sync.inFlight
   const upstashConfigured = Boolean(dataSourceConfig.upstash?.url && dataSourceConfig.upstash?.token)
@@ -104,26 +87,6 @@ export default function ImportExportPage() {
     setUpstashUrl(dataSourceConfig.upstash?.url ?? "")
     setUpstashToken(dataSourceConfig.upstash?.token ?? "")
   }, [dataSourceConfig.upstash?.token, dataSourceConfig.upstash?.url])
-
-  useEffect(() => {
-    setLocalHistory(engine.getLocalHistory())
-  }, [engine, sync.baseVersion, sync.dirty])
-
-  const loadRemoteHistory = useCallback(async () => {
-    if (!isUpstashMode) return
-    setHistoryLoading(true)
-    try {
-      setRemoteHistory(await engine.listRemoteHistory())
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Không tải được lịch sử trên Redis.")
-    } finally {
-      setHistoryLoading(false)
-    }
-  }, [engine, isUpstashMode])
-
-  useEffect(() => {
-    if (isUpstashMode && sync.phase === "idle") void loadRemoteHistory()
-  }, [isUpstashMode, loadRemoteHistory, sync.baseVersion, sync.phase])
 
   const generateJson = () => {
     const text = exportJson()
@@ -172,18 +135,7 @@ export default function ImportExportPage() {
     if (fileInputRef.current) fileInputRef.current.value = ""
   }
 
-  /** Trước mọi thao tác thay toàn bộ dữ liệu: ghim bản hiện tại trên Redis để luôn khôi phục được. */
-  const guardDestructive = async () => {
-    if (!isUpstashMode) return true
-    const ok = await engine.pinHead()
-    if (!ok) {
-      toast.error("Không kết nối được Redis để ghim bản hiện tại. Hãy thử lại khi có mạng, hoặc tắt đồng bộ trước.")
-    }
-    return ok
-  }
-
-  const doImport = async () => {
-    if (!(await guardDestructive())) return
+  const doImport = () => {
     const res = importJson(importText)
     if (!res.ok) {
       toast.error(res.error)
@@ -191,20 +143,19 @@ export default function ImportExportPage() {
     }
     toast.success(
       isUpstashMode
-        ? "Đã phục hồi dữ liệu và sẽ đồng bộ lên mọi thiết bị. Bản trước đó đã được ghim trên Redis."
-        : "Đã phục hồi dữ liệu. (Đã tự tạo bản sao lưu trước khi ghi đè.)",
+        ? "Đã phục hồi dữ liệu và sẽ đồng bộ lên mọi thiết bị. Có thể hoàn tác trong “Nhật ký thay đổi”."
+        : "Đã phục hồi dữ liệu. Có thể hoàn tác trong “Nhật ký thay đổi”.",
     )
     clearImport()
     setExportText("")
   }
 
-  const doResetAll = async () => {
-    if (!(await guardDestructive())) return
+  const doResetAll = () => {
     resetAll()
     toast.success(
       isUpstashMode
-        ? "Đã xóa toàn bộ dữ liệu; thao tác sẽ đồng bộ lên mọi thiết bị. Bản trước đó đã được ghim trên Redis."
-        : "Đã xóa toàn bộ dữ liệu. (Đã tự tạo bản sao lưu trước khi xóa.)",
+        ? "Đã xóa toàn bộ dữ liệu trên mọi thiết bị. Có thể hoàn tác trong “Nhật ký thay đổi”."
+        : "Đã xóa toàn bộ dữ liệu. Có thể hoàn tác trong “Nhật ký thay đổi”.",
     )
     clearImport()
     setExportText("")
@@ -218,47 +169,12 @@ export default function ImportExportPage() {
     await saveUpstash(parsedUpstashConfig)
   }
 
-  const restoreRemote = async (version: number, mode: "replace" | "merge") => {
-    setHistoryBusyVersion(version)
-    try {
-      await engine.restoreRemoteVersion(version, mode)
-      toast.success(mode === "replace" ? `Đã khôi phục về bản v${version}.` : `Đã gộp bản v${version} vào dữ liệu hiện tại.`)
-      await loadRemoteHistory()
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Không khôi phục được.")
-    } finally {
-      setHistoryBusyVersion(null)
-    }
-  }
-
-  const togglePin = async (entry: HistoryEntry) => {
-    setHistoryBusyVersion(entry.version)
-    try {
-      await engine.pinRemoteVersion(entry.version, !entry.pinned)
-      await loadRemoteHistory()
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Không ghim được.")
-    } finally {
-      setHistoryBusyVersion(null)
-    }
-  }
-
-  const restoreLocal = async (index: number, mode: "replace" | "merge") => {
-    try {
-      await engine.restoreLocalHistory(index, mode)
-      toast.success(mode === "replace" ? "Đã khôi phục bản lưu trên máy." : "Đã gộp bản lưu trên máy vào dữ liệu hiện tại.")
-      setLocalHistory(engine.getLocalHistory())
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Không khôi phục được.")
-    }
-  }
-
   return (
     <div className="mx-auto max-w-5xl space-y-3 sm:space-y-6">
       <div>
         <h1 className="text-lg font-semibold tracking-tight sm:text-2xl">Dữ liệu</h1>
         <p className="hidden text-sm text-muted-foreground sm:block">
-          Chọn nơi app lưu dữ liệu, đồng bộ nhiều thiết bị qua Upstash Redis, khôi phục từ lịch sử, hoặc xuất nhập file sao lưu.
+          Chọn nơi app lưu dữ liệu, đồng bộ nhiều thiết bị qua Upstash Redis, xem/hoàn tác mọi thay đổi, hoặc xuất nhập file.
         </p>
       </div>
 
@@ -330,7 +246,7 @@ export default function ImportExportPage() {
                 {isUpstashMode ? <Badge>Đang dùng</Badge> : null}
               </div>
               <p className="mt-2 text-xs text-muted-foreground">
-                Đồng bộ nhiều thiết bị. Mỗi lần ghi đều kiểm tra phiên bản trên Redis trước, gộp thay đổi từ máy khác và giữ lịch sử để khôi phục.
+                Đồng bộ nhiều thiết bị bằng sổ cái chỉ-ghi-thêm: mỗi thay đổi là một dòng trong sổ, không thiết bị nào ghi đè được dữ liệu của thiết bị khác.
               </p>
             </button>
           </div>
@@ -396,156 +312,29 @@ export default function ImportExportPage() {
                   </span>
                 </div>
                 <div className="flex items-center justify-between gap-3 rounded-md bg-background px-3 py-2">
-                  <span className="text-muted-foreground">Phiên bản Redis</span>
-                  <span className="font-medium">{isUpstashMode && sync.remoteVersion > 0 ? `v${sync.remoteVersion}` : "Chưa có"}</span>
+                  <span className="text-muted-foreground">Sổ cái trên Redis</span>
+                  <span className="font-medium">{isUpstashMode && sync.joined ? `${sync.remoteLength} thao tác` : "—"}</span>
                 </div>
                 <div className="flex items-center justify-between gap-3 rounded-md bg-background px-3 py-2">
-                  <span className="text-muted-foreground">Máy này đang ở</span>
-                  <span className="font-medium">{isUpstashMode && sync.baseVersion > 0 ? `v${sync.baseVersion}` : "—"}</span>
+                  <span className="text-muted-foreground">Chưa gửi lên</span>
+                  <span className={cn("font-medium", sync.pending > 0 && "text-amber-700 dark:text-amber-300")}>
+                    {sync.pending > 0 ? `${sync.pending} thay đổi` : "Không có"}
+                  </span>
                 </div>
                 <div className="rounded-md bg-background px-3 py-2 text-xs text-muted-foreground">
-                  <div>Pull gần nhất: {formatDateTime(sync.lastPullAt)}</div>
-                  <div>Push gần nhất: {formatDateTime(sync.lastPushAt)}</div>
-                  {sync.remoteDeviceLabel ? (
-                    <div>
-                      Redis ghi bởi: {sync.remoteDeviceLabel} · {formatDateTime(sync.remoteCommittedAt)}
-                    </div>
-                  ) : null}
+                  <div>Đồng bộ gần nhất: {formatDateTime(sync.lastSyncAt)}</div>
+                  <div>
+                    Lưu trên máy: {sync.journalKind === "indexeddb" ? "IndexedDB" : "bộ nhớ tạm (trình duyệt chặn IndexedDB)"}
+                  </div>
+                  {sync.storageError ? <div className="mt-1 text-destructive">{sync.storageError}</div> : null}
                   {sync.lastError ? <div className="mt-1 text-destructive">{sync.lastError}</div> : null}
                 </div>
-                {sync.conflictsCount > 0 ? (
-                  <div className="flex items-center justify-between gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
-                    <span>{sync.conflictsCount} xung đột đã được gộp tự động (bản thua có lưu lại).</span>
-                    <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => engine.clearConflictLog()}>
-                      Xoá nhật ký
-                    </Button>
-                  </div>
-                ) : null}
               </div>
             </div>
           </div>
 
-          {isUpstashMode ? (
-            <div className="rounded-lg border bg-muted/20 p-4">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <History className="h-4 w-4 text-muted-foreground" />
-                  <div className="text-sm font-medium">Lịch sử trên Redis</div>
-                </div>
-                <Button variant="ghost" size="sm" className="h-8" onClick={() => void loadRemoteHistory()} disabled={historyLoading}>
-                  <RefreshCw className={cn("h-3.5 w-3.5", historyLoading && "animate-spin")} />
-                  Tải lại
-                </Button>
-              </div>
-              <p className="mb-3 text-xs text-muted-foreground">
-                Mỗi lần đồng bộ tạo một bản mới; Redis giữ 20 bản gần nhất, một bản mỗi ngày trong 60 ngày, và mọi bản được ghim. Khôi phục không xoá gì: bản hiện tại vẫn nằm trong lịch sử.
-              </p>
-              {remoteHistory === null ? (
-                <div className="text-xs text-muted-foreground">{historyLoading ? "Đang tải…" : "Chưa tải lịch sử."}</div>
-              ) : remoteHistory.length === 0 ? (
-                <div className="text-xs text-muted-foreground">Chưa có bản nào trên Redis.</div>
-              ) : (
-                <div className="max-h-72 space-y-1.5 overflow-y-auto pr-1">
-                  {remoteHistory.map((entry) => {
-                    const isCurrent = entry.version === sync.remoteVersion
-                    const busy = historyBusyVersion === entry.version
-                    return (
-                      <div
-                        key={entry.version}
-                        className={cn(
-                          "flex flex-wrap items-center justify-between gap-2 rounded-md border bg-background px-3 py-2 text-xs",
-                          isCurrent && "border-primary/50",
-                        )}
-                      >
-                        <div className="flex min-w-0 items-center gap-2">
-                          <span className="font-mono font-medium">v{entry.version}</span>
-                          <span className="text-muted-foreground">{formatDateTime(entry.committedAt)}</span>
-                          {isCurrent ? <Badge variant="secondary">Hiện tại</Badge> : null}
-                          {entry.pinned ? (
-                            <Badge variant="outline" className="gap-1">
-                              <Pin className="h-3 w-3" /> Ghim
-                            </Badge>
-                          ) : null}
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <Button variant="ghost" size="sm" className="h-7 px-2" disabled={busy} onClick={() => void togglePin(entry)} title={entry.pinned ? "Bỏ ghim" : "Ghim để không bị dọn"}>
-                            {entry.pinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
-                          </Button>
-                          {!isCurrent ? (
-                            <AlertDialog>
-                              <AlertDialogTrigger asChild>
-                                <Button variant="outline" size="sm" className="h-7 px-2" disabled={busy}>
-                                  {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
-                                  Khôi phục
-                                </Button>
-                              </AlertDialogTrigger>
-                              <AlertDialogContent>
-                                <AlertDialogHeader>
-                                  <AlertDialogTitle>Khôi phục bản v{entry.version}?</AlertDialogTitle>
-                                  <AlertDialogDescription>
-                                    Bản hiện tại (v{sync.remoteVersion}) sẽ được ghim trước khi khôi phục nên không mất. Chọn “Thay thế” để quay hẳn về bản này, hoặc “Gộp” để chỉ lấy lại những mục đang thiếu.
-                                  </AlertDialogDescription>
-                                </AlertDialogHeader>
-                                <AlertDialogFooter>
-                                  <AlertDialogCancel>Huỷ</AlertDialogCancel>
-                                  <Button variant="outline" onClick={() => void restoreRemote(entry.version, "merge")}>
-                                    Gộp vào hiện tại
-                                  </Button>
-                                  <AlertDialogAction onClick={() => void restoreRemote(entry.version, "replace")}>Thay thế bằng bản này</AlertDialogAction>
-                                </AlertDialogFooter>
-                              </AlertDialogContent>
-                            </AlertDialog>
-                          ) : null}
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-          ) : null}
+          <LedgerHistoryPanel />
 
-          <div className="rounded-lg border bg-muted/20 p-4">
-            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <HardDrive className="h-4 w-4 text-muted-foreground" />
-                <div className="text-sm font-medium">Bản lưu trên máy này</div>
-              </div>
-              <Button variant="ghost" size="sm" className="h-8" onClick={() => setShowLocalHistory((v) => !v)}>
-                {showLocalHistory ? "Ẩn" : `Xem (${localHistory.length})`}
-              </Button>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              App tự lưu bản trước mỗi lần dữ liệu trên máy bị thay bởi đồng bộ hoặc khôi phục (giữ 3 bản gần nhất).
-            </p>
-            {showLocalHistory ? (
-              localHistory.length === 0 ? (
-                <div className="mt-2 text-xs text-muted-foreground">Chưa có bản lưu nào.</div>
-              ) : (
-                <div className="mt-2 space-y-1.5">
-                  {localHistory.map((entry, index) => (
-                    <div key={`${entry.at}-${index}`} className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-background px-3 py-2 text-xs">
-                      <div className="min-w-0">
-                        <div className="font-medium">{formatDateTime(entry.at)}</div>
-                        <div className="text-muted-foreground">
-                          {entry.reason} · {countDocEntities(entry)} mục
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => void restoreLocal(index, "merge")}>
-                          Gộp
-                        </Button>
-                        <Button variant="outline" size="sm" className="h-7 px-2" onClick={() => void restoreLocal(index, "replace")}>
-                          <RotateCcw className="h-3.5 w-3.5" />
-                          Khôi phục
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )
-            ) : null}
-          </div>
         </CardContent>
       </Card>
 
@@ -637,8 +426,8 @@ export default function ImportExportPage() {
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
               <span>
                 Nhập sẽ <span className="font-semibold">ghi đè toàn bộ dữ liệu hiện tại</span>
-                {isUpstashMode ? " và đồng bộ lên mọi thiết bị" : ""}. App tự tạo bản sao lưu
-                {isUpstashMode ? " và ghim bản hiện tại trên Redis" : ""} trước khi ghi đè.
+                {isUpstashMode ? " và đồng bộ lên mọi thiết bị" : ""}. Dữ liệu cũ vẫn nằm trong sổ cái — hoàn tác
+                được trong “Nhật ký thay đổi”.
               </span>
             </div>
 
@@ -723,7 +512,7 @@ export default function ImportExportPage() {
                           {isUpstashMode ? " Thay đổi này sẽ đồng bộ lên MỌI thiết bị." : ""}
                         </div>
                         <div className="text-xs text-muted-foreground">
-                          App tự tạo bản sao lưu{isUpstashMode ? " và ghim bản hiện tại trên Redis" : ""} trước khi ghi đè.
+                          Dữ liệu hiện tại vẫn nằm trong sổ cái; có thể hoàn tác trong “Nhật ký thay đổi”.
                         </div>
                       </div>
                     </AlertDialogDescription>
@@ -769,7 +558,7 @@ export default function ImportExportPage() {
             <span className="font-medium text-foreground">
               Nên bấm “Tải file sao lưu” trước khi xóa.
             </span>{" "}
-            App vẫn tự tạo một bản sao lưu{isUpstashMode ? " và ghim bản hiện tại trên Redis" : ""}, có thể phục hồi lại.
+            Thao tác xoá được ghi vào sổ cái nên vẫn hoàn tác được trong “Nhật ký thay đổi”.
           </p>
 
           <AlertDialog
@@ -797,7 +586,7 @@ export default function ImportExportPage() {
                       Thao tác này sẽ XÓA TOÀN BỘ DỮ LIỆU của bạn{isUpstashMode ? " trên mọi thiết bị" : ""}.
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      Trước khi xóa, app sẽ tự tạo bản sao lưu{isUpstashMode ? " và ghim bản hiện tại trên Redis" : ""}.
+                      Dữ liệu bị xoá vẫn nằm trong sổ cái; có thể hoàn tác trong “Nhật ký thay đổi”.
                     </div>
                   </div>
                 </AlertDialogDescription>

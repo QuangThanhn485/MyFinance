@@ -1,61 +1,66 @@
 import { AlertTriangle, Cloud, CloudOff, Loader2, PauseCircle, ShieldAlert } from "lucide-react"
 import { Link } from "react-router-dom"
 import { cn } from "@/lib/utils"
-import type { SyncState } from "@/sync/syncEngine"
+import type { LedgerSyncState } from "@/ledger/engine"
 
 function formatTime(ms?: number) {
   if (!ms) return ""
   return new Date(ms).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })
 }
 
-export function describeSyncPhase(sync: SyncState): { tone: "ok" | "warn" | "error" | "muted"; label: string; detail?: string } {
+export function describeSyncPhase(sync: LedgerSyncState): { tone: "ok" | "warn" | "error" | "muted"; label: string; detail?: string } {
+  if (sync.storageError) return { tone: "error", label: "Không ghi được vào bộ nhớ trình duyệt", detail: sync.storageError }
+  const pendingText = sync.pending > 0 ? `${sync.pending} thay đổi chưa gửi` : undefined
   switch (sync.phase) {
     case "local-only":
-      return { tone: "muted", label: "Chỉ lưu trên máy này" }
+      return sync.journalKind === "memory"
+        ? { tone: "error", label: "Trình duyệt chặn bộ nhớ lâu dài", detail: "Dữ liệu sẽ mất khi đóng tab — hãy bật đồng bộ hoặc đổi trình duyệt" }
+        : { tone: "muted", label: "Chỉ lưu trên máy này" }
     case "booting":
-      return { tone: "muted", label: "Đang kiểm tra Redis…" }
+      return { tone: "muted", label: "Đang kết nối Redis…", detail: pendingText }
     case "syncing":
-      return { tone: "muted", label: "Đang đồng bộ…" }
+      return { tone: "muted", label: "Đang đồng bộ…", detail: pendingText }
+    case "migrating":
+      return { tone: "muted", label: "Đang chuyển dữ liệu lên sổ cái…", detail: sync.lastError }
     case "idle":
-      return sync.dirty
-        ? { tone: "warn", label: "Có thay đổi chưa đồng bộ", detail: sync.lastPushAt ? `Lần cuối ${formatTime(sync.lastPushAt)}` : undefined }
-        : { tone: "ok", label: `Đã đồng bộ v${sync.baseVersion}`, detail: sync.lastPullAt ? formatTime(sync.lastPullAt) : undefined }
+      return sync.pending > 0
+        ? { tone: "warn", label: pendingText as string, detail: sync.lastSyncAt ? `Lần cuối ${formatTime(sync.lastSyncAt)}` : undefined }
+        : { tone: "ok", label: `Đã đồng bộ · #${sync.cursor}`, detail: sync.lastSyncAt ? formatTime(sync.lastSyncAt) : undefined }
     case "offline":
-      return { tone: "warn", label: "Không có mạng — lưu trên máy", detail: "Sẽ đồng bộ khi kết nối lại" }
-    case "degraded":
-      return { tone: "error", label: "Không đồng bộ được", detail: sync.lastError }
+      return { tone: "warn", label: "Mất kết nối — vẫn lưu trên máy", detail: pendingText ?? "Sẽ đồng bộ khi kết nối lại" }
+    case "error":
+      return { tone: "error", label: "Chưa đồng bộ được", detail: sync.lastError }
     case "auth-error":
       return { tone: "error", label: "Token Redis không hợp lệ", detail: "Vào trang Dữ liệu để cập nhật" }
-    case "too-large":
-      return { tone: "error", label: "Dữ liệu vượt giới hạn Redis", detail: sync.lastError }
     case "unsupported":
-      return { tone: "error", label: "Redis không hỗ trợ script", detail: "Đồng bộ ghi đã bị khoá để bảo vệ dữ liệu" }
-    case "conflict":
+      return { tone: "error", label: "Redis không cho chạy script", detail: "Đồng bộ đã khoá để bảo vệ dữ liệu" }
+    case "needs-update":
+      return { tone: "error", label: "Cần tải lại ứng dụng", detail: sync.lastError }
+    case "attention":
       return { tone: "warn", label: "Cần bạn quyết định", detail: "Mở hộp thoại đồng bộ" }
-    case "contended":
-      return { tone: "warn", label: "Thiết bị khác đang ghi", detail: "Sẽ thử lại sau" }
     case "paused":
-      return { tone: "warn", label: "Đồng bộ tạm dừng", detail: "Vào trang Dữ liệu để tiếp tục" }
+      return { tone: "warn", label: "Đồng bộ tạm dừng", detail: pendingText ?? "Vào trang Dữ liệu để tiếp tục" }
     default:
       return { tone: "muted", label: sync.phase }
   }
 }
 
-export function SyncStatusPill({ sync }: { sync: SyncState }) {
-  if (sync.mode !== "upstash") return null
+export function SyncStatusPill({ sync }: { sync: LedgerSyncState }) {
+  const storageProblem = Boolean(sync.storageError) || sync.journalKind === "memory"
+  if (sync.mode !== "upstash" && !storageProblem) return null
   const info = describeSyncPhase(sync)
-  const Icon =
-    sync.inFlight || sync.phase === "syncing" || sync.phase === "booting"
-      ? Loader2
-      : info.tone === "error"
-        ? ShieldAlert
-        : sync.phase === "offline"
-          ? CloudOff
-          : sync.phase === "paused"
-            ? PauseCircle
-            : info.tone === "warn"
-              ? AlertTriangle
-              : Cloud
+  const busy = sync.inFlight || sync.phase === "syncing" || sync.phase === "booting" || sync.phase === "migrating"
+  const Icon = busy
+    ? Loader2
+    : info.tone === "error"
+      ? ShieldAlert
+      : sync.phase === "offline"
+        ? CloudOff
+        : sync.phase === "paused"
+          ? PauseCircle
+          : info.tone === "warn"
+            ? AlertTriangle
+            : Cloud
 
   return (
     <Link
@@ -70,13 +75,8 @@ export function SyncStatusPill({ sync }: { sync: SyncState }) {
         info.tone === "muted" && "border-border bg-background/90 text-muted-foreground",
       )}
     >
-      <Icon className={cn("h-3.5 w-3.5 shrink-0", (sync.inFlight || sync.phase === "syncing" || sync.phase === "booting") && "animate-spin")} />
+      <Icon className={cn("h-3.5 w-3.5 shrink-0", busy && "animate-spin")} />
       <span className="truncate">{info.label}</span>
-      {sync.conflictsCount > 0 ? (
-        <span className="rounded-full bg-amber-500/20 px-1.5 text-[10px] font-medium text-amber-800 dark:text-amber-200">
-          {sync.conflictsCount} xung đột
-        </span>
-      ) : null}
     </Link>
   )
 }

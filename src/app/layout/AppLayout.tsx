@@ -4,7 +4,7 @@ import AppOverlays from "@/app/layout/AppOverlays"
 import { MobileAppBar, MobileBottomNav } from "@/app/layout/MobileNavigation"
 import SideNav from "@/app/layout/SideNav"
 import { monthFromIsoDate, todayIso } from "@/lib/date"
-import { getSyncEngine } from "@/sync/appSync"
+import { getLedgerEngine } from "@/ledger/appLedger"
 
 const SIDEBAR_COLLAPSED_KEY = "smartSpend.ui.sidebarCollapsed.v1"
 const APP_TITLE = "Chi Tiêu Thông Minh"
@@ -40,10 +40,10 @@ export default function AppLayout() {
     }
   }, [sidebarCollapsed])
 
-  // Auto-close tháng đi qua SyncEngine: chỉ chạy khi đã có dữ liệu mới nhất (hoặc mode local),
-  // và chỉ một lần cho mỗi tháng — không còn ghi đĩa/đồng bộ vô nghĩa mỗi 60 giây.
+  // Auto-close tháng đi qua sổ cái: chỉ chạy khi đã có dữ liệu mới nhất (hoặc mode local),
+  // và chỉ một lần cho mỗi tháng.
   useEffect(() => {
-    const engine = getSyncEngine()
+    const engine = getLedgerEngine()
     const tick = () => engine.requestAutoClose(monthFromIsoDate(todayIso()))
     tick()
     const timer = window.setInterval(tick, 60_000)

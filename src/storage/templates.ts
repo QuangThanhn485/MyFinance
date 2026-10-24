@@ -132,25 +132,31 @@ export function normalizeTemplateList(raw: unknown, fallbackNow = nowIso()): Exp
   return out
 }
 
+/**
+ * Nguồn mẫu chi tiêu. Trong app, appLedger gắn nguồn này vào store (mẫu được đồng bộ qua sổ
+ * cái như mọi dữ liệu khác). Khi chưa gắn (test đơn vị) thì đọc/ghi localStorage như cũ.
+ */
+type TemplateSource = { get(): ExpenseTemplate[]; set(next: ExpenseTemplate[]): void }
+let templateSource: TemplateSource | null = null
+
+export function bindTemplateSource(source: TemplateSource | null) {
+  templateSource = source
+}
+
 export function loadExpenseTemplates(): ExpenseTemplate[] {
+  if (templateSource) return templateSource.get()
+  return loadLegacyExpenseTemplates()
+}
+
+/** Mẫu lưu trong localStorage bởi các bản trước sổ cái. */
+export function loadLegacyExpenseTemplates(): ExpenseTemplate[] {
   if (typeof localStorage === "undefined") return []
   const raw = localStorage.getItem(EXPENSE_TEMPLATES_STORAGE_KEY)
   if (!raw) return []
   return normalizeTemplateList(safeParseJson(raw))
 }
 
-export function loadTemplateTombstones(): Record<string, string> {
-  if (typeof localStorage === "undefined") return {}
-  const parsed = safeParseJson(localStorage.getItem(EXPENSE_TEMPLATE_TOMBSTONES_KEY) ?? "")
-  if (!isRecord(parsed)) return {}
-  const out: Record<string, string> = {}
-  for (const [key, value] of Object.entries(parsed)) {
-    if (typeof value === "string") out[key] = value
-  }
-  return out
-}
-
-function notifyTemplatesChanged() {
+export function notifyTemplatesChanged() {
   if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") return
   try {
     window.dispatchEvent(new CustomEvent(TEMPLATES_CHANGED_EVENT))
@@ -159,37 +165,22 @@ function notifyTemplatesChanged() {
   }
 }
 
-function writeTemplatesRaw(templates: ExpenseTemplate[], tombstones: Record<string, string>) {
+/**
+ * Ghi danh sách mẫu do người dùng thay đổi. Khi đã gắn sổ cái, mẫu nào biến mất/đổi được sổ
+ * cái ghi thành op (xoá lan sang mọi thiết bị, hoàn tác được).
+ */
+export function saveExpenseTemplates(templates: ExpenseTemplate[]) {
+  if (templateSource) {
+    templateSource.set(templates)
+    notifyTemplatesChanged()
+    return
+  }
   if (typeof localStorage === "undefined") return
   try {
     localStorage.setItem(EXPENSE_TEMPLATES_STORAGE_KEY, JSON.stringify(templates))
-    localStorage.setItem(EXPENSE_TEMPLATE_TOMBSTONES_KEY, JSON.stringify(tombstones))
   } catch {
     // quota — giữ nguyên bản cũ
   }
-}
-
-/**
- * Ghi danh sách mẫu do người dùng thay đổi. Mẫu nào biến mất so với bản đang lưu
- * được ghi tombstone để xoá lan sang thiết bị khác thay vì "hồi sinh".
- */
-export function saveExpenseTemplates(templates: ExpenseTemplate[]) {
-  if (typeof localStorage === "undefined") return
-  const previous = loadExpenseTemplates()
-  const nextIds = new Set(templates.map((t) => t.id))
-  const tombstones = loadTemplateTombstones()
-  const now = nowIso()
-  for (const t of previous) {
-    if (!nextIds.has(t.id)) tombstones[t.id] = now
-  }
-  for (const id of nextIds) delete tombstones[id]
-  writeTemplatesRaw(templates, tombstones)
-  notifyTemplatesChanged()
-}
-
-/** Ghi kết quả đồng bộ (đã merge) — không sinh tombstone mới. */
-export function replaceExpenseTemplatesFromSync(templates: ExpenseTemplate[], tombstones: Record<string, string>) {
-  writeTemplatesRaw(templates, tombstones)
   notifyTemplatesChanged()
 }
 
